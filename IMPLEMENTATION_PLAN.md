@@ -394,7 +394,11 @@ Wrap every data source behind one `ExchangeAdapter` interface (`fetch_markets`, 
 
 **CoinDCX specifics** (researched):
 - **Public candles, no auth needed:** `GET https://public.coindcx.com/market_data/candles?pair={PAIR}&interval={TF}&limit={N}`. Returns OHLCV sorted newest-first; default limit 500. A screener needs *only* this public endpoint — **no API key/secret required**. (Keys, HMAC-signed, are only needed for private order/balance calls, which this project doesn't do.)
-- **Intervals:** `1m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 1d, 3d, 1w, 1M`. Covers `1w/1d/4h/1h/15m` natively; **`3m` is unsupported → resample from `1m`** (same resample path other exchanges need).
+- **Intervals (verified live 2026-07):** the public candles endpoint only actually
+  returns data for **`1m`, `15m`, `1h`, `1d`** (the documented longer list 422s).
+  So the screener fetches those four and **resamples everything else** — `3m` from
+  `1m`, `4h`/`2h` from `1h`, `1w`/`3d` from `1d`, `30m` from `15m`. Handled in
+  `OHLCVService.source_for()`; max 1000 candles/request.
 - **Pairs / naming (two market families):**
   - **`B-` = Binance-sourced** crypto markets, e.g. `B-SOL_USDT`, `B-SOL_BTC`. So `SOL/USDT` and `SOL/BTC` are **native** here.
   - **`I-` = CoinDCX native INR** markets, e.g. `I-SOL_INR`, `I-BTC_INR`, `I-USDT_INR` — real local order books, used for the **INR base**.

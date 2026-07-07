@@ -30,10 +30,13 @@ TIMEFRAME_SECONDS: dict[str, int] = {
     "1w": 7 * 24 * 60 * 60,
 }
 
-# Timeframes CoinDCX serves natively; anything else must be resampled from 1m.
-COINDCX_NATIVE_TIMEFRAMES: set[str] = {
-    "1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "1d", "3d", "1w", "1M",
-}
+# Timeframes the CoinDCX public candles endpoint actually serves (verified live,
+# 2026-07). The docs list more, but only these return data — everything else is
+# resampled from the largest fetchable divisor by OHLCVService.
+COINDCX_FETCHABLE_TIMEFRAMES: set[str] = {"1m", "15m", "1h", "1d"}
+
+# Max candles the public endpoint returns per request.
+COINDCX_MAX_CANDLES = 1000
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
