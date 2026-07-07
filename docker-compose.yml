@@ -1,0 +1,33 @@
+services:
+  dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - screener-data:/app/data_cache
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: ["uvicorn", "backend.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - screener-data:/app/data_cache
+    restart: unless-stopped
+
+  # Always-on alert scanner. Needs TELEGRAM_* in a .env file to actually send.
+  watcher:
+    build: .
+    command: ["python", "-m", "backend.cli", "watch", "--interval", "5"]
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - screener-data:/app/data_cache
+    restart: unless-stopped
+
+volumes:
+  screener-data:

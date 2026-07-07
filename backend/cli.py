@@ -100,6 +100,15 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    from backend import scheduler
+
+    presets = [p.strip() for p in args.presets.split(",")] if args.presets else None
+    scheduler.start(interval_minutes=args.interval, config_path=args.config,
+                    presets=presets, cooldown_s=args.cooldown)
+    return 0
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     from backend.service import ScreenerService
     from backend.signals.backtest import backtest_signal
@@ -143,6 +152,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--cooldown", type=float, default=3600.0,
                    help="per-signal cooldown seconds")
     s.set_defaults(func=cmd_scan)
+
+    w = sub.add_parser("watch", help="run periodic alert scans (always-on)")
+    w.add_argument("--interval", type=int, default=5, help="minutes between scans")
+    w.add_argument("--presets", default=None, help="comma list, default = all")
+    w.add_argument("--cooldown", type=float, default=3600.0)
+    w.set_defaults(func=cmd_watch)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)

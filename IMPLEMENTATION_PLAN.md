@@ -473,12 +473,12 @@ crypto-screener/
 
 ## 7. Phased roadmap
 
-### Phase 0 — Setup (0.5 day)
+### Phase 0 — Setup (0.5 day)  ✅ **DONE**
 - Repo, `git init`, venv, `requirements.txt` (ccxt, pandas, pandas-ta, streamlit, duckdb).
 - Config file listing coins, bases (**BTC/ETH/USDT/INR**), timeframes, and active exchange (**default: `coindcx`**).
 - Build the CoinDCX `(coin, base) → pair` map from the Market Details endpoint at startup.
 
-### Phase 1 — Data + RS engine (core, ~3–5 days)
+### Phase 1 — Data + RS engine (core, ~3–5 days)  ✅ **DONE**
 - CCXT OHLCV fetch with caching + incremental updates.
 - Ratio builder (direct + synthesized).
 - `rs.py` metric + **noise-filtered** bull/bear/neutral classification (§4.7: closed-candle, vol-normalized threshold, smoothing, persistence, hysteresis); unit tests with golden series.
@@ -486,14 +486,14 @@ crypto-screener/
 - **Universe + liquidity gating** (§4.8) and **data-quality** handling (§5.2: gaps, stale→unknown, ratio hygiene).
 - CLI/notebook that prints the RS matrix for a coin list.
 
-### Phase 2 — Screener dashboard MVP + filter engine (Streamlit, ~4–6 days)
+### Phase 2 — Screener dashboard MVP + filter engine (Streamlit, ~4–6 days)  ✅ **DONE**
 - RS matrix as a color-coded heatmap/table (coins × timeframes, per base tab).
 - **Multi-condition filter engine (§4.6):** condition model + AND/OR evaluation via pandas mask; filter-builder UI; the "SOL bull vs BTC on 1h AND 1d AND 1w" case and market-wide `*` scans; ship the preset filters; save/name/re-run.
 - Sorting (e.g. "all-green stacks", top movers), auto-refresh.
 - **Sector/narrative RS** heatmap (§4.9), **market-regime header** (§4.10: BTC dominance / total-cap), and the **index base** (§4.1) as a scan target.
 - Basic chart panel (Plotly or embed Lightweight Charts) for a clicked pair.
 
-### Phase 3 — Real charts + indicators (~1–2 weeks)
+### Phase 3 — Real charts + indicators (~1–2 weeks)  ✅ **DONE**
 - Integrate TradingView Lightweight Charts (SOLUSDT/SOLBTC/SOLETH), tf switcher.
 - Indicator engine + EMA/RSI/MFI/WaveTrend.
 - **VuManChu Cipher B + Divergences** implemented and validated against the Pine script / Python ports.
@@ -501,11 +501,11 @@ crypto-screener/
 - **Alerts** (§4.12: Telegram/Discord on match / align / flip) + **signal journal** (§4.13).
 - **Backtest / validation harness** (§4.11) to validate presets and recalibrate the §4.7 thresholds against forward returns.
 
-### Phase 4 — Production app (optional, ~2–3 weeks)
+### Phase 4 — Production app (optional, ~2–3 weeks)  ✅ **DONE**
 - Split into FastAPI backend + Next.js frontend; WebSocket live updates.
 - Postgres/Timescale, background workers, dockerized deploy.
 
-### Phase 5 — Extras & polish
+### Phase 5 — Extras & polish  ✅ **DONE**
 - (Core alerts, journal, and backtest now land in Phase 3.)
 - **CoinDCX futures** funding-rate / open-interest signals (§4.10), extra alert channels, watchlists, persisted user settings, more bases/sectors, always-on VPS deployment (§5.3).
 

@@ -16,10 +16,13 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.config import load_config  # noqa: E402
+from backend.data.futures import fetch_futures  # noqa: E402
 from backend.indicators.vumanchu import VuManChuCipherB  # noqa: E402
 from backend.screener import filters as filters_mod  # noqa: E402
 from backend.screener import rs as rs_mod  # noqa: E402
 from backend.screener import sectors as sectors_mod  # noqa: E402
+from backend.signals.backtest import backtest_signal  # noqa: E402
+from backend.signals.journal import SignalJournal  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
 
 st.set_page_config(page_title="Crypto RS Screener", layout="wide")
@@ -35,6 +38,14 @@ def build(coins, bases, timeframes, liquidity_gate, _nonce):
     svc = get_service()
     df = svc.build_matrix(coins, bases, timeframes, liquidity_gate=liquidity_gate)
     return df
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def futures_map():
+    try:
+        return {c: (fi.funding_rate, fi.bias) for c, fi in fetch_futures().items()}
+    except Exception:
+        return {}
 
 
 def _strength_color(direction: str, strength: float) -> str:
@@ -168,8 +179,8 @@ def main():
     c3.metric("Breadth 1d (% bull vs USDT)",
               f"{b1d:.0f}%" if b1d == b1d else "—")
 
-    tab_screen, tab_filter, tab_sector, tab_chart = st.tabs(
-        ["Screener", "Filters", "Sectors", "Chart"])
+    tab_screen, tab_filter, tab_sector, tab_chart, tab_bt, tab_journal = st.tabs(
+        ["Screener", "Filters", "Sectors", "Chart", "Backtest", "Journal"])
 
     with tab_screen:
         for base in bases:
@@ -217,10 +228,47 @@ def main():
         base = cc2.selectbox("Base", base_opts, key="chart_base")
         tf = cc3.selectbox("Timeframe", timeframes, key="chart_tf")
         show_vmc = st.checkbox("VuManChu Cipher B", value=True)
+        fut = futures_map().get(coin)
+        if fut:
+            st.caption(f"Perp funding: {fut[0] * 100:.4f}% · {fut[1].replace('_', ' ')}")
         if coin == base:
             st.info("Pick a base different from the coin.")
         else:
             render_chart(svc, coin, base, tf, show_vumanchu=show_vmc)
+
+    with tab_bt:
+        st.caption("Replay a signal historically: forward return after each fire.")
+        bc1, bc2, bc3, bc4 = st.columns(4)
+        bcoin = bc1.selectbox("Coin", coins, key="bt_coin")
+        bbase_opts = [b for b in bases if b != bcoin] or bases
+        bbase = bc2.selectbox("Base", bbase_opts, key="bt_base")
+        btf = bc3.selectbox("Timeframe", timeframes, key="bt_tf")
+        bdir = bc4.selectbox("Direction", [rs_mod.BULL, rs_mod.BEAR], key="bt_dir")
+        horizon = st.slider("Forward horizon (candles)", 3, 40, 10)
+        if bcoin != bbase:
+            frame = svc.ratio_frame(bcoin, bbase, btf)
+            if frame.empty:
+                st.warning("No candles for that pair/timeframe.")
+            else:
+                stats = backtest_signal(frame["close"], cfg.classifier_params(btf),
+                                        direction=bdir, horizon=horizon)
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Signals", stats.n)
+                m2.metric("Hit rate", f"{stats.hit_rate:.0%}" if stats.n else "—")
+                m3.metric("Mean fwd", f"{stats.mean_fwd:+.2f}%" if stats.n else "—")
+                m4.metric("Median fwd", f"{stats.median_fwd:+.2f}%" if stats.n else "—")
+
+    with tab_journal:
+        st.caption("Fired signals (from `python -m backend.cli scan` / watch).")
+        j = SignalJournal()
+        hist = j.to_frame(limit=200)
+        counts = j.preset_counts()
+        j.close()
+        if counts.empty:
+            st.info("No signals recorded yet. Run a scan or the alert scheduler.")
+        else:
+            st.dataframe(counts, use_container_width=True, hide_index=True)
+            st.dataframe(hist, use_container_width=True, hide_index=True)
 
 
 main()

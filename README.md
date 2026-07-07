@@ -55,13 +55,29 @@ timeframes, liquidity floor, sector tags, and the per-timeframe noise-filter
 thresholds. Secrets (Telegram, future order keys) live in `.env` — see
 [.env.example](.env.example). The screener itself needs **no keys**.
 
-## Status
+## Status — all phases implemented ✅
 
-Built in phases (see the plan's roadmap):
-
-- **Phase 0** — setup, config ✅
-- **Phase 1** — CoinDCX data layer, ratio builder, RS engine, universe/liquidity, data quality, CLI
+- **Phase 0** — setup, config
+- **Phase 1** — CoinDCX data layer, ratio builder, noise-filtered RS engine, universe/liquidity, data quality, CLI
 - **Phase 2** — Streamlit dashboard, filter engine, sector RS, regime header
-- **Phase 3** — charts, indicators (VuManChu), alerts, journal, backtest
+- **Phase 3** — charts, indicators (WaveTrend + VuManChu Cipher B), alerts (Telegram), signal journal, backtest harness
 - **Phase 4** — FastAPI backend API
-- **Phase 5** — extras (futures signals, deployment)
+- **Phase 5** — CoinDCX futures funding signal, scheduled alert scanner, Docker deployment
+
+## Commands
+
+```bash
+python -m backend.cli markets                 # sanity-check the data source
+python -m backend.cli matrix --base BTC,USDT  # print the RS matrix
+python -m backend.cli scan                    # evaluate presets, fire alerts
+python -m backend.cli watch --interval 5      # always-on alert scanner
+python -m backend.cli backtest --coin SOL --base BTC --timeframe 1d
+```
+
+## Deployment
+
+```bash
+docker compose up -d          # dashboard :8501, API :8000, alert watcher
+```
+
+Put `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `.env` to enable alert delivery.
