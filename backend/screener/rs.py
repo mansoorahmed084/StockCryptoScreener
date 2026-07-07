@@ -121,6 +121,25 @@ def _apply_persistence(states: list[str], persistence: int) -> list[str]:
     return reported
 
 
+def classify_history(close: pd.Series, params: ClassifierParams, *,
+                     drop_forming: bool = True) -> pd.DataFrame:
+    """Return the full per-candle strength + reported direction series.
+
+    Used by the backtest harness to replay when a signal was active historically.
+    """
+    close = close.dropna().astype(float)
+    if drop_forming and len(close) > 0:
+        close = close.iloc[:-1]
+    if close.empty:
+        return pd.DataFrame(columns=["strength", "direction"])
+    comp = strength_series(close, params)
+    strength = comp["strength"].to_numpy()
+    states = _hysteresis_states(strength, params.neutral_band, params.hysteresis_out)
+    reported = _apply_persistence(states, params.persistence)
+    return pd.DataFrame({"strength": strength, "direction": reported},
+                        index=close.index)
+
+
 def classify(close: pd.Series, params: ClassifierParams, *,
              drop_forming: bool = True, min_rows: int = 30) -> RSResult:
     """Classify a ratio close series into bull/bear/neutral with noise filtering."""

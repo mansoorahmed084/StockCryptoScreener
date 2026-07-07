@@ -17,6 +17,7 @@ from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
 from backend.screener import matrix as matrix_mod
 from backend.screener import universe as universe_mod
+from backend.screener import filters as filters_mod
 
 def _fmt_cell(direction: str, strength: float) -> str:
     if direction == "bull" and pd.notna(strength):
@@ -75,6 +76,52 @@ def cmd_markets(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Build the matrix, evaluate presets, and fire de-duped alerts."""
+    from backend.service import ScreenerService
+    from backend.alerts import AlertDispatcher, notifier_from_env
+    from backend.signals.journal import SignalJournal
+
+    config = load_config(args.config)
+    svc = ScreenerService(config)
+    df = svc.build_matrix(liquidity_gate=True)
+    disp = AlertDispatcher(SignalJournal(), notifier_from_env(),
+                           cooldown_s=args.cooldown)
+    presets = ([p.strip() for p in args.presets.split(",")]
+               if args.presets else list(filters_mod.PRESETS))
+    fired = []
+    for name in presets:
+        flt = filters_mod.PRESETS[name]()
+        fired += disp.dispatch_preset(df, name, flt)
+    print(f"scan complete: {len(fired)} new alert(s)")
+    for e in fired:
+        print(f"  [{e.preset}] {e.coin} {e.direction} vs {e.base} @ {e.timeframe} "
+              f"({e.strength:+.1f})")
+    return 0
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    from backend.service import ScreenerService
+    from backend.signals.backtest import backtest_signal
+
+    config = load_config(args.config)
+    svc = ScreenerService(config)
+    svc.build_matrix([args.coin], [args.base], [args.timeframe],
+                     liquidity_gate=False)
+    frame = svc.ratio_frame(args.coin, args.base, args.timeframe)
+    if frame.empty:
+        print("no data for that pair/timeframe")
+        return 1
+    params = config.classifier_params(args.timeframe)
+    stats = backtest_signal(frame["close"], params, direction=args.direction,
+                            horizon=args.horizon)
+    print(f"{args.coin}/{args.base} {args.timeframe} · {args.direction} "
+          f"(horizon {args.horizon}):")
+    print(f"  entries={stats.n}  hit_rate={stats.hit_rate:.0%}  "
+          f"mean_fwd={stats.mean_fwd:+.2f}%  median_fwd={stats.median_fwd:+.2f}%")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Crypto relative-strength screener")
     parser.add_argument("--config", default=None, help="path to config.yaml")
@@ -90,6 +137,20 @@ def main(argv: list[str] | None = None) -> int:
 
     k = sub.add_parser("markets", help="list markets on the data source")
     k.set_defaults(func=cmd_markets)
+
+    s = sub.add_parser("scan", help="evaluate presets and fire alerts")
+    s.add_argument("--presets", default=None, help="comma list, default = all")
+    s.add_argument("--cooldown", type=float, default=3600.0,
+                   help="per-signal cooldown seconds")
+    s.set_defaults(func=cmd_scan)
+
+    b = sub.add_parser("backtest", help="forward-return stats for a signal")
+    b.add_argument("--coin", required=True)
+    b.add_argument("--base", default="BTC")
+    b.add_argument("--timeframe", default="1d")
+    b.add_argument("--direction", default="bull", choices=["bull", "bear"])
+    b.add_argument("--horizon", type=int, default=10)
+    b.set_defaults(func=cmd_backtest)
 
     args = parser.parse_args(argv)
     try:  # ensure non-ASCII output never crashes on Windows consoles

@@ -9,12 +9,14 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 # Make the repo root importable when Streamlit runs this file directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.config import load_config  # noqa: E402
+from backend.indicators.vumanchu import VuManChuCipherB  # noqa: E402
 from backend.screener import filters as filters_mod  # noqa: E402
 from backend.screener import rs as rs_mod  # noqa: E402
 from backend.screener import sectors as sectors_mod  # noqa: E402
@@ -81,20 +83,55 @@ def render_heatmap(df: pd.DataFrame, base: str, timeframes: list[str]):
     st.dataframe(styler, use_container_width=True)
 
 
-def render_chart(svc, coin, base, timeframe):
+_MARKER_STYLE = {
+    "buy": dict(symbol="triangle-up", color="#22dd77"),
+    "sell": dict(symbol="triangle-down", color="#ff4d4d"),
+    "bull_div": dict(symbol="circle", color="#00e5ff"),
+    "bear_div": dict(symbol="circle", color="#ffd000"),
+}
+
+
+def render_chart(svc, coin, base, timeframe, show_vumanchu=True):
     frame = svc.ratio_frame(coin, base, timeframe)
     if frame.empty:
         st.warning("No candles for this pair/timeframe.")
         return
     ema = frame["close"].ewm(span=21, adjust=False).mean()
-    fig = go.Figure()
+
+    if show_vumanchu:
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                            row_heights=[0.7, 0.3], vertical_spacing=0.03)
+    else:
+        fig = make_subplots(rows=1, cols=1)
+
     fig.add_trace(go.Candlestick(
-        x=frame.index, open=frame["open"], high=frame["high"],
-        low=frame["low"], close=frame["close"], name=f"{coin}/{base}"))
+        x=frame.index, open=frame["open"], high=frame["high"], low=frame["low"],
+        close=frame["close"], name=f"{coin}/{base}"), row=1, col=1)
     fig.add_trace(go.Scatter(x=frame.index, y=ema, name="EMA21",
-                             line=dict(color="orange", width=1)))
-    fig.update_layout(height=520, xaxis_rangeslider_visible=False,
-                      margin=dict(l=10, r=10, t=30, b=10),
+                             line=dict(color="orange", width=1)), row=1, col=1)
+
+    if show_vumanchu:
+        res = VuManChuCipherB().compute(frame)
+        if res.panes:
+            fig.add_trace(go.Scatter(x=frame.index, y=res.panes["wt1"], name="WT1",
+                                     line=dict(color="#4da6ff", width=1)), row=2, col=1)
+            fig.add_trace(go.Scatter(x=frame.index, y=res.panes["wt2"], name="WT2",
+                                     line=dict(color="#b366ff", width=1),
+                                     fill="tonexty"), row=2, col=1)
+            fig.add_trace(go.Bar(x=frame.index, y=res.panes["mfi"], name="MFI",
+                                 marker_color="#4caf50", opacity=0.4), row=2, col=1)
+            fig.add_hline(y=53, line=dict(color="#555", dash="dot"), row=2, col=1)
+            fig.add_hline(y=-53, line=dict(color="#555", dash="dot"), row=2, col=1)
+        for m in res.markers:
+            stl = _MARKER_STYLE.get(m.kind, {})
+            fig.add_trace(go.Scatter(
+                x=[m.ts], y=[m.price], mode="markers", name=m.kind,
+                marker=dict(size=11, **stl), showlegend=False), row=1, col=1)
+        sig = ", ".join(k for k, v in res.signals.items() if v) or "none"
+        st.caption(f"VuManChu latest signals: {sig}")
+
+    fig.update_layout(height=620, xaxis_rangeslider_visible=False,
+                      margin=dict(l=10, r=10, t=30, b=10), showlegend=True,
                       title=f"{coin}/{base} · {timeframe}")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -179,10 +216,11 @@ def main():
         base_opts = [b for b in bases if b != coin] or bases  # no COIN/COIN identity
         base = cc2.selectbox("Base", base_opts, key="chart_base")
         tf = cc3.selectbox("Timeframe", timeframes, key="chart_tf")
+        show_vmc = st.checkbox("VuManChu Cipher B", value=True)
         if coin == base:
             st.info("Pick a base different from the coin.")
         else:
-            render_chart(svc, coin, base, tf)
+            render_chart(svc, coin, base, tf, show_vumanchu=show_vmc)
 
 
 main()
