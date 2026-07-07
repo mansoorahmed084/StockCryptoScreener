@@ -49,6 +49,19 @@ def trend(n: int, start: float, drift: float, *, noise: float = 0.0,
     return vals
 
 
+def matrix_df(rows: list[dict]) -> pd.DataFrame:
+    """Build a long-form RS matrix DataFrame from partial cell specs (for tests)."""
+    from backend.screener.matrix import CELL_COLUMNS
+    defaults = {
+        "coin": "", "base": "", "timeframe": "", "direction": "neutral",
+        "strength": 0.0, "change_pct": 0.0, "rank": 50.0, "method": "direct",
+        "synthetic": False, "quote_volume_24h": 1e9, "quality_ok": True,
+        "quality_reason": "", "n": 100,
+    }
+    full = [{**defaults, **r} for r in rows]
+    return pd.DataFrame(full, columns=CELL_COLUMNS)
+
+
 class FakeAdapter(ExchangeAdapter):
     """In-memory adapter returning pre-canned frames. No network."""
 
