@@ -1,0 +1,61 @@
+# Crypto Relative-Strength Screener — runtime configuration.
+# See IMPLEMENTATION_PLAN.md for the design behind every field.
+
+exchange: coindcx          # primary data source: coindcx | ccxt
+ccxt_exchange: binance     # used only when exchange == ccxt
+
+# Coin universe. Either an explicit watchlist, or auto top-N by 24h volume.
+universe:
+  mode: watchlist          # watchlist | top_volume
+  watchlist: [BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX, LINK, MATIC, DOT, LTC]
+  top_n: 40                # used when mode == top_volume
+  min_quote_volume_24h: 100000   # liquidity floor (in quote currency, USDT-equiv)
+
+# Bases each coin is measured against.
+bases: [BTC, ETH, USDT, INR, INDEX]
+
+# Timeframes for the matrix (3m is resampled from 1m on CoinDCX).
+timeframes: [1w, 1d, 4h, 1h, 15m, 3m]
+
+# Noise-filter / classification thresholds (see plan sec 4.7).
+# Per-timeframe overrides fall back to `default`.
+classifier:
+  default:
+    ema_len: 21
+    vol_lookback: 90
+    neutral_band: 1.0      # z-score deadband for bull/bear
+    hysteresis_out: 0.6    # sticky exit threshold (< neutral_band)
+    persistence: 2         # consecutive closed candles required to flip
+    weights: { z_return: 1.0, ema_pos: 1.0, ema_slope: 1.0 }
+  per_timeframe:
+    3m:  { vol_lookback: 100, neutral_band: 1.2, persistence: 3 }
+    15m: { vol_lookback: 96,  neutral_band: 1.0, persistence: 2 }
+    1h:  { vol_lookback: 90,  neutral_band: 1.0, persistence: 2 }
+    4h:  { vol_lookback: 90,  neutral_band: 0.8, persistence: 2 }
+    1d:  { vol_lookback: 60,  neutral_band: 0.8, persistence: 1 }
+    1w:  { vol_lookback: 52,  neutral_band: 0.7, persistence: 1 }
+
+# Sector / narrative tags (coin -> sectors). Used for sector RS aggregation.
+sectors:
+  BTC: [Store-of-Value]
+  ETH: [L1, Smart-Contract]
+  SOL: [L1, Smart-Contract]
+  BNB: [L1, Exchange]
+  XRP: [Payments]
+  ADA: [L1]
+  DOGE: [Memes]
+  AVAX: [L1]
+  LINK: [Oracle, DeFi]
+  MATIC: [L2]
+  DOT: [L1, Interop]
+  LTC: [Payments]
+
+# Data fetching.
+data:
+  candle_limit: 500        # candles per (symbol, tf) request
+  cache_dir: data_cache
+  stale_multiplier: 3      # cell is 'unknown' if last candle older than this * tf
+
+# Index base construction.
+index:
+  exclude: [BTC]           # equal-weight alt index excludes these

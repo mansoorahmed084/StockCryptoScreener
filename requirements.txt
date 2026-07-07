@@ -1,0 +1,25 @@
+# Core data + compute
+httpx>=0.27
+pandas>=2.2
+numpy>=1.26
+PyYAML>=6.0
+
+# Storage / cache
+duckdb>=1.0
+
+# Dashboard (Phase 2)
+streamlit>=1.36
+plotly>=5.22
+
+# API (Phase 4)
+fastapi>=0.111
+uvicorn>=0.30
+
+# Alerts / scheduling (Phase 3+)
+apscheduler>=3.10
+
+# Optional secondary data source
+# ccxt>=4.3
+
+# Testing
+pytest>=8.2
