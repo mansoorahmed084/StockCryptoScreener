@@ -61,6 +61,21 @@ def test_identity_when_coin_equals_base():
     assert res.frame.empty
 
 
+def test_index_rebased_at_common_window_start():
+    # AAA has 300 candles (tripled since its start); BBB has only 100 flat ones.
+    # The index must rebase at the COMMON window start, i.e. begin at 1.0 —
+    # rebasing each member at its own first candle would start it at ~1.7.
+    frames = {
+        ("AAA", "USDT", "1h"): make_ohlcv(list(np.linspace(100, 300, 300)),
+                                          timeframe="1h"),
+        ("BBB", "USDT", "1h"): make_ohlcv([50.0] * 100, timeframe="1h"),
+    }
+    service, config = _service(frames)
+    builder = RatioBuilder(service, config, universe_coins=["AAA", "BBB"])
+    lvl = builder.index_level("1h")
+    assert abs(lvl.iloc[0] - 1.0) < 1e-9
+
+
 def test_index_base_equal_weight():
     frames = {
         ("SOL", "USDT", "1h"): make_ohlcv(trend(120, 100, 0.02, seed=1), timeframe="1h"),

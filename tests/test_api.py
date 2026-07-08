@@ -25,6 +25,10 @@ class FakeService:
                          "direction": "bull", "strength": 1.6, "rank": 95})
         rows.append({"coin": "BTC", "base": "USDT", "timeframe": "1d",
                      "direction": "bull", "strength": 1.0})
+        # an unknown cell keeps its rank as pd.NA — the API must emit null for it
+        rows.append({"coin": "DOGE", "base": "USDT", "timeframe": "1d",
+                     "direction": "unknown", "strength": float("nan"),
+                     "rank": pd.NA})
         return matrix_df(rows)
 
     def regime(self, df):
@@ -57,6 +61,13 @@ def test_matrix_cells():
     body = client.get("/matrix").json()
     assert len(body["cells"]) > 0
     assert {"coin", "base", "timeframe", "direction"}.issubset(body["cells"][0])
+
+
+def test_matrix_pd_na_serialized_as_null():
+    body = client.get("/matrix").json()
+    doge = [c for c in body["cells"] if c["coin"] == "DOGE"][0]
+    assert doge["rank"] is None       # pd.NA must not leak as {'__module__': ...}
+    assert doge["strength"] is None   # NaN -> null
 
 
 def test_filter_full_stack_bull():

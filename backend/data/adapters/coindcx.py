@@ -90,9 +90,10 @@ class CoinDcxAdapter(ExchangeAdapter):
             if not (pair and coin and quote):
                 continue
             coin, quote = coin.upper(), quote.upper()
-            qv = volumes.get(market_sym, 0.0)
+            qv, px = volumes.get(market_sym, (0.0, 0.0))
             markets[(coin, quote)] = Market(
-                coin=coin, quote=quote, symbol=pair, quote_volume_24h=qv
+                coin=coin, quote=quote, symbol=pair,
+                quote_volume_24h=qv, last_price=px,
             )
             pair_index[pair] = (coin, quote)
         self._markets = markets
@@ -100,9 +101,9 @@ class CoinDcxAdapter(ExchangeAdapter):
         log.info("CoinDCX: loaded %d markets", len(markets))
         return markets
 
-    def _fetch_quote_volumes(self) -> dict[str, float]:
-        """market symbol -> approx 24h quote volume (base_vol * last_price)."""
-        out: dict[str, float] = {}
+    def _fetch_quote_volumes(self) -> dict[str, tuple[float, float]]:
+        """market symbol -> (approx 24h quote volume, last price)."""
+        out: dict[str, tuple[float, float]] = {}
         try:
             ticker = self._get(f"{API_BASE}/exchange/ticker")
         except Exception as exc:  # ticker is best-effort
@@ -117,7 +118,7 @@ class CoinDcxAdapter(ExchangeAdapter):
                 price = float(t.get("last_price", 0) or 0)
             except (TypeError, ValueError):
                 continue
-            out[sym] = vol * price
+            out[sym] = (vol * price, price)
         return out
 
     def markets(self) -> dict[tuple[str, str], Market]:

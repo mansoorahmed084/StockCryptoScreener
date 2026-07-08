@@ -51,3 +51,18 @@ def test_change_pct_sign_matches_last_move():
     close = _close(trend(120, 100, 0.02, noise=0.0, seed=5))
     res = rs.classify(close, PARAMS)
     assert res.change_pct > 0
+
+
+def test_hysteresis_sticky_through_shallow_dips():
+    import numpy as np
+    # plan sec 4.7 rule 6: bull persists until strength drops below -exit
+    states = rs._hysteresis_states(np.array([1.1, 0.4, -0.3, 0.4, 1.1]), 1.0, 0.6)
+    assert states == [rs.BULL] * 5
+
+
+def test_hysteresis_exits_on_genuine_reversal():
+    import numpy as np
+    states = rs._hysteresis_states(np.array([1.1, -0.7, -0.2]), 1.0, 0.6)
+    assert states[0] == rs.BULL
+    assert states[1] == rs.NEUTRAL  # dropped below -0.6 -> leaves bull
+    assert states[2] == rs.NEUTRAL

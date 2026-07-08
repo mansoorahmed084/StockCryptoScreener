@@ -83,6 +83,9 @@ def strength_series(close: pd.Series, params: ClassifierParams) -> pd.DataFrame:
 
 
 def _hysteresis_states(strength: np.ndarray, enter: float, exit_: float) -> list[str]:
+    """Sticky-state banding per plan sec 4.7 rule 6: enter bull at +enter, and
+    only LEAVE bull when strength drops below -exit_ (mirror for bear), so the
+    state survives shallow dips instead of oscillating around one line."""
     states: list[str] = []
     prev = NEUTRAL
     for s in strength:
@@ -92,9 +95,9 @@ def _hysteresis_states(strength: np.ndarray, enter: float, exit_: float) -> list
             st = BULL
         elif s <= -enter:
             st = BEAR
-        elif prev == BULL and s >= exit_:
+        elif prev == BULL and s > -exit_:
             st = BULL
-        elif prev == BEAR and s <= -exit_:
+        elif prev == BEAR and s < exit_:
             st = BEAR
         else:
             st = NEUTRAL

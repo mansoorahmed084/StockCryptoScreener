@@ -37,13 +37,19 @@ def get_service() -> ScreenerService:
     return _service
 
 
+def _jsonable(v):
+    """None for NaN/inf/pd.NA so payloads are valid JSON (pd.NA is not a float
+    and would otherwise serialize as {'__module__': 'pandas'})."""
+    if v is None or v is pd.NA:
+        return None
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return v
+
+
 def _clean(records: list[dict]) -> list[dict]:
-    """Replace NaN/inf with None so the payload is valid JSON."""
-    out = []
-    for r in records:
-        out.append({k: (None if isinstance(v, float) and not math.isfinite(v) else v)
-                    for k, v in r.items()})
-    return out
+    """Replace NaN/inf/pd.NA with None so the payload is valid JSON."""
+    return [{k: _jsonable(v) for k, v in r.items()} for r in records]
 
 
 def _matrix(service: ScreenerService, coins, bases, timeframes, gate) -> pd.DataFrame:
@@ -131,7 +137,6 @@ def evaluate_filter(body: FilterBody,
 @app.get("/chart")
 def chart(coin: str, base: str, timeframe: str, vumanchu: bool = True,
           service: ScreenerService = Depends(get_service)) -> dict:
-    _matrix(service, [coin.upper()], [base.upper()], [timeframe], False)
     frame = service.ratio_frame(coin.upper(), base.upper(), timeframe)
     if frame.empty:
         raise HTTPException(404, "no candles for that pair/timeframe")
@@ -141,10 +146,11 @@ def chart(coin: str, base: str, timeframe: str, vumanchu: bool = True,
             ts=lambda d: d["ts"].astype(str)).to_dict("records")),
     }
     if vumanchu:
-        res = VuManChuCipherB().compute(frame)
+        # Signals only on closed candles — the forming candle repaints (plan 4.7).
+        res = VuManChuCipherB().compute(frame.iloc[:-1])
         payload["vumanchu"] = {
-            "wt1": [None if not math.isfinite(x) else x for x in res.panes.get("wt1", [])],
-            "wt2": [None if not math.isfinite(x) else x for x in res.panes.get("wt2", [])],
+            "wt1": [_jsonable(float(x)) for x in res.panes.get("wt1", [])],
+            "wt2": [_jsonable(float(x)) for x in res.panes.get("wt2", [])],
             "signals": res.signals,
             "markers": [{"ts": str(m.ts), "kind": m.kind, "price": m.price}
                         for m in res.markers],
@@ -156,7 +162,6 @@ def chart(coin: str, base: str, timeframe: str, vumanchu: bool = True,
 def backtest(coin: str, base: str = "BTC", timeframe: str = "1d",
              direction: str = "bull", horizon: int = 10,
              service: ScreenerService = Depends(get_service)) -> dict:
-    _matrix(service, [coin.upper()], [base.upper()], [timeframe], False)
     frame = service.ratio_frame(coin.upper(), base.upper(), timeframe)
     if frame.empty:
         raise HTTPException(404, "no candles for that pair/timeframe")

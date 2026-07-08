@@ -67,3 +67,13 @@ def test_serialization_round_trip():
     flt = filters.higher_tf_pullback("ETH")
     restored = Filter.from_dict(flt.to_dict())
     assert restored.to_dict() == flt.to_dict()
+
+
+def test_multi_base_strength_accepts_single_base_string():
+    flt = filters.multi_base_strength("BTC")  # must not iterate into 'B','T','C'
+    assert [c.base for c in flt.conditions] == ["BTC"]
+
+
+def test_condition_cells_collects_bases_and_timeframes():
+    flt = filters.higher_tf_pullback("BTC")
+    assert flt.condition_cells() == {("BTC", "1w"), ("BTC", "1d"), ("BTC", "1h")}

@@ -68,9 +68,11 @@ class FakeAdapter(ExchangeAdapter):
     name = "fake"
 
     def __init__(self, frames: dict[tuple[str, str, str], pd.DataFrame],
-                 volumes: dict[tuple[str, str], float] | None = None):
+                 volumes: dict[tuple[str, str], float] | None = None,
+                 prices: dict[tuple[str, str], float] | None = None):
         self._frames = frames
         volumes = volumes or {}
+        prices = prices or {}
         self._markets = {}
         for (coin, quote, _tf) in frames:
             key = (coin.upper(), quote.upper())
@@ -78,6 +80,7 @@ class FakeAdapter(ExchangeAdapter):
                 self._markets[key] = Market(
                     coin=key[0], quote=key[1], symbol=f"{key[0]}_{key[1]}",
                     quote_volume_24h=volumes.get(key, 1e9),
+                    last_price=prices.get(key, 1.0),
                 )
 
     def refresh_markets(self):

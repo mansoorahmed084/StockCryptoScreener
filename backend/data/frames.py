@@ -30,7 +30,10 @@ _RESAMPLE_RULE = {
     "8h": "8h",
     "1d": "1D",
     "3d": "3D",
-    "1w": "1W",
+    # W-MON + closed/label "left" = weeks spanning Mon 00:00 UTC .. Sun, labeled by
+    # their Monday — matching exchange/TradingView weekly candles. Plain "1W" is
+    # W-SUN and shifts every weekly candle by a day.
+    "1w": "W-MON",
 }
 
 _AGG = {

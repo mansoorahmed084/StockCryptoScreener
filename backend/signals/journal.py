@@ -44,6 +44,18 @@ class SignalJournal:
             )
             """
         )
+        # Which coins matched each preset on the LAST scan — lets the dispatcher
+        # alert on state changes (new matches) instead of re-firing steady states.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS preset_state (
+                preset TEXT NOT NULL,
+                coin TEXT NOT NULL,
+                updated REAL,
+                PRIMARY KEY (preset, coin)
+            )
+            """
+        )
         self._conn.commit()
 
     def log(self, entry: SignalEntry) -> None:
@@ -66,6 +78,22 @@ class SignalJournal:
         now = now if now is not None else time.time()
         last = self.last_fired(dedup_key)
         return last is not None and (now - last) < cooldown_s
+
+    def matched_coins(self, preset: str) -> set[str]:
+        """Coins that matched ``preset`` on the previous scan."""
+        cur = self._conn.execute(
+            "SELECT coin FROM preset_state WHERE preset = ?", (preset,))
+        return {row[0] for row in cur.fetchall()}
+
+    def record_matches(self, preset: str, coins: set[str],
+                       now: float | None = None) -> None:
+        """Replace the stored match set for ``preset`` with ``coins``."""
+        now = now if now is not None else time.time()
+        self._conn.execute("DELETE FROM preset_state WHERE preset = ?", (preset,))
+        self._conn.executemany(
+            "INSERT INTO preset_state(preset, coin, updated) VALUES (?,?,?)",
+            [(preset, coin, now) for coin in coins])
+        self._conn.commit()
 
     def to_frame(self, limit: int | None = None) -> pd.DataFrame:
         q = "SELECT coin, base, timeframe, preset, direction, strength, fired_at" \

@@ -12,6 +12,7 @@ The resulting ratio *is* the relative-strength series consumed by the RS engine.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -63,7 +64,9 @@ class RatioBuilder:
         self.service = service
         self.config = config
         self.universe_coins = [c.upper() for c in (universe_coins or config.watchlist)]
-        self._index_cache: dict[str, pd.Series] = {}
+        # timeframe -> (monotonic timestamp, level); TTL follows the OHLCV cache so
+        # a long-lived builder doesn't serve a permanently stale index.
+        self._index_cache: dict[str, tuple[float, pd.Series]] = {}
 
     # -- public ---------------------------------------------------------------
     def ratio(self, coin: str, base: str, timeframe: str) -> RatioResult:
@@ -127,28 +130,41 @@ class RatioBuilder:
         return out, "index", True
 
     def index_level(self, timeframe: str) -> pd.Series:
-        """Equal-weight alt-index close series (base 1.0), cached per timeframe."""
-        if timeframe in self._index_cache:
-            return self._index_cache[timeframe]
+        """Equal-weight alt-index close series (base 1.0), cached per timeframe.
+
+        Members are inner-joined on timestamps FIRST and rebased at the common
+        window start — rebasing each member at its own first candle would let
+        long-history coins enter the join window at inflated levels and dominate
+        the "equal-weight" mean.
+        """
+        now = time.monotonic()
+        hit = self._index_cache.get(timeframe)
+        if hit and now - hit[0] < self.service.cache_ttl:
+            return hit[1]
         exclude = {c.upper() for c in self.config.index_exclude}
         members = [c for c in self.universe_coins
                    if c not in exclude and c != USD_QUOTE]
-        normalised: list[pd.Series] = []
+        series: list[pd.Series] = []
         for m in members:
             df = self.service.get(m, USD_QUOTE, timeframe)
             if df.empty:
                 continue
             close = df["close"].dropna()
-            if close.empty or close.iloc[0] == 0:
+            if close.empty:
                 continue
-            normalised.append(close / close.iloc[0])
-        if not normalised:
+            series.append(close.rename(m))
+        if not series:
             level = pd.Series(dtype=float)
         else:
-            mat = pd.concat(normalised, axis=1, join="inner")
-            level = mat.mean(axis=1)
-            level.index.name = "ts"
-        self._index_cache[timeframe] = level
+            mat = pd.concat(series, axis=1, join="inner")
+            if mat.empty:
+                level = pd.Series(dtype=float)
+            else:
+                first = mat.iloc[0].replace(0, np.nan)
+                rebased = mat.div(first, axis=1).dropna(axis=1, how="all")
+                level = rebased.mean(axis=1)
+                level.index.name = "ts"
+        self._index_cache[timeframe] = (now, level)
         return level
 
     def clear_index_cache(self) -> None:

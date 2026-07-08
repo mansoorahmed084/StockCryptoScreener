@@ -78,21 +78,12 @@ def cmd_markets(args: argparse.Namespace) -> int:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     """Build the matrix, evaluate presets, and fire de-duped alerts."""
-    from backend.service import ScreenerService
-    from backend.alerts import AlertDispatcher, notifier_from_env
-    from backend.signals.journal import SignalJournal
+    from backend.scheduler import run_scan
 
     config = load_config(args.config)
-    svc = ScreenerService(config)
-    df = svc.build_matrix(liquidity_gate=True)
-    disp = AlertDispatcher(SignalJournal(), notifier_from_env(),
-                           cooldown_s=args.cooldown)
     presets = ([p.strip() for p in args.presets.split(",")]
-               if args.presets else list(filters_mod.PRESETS))
-    fired = []
-    for name in presets:
-        flt = filters_mod.PRESETS[name]()
-        fired += disp.dispatch_preset(df, name, flt)
+               if args.presets else None)
+    fired = run_scan(config, presets=presets, cooldown_s=args.cooldown)
     print(f"scan complete: {len(fired)} new alert(s)")
     for e in fired:
         print(f"  [{e.preset}] {e.coin} {e.direction} vs {e.base} @ {e.timeframe} "
@@ -115,8 +106,6 @@ def cmd_backtest(args: argparse.Namespace) -> int:
 
     config = load_config(args.config)
     svc = ScreenerService(config)
-    svc.build_matrix([args.coin], [args.base], [args.timeframe],
-                     liquidity_gate=False)
     frame = svc.ratio_frame(args.coin, args.base, args.timeframe)
     if frame.empty:
         print("no data for that pair/timeframe")

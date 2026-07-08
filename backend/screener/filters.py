@@ -115,6 +115,13 @@ class Filter:
             "groups": [g.to_dict() for g in self.groups],
         }
 
+    def condition_cells(self) -> set[tuple[str, str]]:
+        """(base, timeframe) pairs this filter's conditions actually test."""
+        cells = {(c.base, c.timeframe) for c in self.conditions}
+        for g in self.groups:
+            cells |= g.condition_cells()
+        return cells
+
     def evaluate(self, df: pd.DataFrame, all_coins: set[str] | None = None) -> set[str]:
         all_coins = all_coins if all_coins is not None else set(df["coin"].unique())
         sets: list[set[str]] = [c.matching_coins(df) for c in self.conditions]
@@ -165,6 +172,8 @@ def higher_tf_pullback(base: str = "BTC") -> Filter:
 
 def multi_base_strength(bases=("BTC", "ETH", "USDT"), timeframe="1d") -> Filter:
     """Outperforming several bases at once on one timeframe."""
+    if isinstance(bases, str):  # a lone base string must not be iterated char-wise
+        bases = (bases,)
     return Filter(
         logic="AND", name="Multi-base strength",
         conditions=[Condition(ANY, b, timeframe, "direction", "is", rs.BULL)

@@ -18,7 +18,9 @@ class Market:
     coin: str
     quote: str
     symbol: str
-    quote_volume_24h: float = 0.0
+    quote_volume_24h: float = 0.0   # in units of the QUOTE currency
+    last_price: float = 0.0         # quote units per coin; lets volumes be
+                                    # converted to a common USDT yardstick
 
     @property
     def key(self) -> tuple[str, str]:

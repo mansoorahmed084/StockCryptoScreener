@@ -44,13 +44,14 @@ class CcxtAdapter(ExchangeAdapter):
                 continue
             if m.get("type") not in (None, "spot") and not m.get("spot", True):
                 continue
-            qv = 0.0
+            qv, px = 0.0, 0.0
             tk = tickers.get(symbol)
             if tk:
                 qv = float(tk.get("quoteVolume") or 0.0)
+                px = float(tk.get("last") or 0.0)
             markets[(base.upper(), quote.upper())] = Market(
                 coin=base.upper(), quote=quote.upper(), symbol=symbol,
-                quote_volume_24h=qv,
+                quote_volume_24h=qv, last_price=px,
             )
         self._markets = markets
         return markets

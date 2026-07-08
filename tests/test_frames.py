@@ -26,6 +26,15 @@ def test_from_records_dedups():
     assert df["close"].iloc[0] == 9.0  # keep last
 
 
+def test_resample_weekly_monday_anchor():
+    # 21 daily candles starting Monday 2026-06-01 -> 3 Monday-anchored weeks
+    df = make_ohlcv(list(range(1, 22)), timeframe="1d", start="2026-06-01")
+    wk = resample_ohlcv(df, "1w")
+    assert all(ts.day_name() == "Monday" for ts in wk.index)
+    assert wk["open"].iloc[0] == df["open"].iloc[0]     # Monday's open
+    assert wk["close"].iloc[0] == df["close"].iloc[6]   # Sunday's close
+
+
 def test_resample_1m_to_3m():
     closes = list(range(1, 13))  # 12 one-minute candles
     df = make_ohlcv(closes, timeframe="1m", start="2024-01-01")  # 3m-aligned

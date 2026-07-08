@@ -34,7 +34,7 @@ def get_service():
 
 
 @st.cache_data(show_spinner="Building relative-strength matrix…")
-def build(coins, bases, timeframes, liquidity_gate, _nonce):
+def build(coins, bases, timeframes, liquidity_gate):
     svc = get_service()
     df = svc.build_matrix(coins, bases, timeframes, liquidity_gate=liquidity_gate)
     return df
@@ -122,14 +122,16 @@ def render_chart(svc, coin, base, timeframe, show_vumanchu=True):
                              line=dict(color="orange", width=1)), row=1, col=1)
 
     if show_vumanchu:
-        res = VuManChuCipherB().compute(frame)
+        # Signals only on closed candles — the forming candle repaints (plan 4.7).
+        closed = frame.iloc[:-1]
+        res = VuManChuCipherB().compute(closed)
         if res.panes:
-            fig.add_trace(go.Scatter(x=frame.index, y=res.panes["wt1"], name="WT1",
+            fig.add_trace(go.Scatter(x=closed.index, y=res.panes["wt1"], name="WT1",
                                      line=dict(color="#4da6ff", width=1)), row=2, col=1)
-            fig.add_trace(go.Scatter(x=frame.index, y=res.panes["wt2"], name="WT2",
+            fig.add_trace(go.Scatter(x=closed.index, y=res.panes["wt2"], name="WT2",
                                      line=dict(color="#b366ff", width=1),
                                      fill="tonexty"), row=2, col=1)
-            fig.add_trace(go.Bar(x=frame.index, y=res.panes["mfi"], name="MFI",
+            fig.add_trace(go.Bar(x=closed.index, y=res.panes["mfi"], name="MFI",
                                  marker_color="#4caf50", opacity=0.4), row=2, col=1)
             fig.add_hline(y=53, line=dict(color="#555", dash="dot"), row=2, col=1)
             fig.add_hline(y=-53, line=dict(color="#555", dash="dot"), row=2, col=1)
@@ -162,13 +164,12 @@ def main():
         liquidity_gate = st.checkbox("Liquidity gate", value=True)
         if st.button("🔄 Refresh data"):
             st.cache_data.clear()
-        nonce = st.session_state.get("_nonce", 0)
 
     if not (coins and bases and timeframes):
         st.warning("Pick at least one coin, base and timeframe.")
         return
 
-    df = build(tuple(coins), tuple(bases), tuple(timeframes), liquidity_gate, nonce)
+    df = build(tuple(coins), tuple(bases), tuple(timeframes), liquidity_gate)
 
     # -- regime header --------------------------------------------------------
     reg = svc.regime(df)
@@ -192,8 +193,9 @@ def main():
         preset = st.selectbox("Preset", ["(custom)"] + list(filters_mod.PRESETS))
         if preset != "(custom)":
             base = st.selectbox("Base", bases, key="preset_base")
-            flt = filters_mod.PRESETS[preset](base) if preset != "fresh_momentum" \
-                else filters_mod.PRESETS[preset](base)
+            factory = filters_mod.PRESETS[preset]
+            # multi_base_strength ANDs a tuple of bases; the others take one base
+            flt = factory() if preset == "multi_base_strength" else factory(base)
             st.code(flt.name, language=None)
         else:
             st.write("Build an AND filter across timeframes:")
