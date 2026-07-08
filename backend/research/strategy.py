@@ -44,6 +44,10 @@ class Prep:
     btc1d: np.ndarray | None = None          # BTC/USDT 1d direction per 1h bar
     alt1d: np.ndarray | None = None          # the alt's own USDT 1d direction
     wt2_4h: np.ndarray | None = None         # last CLOSED 4h bucket's WT2 per 1h bar
+    wt2_4h_rising: np.ndarray | None = None  # 1.0 where that bucket's WT2 rose
+    mfi_4h: np.ndarray | None = None         # last closed 4h bucket's money flow
+    alt4h: np.ndarray | None = None          # the alt's own 4h trend direction
+    ema200: np.ndarray | None = None         # EMA200 of 1h closes
 
 
 def _atr(df: pd.DataFrame, length: int = 14) -> np.ndarray:
@@ -141,9 +145,22 @@ def prepare(coin: str, df1h: pd.DataFrame, btc1h: pd.DataFrame,
                                      div4h_active_buckets * 4)
 
     vmc4h = VuManChuCipherB().compute(df4h)
-    prep.wt2_4h = _numeric_per_bar(idx, df4h.index,
-                                   vmc4h.panes["wt2"].to_numpy(),
+    wt2_4h_series = vmc4h.panes["wt2"]
+    prep.wt2_4h = _numeric_per_bar(idx, df4h.index, wt2_4h_series.to_numpy(),
                                    pd.Timedelta("4h"))
+    prep.wt2_4h_rising = _numeric_per_bar(
+        idx, df4h.index, (wt2_4h_series.diff() > 0).astype(float).to_numpy(),
+        pd.Timedelta("4h"))
+    prep.mfi_4h = _numeric_per_bar(idx, df4h.index,
+                                   vmc4h.panes["mfi"].to_numpy(),
+                                   pd.Timedelta("4h"))
+    alt4h_hist = rs.classify_history(df4h["close"],
+                                     config.classifier_params("4h"),
+                                     drop_forming=False)
+    prep.alt4h = _state_per_bar(idx, alt4h_hist.index,
+                                alt4h_hist["direction"].to_numpy(),
+                                pd.Timedelta("4h"))
+    prep.ema200 = df1h["close"].ewm(span=200, adjust=False).mean().to_numpy()
 
     # RS vs BTC states (previous closed bucket only)
     btc_1d = resample_ohlcv(btc1h, "1d")
@@ -297,6 +314,86 @@ def gen_signals(prep: Prep, p: dict) -> list:
                            tag=ev.tf, limit=None if limit is None else float(limit),
                            ttl=int(ttl)))
     return sigs
+
+
+def gen_pullback_signals(prep: Prep, p: dict) -> list:
+    """Trend-continuation entries: 1h WT cross-up from a pullback zone, gated by
+    4h context and optional regime filters. All filters read state knowable at
+    the cross bar's close; entry is next open (engine)."""
+    from .engine import Signal
+
+    closes = prep.df["close"].to_numpy()
+    lows = prep.df["low"].to_numpy()
+    n = len(closes)
+    lo, hi = p.get("cross_zone", (-60.0, 0.0))
+    warmup = 250  # let EMA200/ATR/4h states settle
+
+    # Precomputed context arrays for the optional structure gates
+    thrust_max = dip_min = ema_prev = None
+    if p.get("recent_htf_thrust"):
+        bars, _level = p["recent_htf_thrust"]
+        thrust_max = (pd.Series(prep.wt2_4h).rolling(bars, min_periods=1)
+                      .max().to_numpy())
+    if p.get("dip_depth"):
+        bars, _level = p["dip_depth"]
+        dip_min = (pd.Series(prep.wt2).rolling(bars, min_periods=1)
+                   .min().to_numpy())
+    if p.get("ema200_rising"):
+        ema_prev = np.roll(prep.ema200, p["ema200_rising"])
+
+    sigs: list[Signal] = []
+    for i in np.where(prep.wt_up)[0]:
+        if i < warmup or i >= n - 1:
+            continue
+        if not (lo <= prep.wt2[i] <= hi):
+            continue
+        if thrust_max is not None and not (
+                thrust_max[i] >= p["recent_htf_thrust"][1]):
+            continue
+        if dip_min is not None and not (dip_min[i] <= p["dip_depth"][1]):
+            continue
+        if ema_prev is not None and not (prep.ema200[i] > ema_prev[i]):
+            continue
+        # ---- 4h context (the multi-timeframe part) ----
+        if p.get("htf_wt_min") is not None and not (
+                prep.wt2_4h[i] >= p["htf_wt_min"]):
+            continue
+        if p.get("htf_wt_rising") and prep.wt2_4h_rising[i] != 1.0:
+            continue
+        if p.get("htf_mfi_pos") and not (prep.mfi_4h[i] > 0):
+            continue
+        if p.get("alt4h_bull") and prep.alt4h[i] != rs.BULL:
+            continue
+        if p.get("ema200_up") and not (closes[i] > prep.ema200[i]):
+            continue
+        # ---- regime gates ----
+        if p.get("btc_regime") == "not_bear_1d" and prep.btc1d[i] == rs.BEAR:
+            continue
+        if p.get("alt_regime") == "not_bear_1d" and prep.alt1d[i] == rs.BEAR:
+            continue
+        # ---- stop ----
+        atr = prep.atr[i]
+        if np.isnan(atr) or atr <= 0:
+            continue
+        mode = p.get("sl", ("swing", 10, 0.5))
+        if mode[0] == "swing":
+            _, nback, buf = mode
+            stop = float(lows[max(0, i - nback + 1): i + 1].min()) - buf * atr
+        else:  # ("atr", mult)
+            stop = closes[i] - mode[1] * atr
+        risk_pct = (closes[i] - stop) / closes[i]
+        # too-tight stops make costs dominate and noise fatal; too-wide is junk
+        if risk_pct < p.get("min_risk_pct", 0.005) \
+                or risk_pct > p.get("max_risk_pct", 0.08):
+            continue
+        sigs.append(Signal(ts=prep.df.index[i], stop=float(stop), tag="pullback"))
+    return sigs
+
+
+def trail_series(prep: Prep, k: float) -> pd.Series:
+    """Chandelier-style trail: close − k×ATR (engine only ever raises the stop)."""
+    return pd.Series(prep.df["close"].to_numpy() - k * prep.atr,
+                     index=prep.df.index)
 
 
 def gen_btc_dip_signals(btc_prep: Prep, alt_prep: Prep, p: dict) -> list:

@@ -136,6 +136,23 @@ def test_limit_fill_bar_can_still_stop_out():
     assert trades[0].exit_ts == df.index[1]
 
 
+def test_trailing_stop_ratchets_up_and_exits():
+    df = _df([
+        (100, 101, 99, 100),        # signal
+        (100, 106, 99.9, 105),      # entry 100; trail raises stop to 103
+        (105, 107, 104, 106),       # trail -> 104
+        (106, 106.5, 103.5, 104),   # low 103.5 <= stop 104 -> stopped at 104
+    ])
+    trail = pd.Series([float("nan"), 103.0, 104.0, 101.0], index=df.index)
+    sig = Signal(ts=df.index[0], stop=95.0)
+    trades = simulate("X", df, [sig], rr_target=None, trail_stop=trail,
+                      fee_pct=0, slip_pct=0)
+    t = trades[0]
+    assert t.reason == "stop"
+    assert t.exit == 104.0          # ratcheted stop, never lowered by the 101
+    assert t.r > 0                  # trailed into profit
+
+
 def test_metrics_drawdown():
     from backend.research.engine import Trade
     ts = pd.Timestamp("2025-01-01", tz="UTC")

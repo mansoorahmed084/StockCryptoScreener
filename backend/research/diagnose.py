@@ -23,7 +23,11 @@ def forward_stats(preps: dict, params: dict, cutoff: pd.Timestamp) -> dict:
     for coin, prep in preps.items():
         closes = prep.df["close"].to_numpy()
         n = len(closes)
-        for sig in strategy.gen_signals(prep, params):
+        if params.get("signal_source") == "pullback":
+            sig_list = strategy.gen_pullback_signals(prep, params)
+        else:
+            sig_list = strategy.gen_signals(prep, params)
+        for sig in sig_list:
             i = prep.df.index.get_loc(sig.ts)
             entry_i = i + 1
             if entry_i >= n:
@@ -48,22 +52,25 @@ def forward_stats(preps: dict, params: dict, cutoff: pd.Timestamp) -> dict:
     return out
 
 
+_PB = {"signal_source": "pullback", "sl": ("swing", 10, 0.5)}
+
 VARIANTS = {
-    "all_1h_divs":        {"div_tf": "1h", "sl": ("pivot", 0.5)},
-    "oversold_-40":       {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "oversold_only": True, "oversold_level": -40},
-    "oversold_-53":       {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "oversold_only": True, "oversold_level": -53},
-    "div_4h":             {"div_tf": "4h", "sl": ("pivot", 0.5)},
-    "multi_tf":           {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "multi_tf_div": True},
-    "multi_tf_oversold":  {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "multi_tf_div": True,
-                           "oversold_only": True, "oversold_level": -40},
-    "multi_tf_btc_ok":    {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "multi_tf_div": True, "btc_regime": "not_bear_1d"},
-    "rs4h_bull_div1h":    {"div_tf": "1h", "sl": ("pivot", 0.5),
-                           "rs_filter": "4h"},
+    "pb_raw":            {**_PB},
+    "pb_thrust":         {**_PB, "recent_htf_thrust": (120, 53)},
+    "pb_dip30":          {**_PB, "dip_depth": (12, -30)},
+    "pb_dip40":          {**_PB, "dip_depth": (12, -40)},
+    "pb_ema_rising":     {**_PB, "ema200_up": True, "ema200_rising": 24},
+    "pb_thrust_dip":     {**_PB, "recent_htf_thrust": (120, 53),
+                          "dip_depth": (12, -30)},
+    "pb_thrust_ema":     {**_PB, "recent_htf_thrust": (120, 53),
+                          "ema200_up": True, "ema200_rising": 24},
+    "pb_all3":           {**_PB, "recent_htf_thrust": (120, 53),
+                          "dip_depth": (12, -30),
+                          "ema200_up": True, "ema200_rising": 24},
+    "pb_all3_wt4h":      {**_PB, "recent_htf_thrust": (120, 53),
+                          "dip_depth": (12, -30),
+                          "ema200_up": True, "ema200_rising": 24,
+                          "htf_wt_min": -20},
 }
 
 

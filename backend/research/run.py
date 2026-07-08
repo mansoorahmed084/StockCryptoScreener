@@ -51,18 +51,25 @@ def run_variant(preps: dict, params: dict, cutoff: pd.Timestamp,
     """Returns (is_metrics, oos_metrics, all_trades)."""
     all_trades = []
     for coin, prep in preps.items():
-        if params.get("signal_source") == "btc_dip":
+        source = params.get("signal_source")
+        if source == "btc_dip":
             sigs = strategy.gen_btc_dip_signals(btc_prep, prep, params)
+        elif source == "pullback":
+            sigs = strategy.gen_pullback_signals(prep, params)
         else:
             sigs = strategy.gen_signals(prep, params)
         exit_sig = None
         if params.get("exit") == "wt_bear_cross":
             exit_sig = strategy.wt_exit_series(
                 prep, level=params.get("exit_level"))
+        trail = None
+        if params.get("trail") is not None:
+            trail = strategy.trail_series(prep, params["trail"])
         trades = engine.simulate(
             coin, prep.df, sigs,
             rr_target=params.get("rr", 1.5),
             exit_signal=exit_sig,
+            trail_stop=trail,
             max_hold=params.get("max_hold"))
         all_trades += trades
     is_t = [t for t in all_trades if t.entry_ts < cutoff]
@@ -84,29 +91,27 @@ def table(rows: list[tuple[str, engine.Metrics, engine.Metrics]]) -> str:
 # The grid under test — edited between iterations; results go to
 # STRATEGY_RESEARCH.md.
 # ---------------------------------------------------------------------------
-_OS1H = {"div_tf": "1h", "oversold_only": True, "oversold_level": -53}
-_DIP = {"signal_source": "btc_dip", "oversold_only": True,
-        "oversold_level": -53, "sl": ("atr", 2.0)}
+# Short-term research iteration C (SHORT_TERM_STRATEGY.md): the daily winner's
+# recipe one TF down — 4h capitulation divergence + regime gate, TP 2R.
+_C4 = {"div_tf": "4h", "oversold_only": True, "rr": 2.0,
+       "sl": ("pivot", 1.0), "max_hold": 240}
 
 VARIANTS: dict[str, dict] = {
-    # A: simultaneous multi-TF stretch — 1h div while last closed 4h WT2 oversold
-    "A_htf45_tp0.5":     {**_OS1H, "htf_oversold": -45,
-                          "rr": 0.5, "sl": ("atr", 2.5)},
-    "A_htf45_tp1.0":     {**_OS1H, "htf_oversold": -45,
-                          "rr": 1.0, "sl": ("atr", 2.0)},
-    "A_htf53_tp0.5":     {**_OS1H, "htf_oversold": -53,
-                          "rr": 0.5, "sl": ("atr", 2.5)},
-    "A_htf45_lim":       {**_OS1H, "htf_oversold": -45,
-                          "rr": 0.5, "sl": ("atr", 2.5),
-                          "entry": ("limit_atr", 0.5, 6)},
-    # B: BTC deep-oversold dip -> buy RS-strong alts (beta snap)
-    "B_dip_rs4h_tp0.5":  {**_DIP, "rs_filter": "4h", "rr": 0.5},
-    "B_dip_rs4h_tp1.0":  {**_DIP, "rs_filter": "4h", "rr": 1.0},
-    "B_dip_rs1d_tp1.0":  {**_DIP, "rs_filter": "1d", "rr": 1.0},
-    "B_dip_rs4h_hold":   {**_DIP, "rs_filter": "4h", "rr": None,
-                          "exit": "wt_bear_cross", "max_hold": 48},
-    "B_dip_rs4h_lim":    {**_DIP, "rs_filter": "4h", "rr": 1.0,
-                          "entry": ("limit_atr", 0.5, 6)},
+    "C1_os40":           {**_C4, "oversold_level": -40},
+    "C2_os45":           {**_C4, "oversold_level": -45},
+    "C3_os53":           {**_C4, "oversold_level": -53},
+    "C4_os45_btc":       {**_C4, "oversold_level": -45,
+                          "btc_regime": "not_bear_1d"},
+    "C5_os53_btc":       {**_C4, "oversold_level": -53,
+                          "btc_regime": "not_bear_1d"},
+    "C6_os45_btc_alt":   {**_C4, "oversold_level": -45,
+                          "btc_regime": "not_bear_1d",
+                          "alt_regime": "not_bear_1d"},
+    "C7_os45_btc_rr2.5": {**_C4, "oversold_level": -45, "rr": 2.5,
+                          "btc_regime": "not_bear_1d"},
+    "C8_os45_btc_lim":   {**_C4, "oversold_level": -45,
+                          "btc_regime": "not_bear_1d",
+                          "entry": ("limit_atr", 0.5, 12)},
 }
 
 
