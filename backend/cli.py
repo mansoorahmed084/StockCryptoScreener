@@ -91,6 +91,45 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Multi-TF bullish confluence + VuManChu divergence report."""
+    from backend.service import ScreenerService
+
+    config = load_config(args.config)
+    svc = ScreenerService(config)
+    coins = ([c.strip().upper() for c in args.coins.split(",")]
+             if args.coins else None)
+    timeframes = ([t.strip() for t in args.timeframes.split(",")]
+                  if args.timeframes else None)
+    df = svc.report(coins, args.base, timeframes,
+                    div_lookback=args.div_lookback,
+                    require_all_bull=args.all_bull)
+    if df.empty:
+        print("no coins matched")
+        return 0
+
+    tfs = timeframes or ["15m", "4h", "1d", "1w"]
+    out = pd.DataFrame(index=df["coin"])
+    for tf in tfs:
+        cells = []
+        for _, r in df.iterrows():
+            cell = _fmt_cell(r[f"dir_{tf}"],
+                             r[f"strength_{tf}"] if r[f"strength_{tf}"] is not None
+                             else float("nan"))
+            div = r[f"div_{tf}"]
+            if div:
+                cell += f" [div:{div}]"
+            cells.append(cell)
+        out[tf] = cells
+    out["score"] = df["score"].values
+    out["all_bull"] = ["YES" if x else "" for x in df["all_bull"]]
+    out["multi_div"] = ["YES" if x else "" for x in df["multi_tf_bull_div"]]
+    print(f"\n=== bullish confluence vs {args.base.upper()} "
+          f"(divs within last {args.div_lookback} candles) ===")
+    print(out.to_string())
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     from backend import scheduler
 
@@ -141,6 +180,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--cooldown", type=float, default=3600.0,
                    help="per-signal cooldown seconds")
     s.set_defaults(func=cmd_scan)
+
+    r = sub.add_parser("report",
+                       help="multi-TF bullish confluence + VMC divergence report")
+    r.add_argument("--coins", default=None, help="comma list, default = universe")
+    r.add_argument("--base", default="USDT")
+    r.add_argument("--timeframes", default=None,
+                   help="comma list, default = 15m,4h,1d,1w")
+    r.add_argument("--div-lookback", type=int, default=10,
+                   help="divergence counts if within last N closed candles")
+    r.add_argument("--all-bull", action="store_true",
+                   help="only coins bullish on every selected timeframe")
+    r.set_defaults(func=cmd_report)
 
     w = sub.add_parser("watch", help="run periodic alert scans (always-on)")
     w.add_argument("--interval", type=int, default=5, help="minutes between scans")

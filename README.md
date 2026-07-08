@@ -69,6 +69,9 @@ thresholds. Secrets (Telegram, future order keys) live in `.env` — see
 ```bash
 python -m backend.cli markets                 # sanity-check the data source
 python -m backend.cli matrix --base BTC,USDT  # print the RS matrix
+python -m backend.cli report --base USDT --timeframes 15m,4h,1d,1w
+                                              # multi-TF bullish confluence
+                                              # + VuManChu divergence report
 python -m backend.cli scan                    # evaluate presets, fire alerts
 python -m backend.cli watch --interval 5      # always-on alert scanner
 python -m backend.cli backtest --coin SOL --base BTC --timeframe 1d

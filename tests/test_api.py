@@ -37,6 +37,22 @@ class FakeService:
     def ratio_frame(self, coin, base, timeframe):
         return make_ohlcv(trend(200, 100, 0.01, noise=0.002, seed=1), timeframe="1d")
 
+    def report(self, coins=None, base="USDT", timeframes=None, *,
+               div_lookback=10, liquidity_gate=True, require_all_bull=False):
+        rows = [{"coin": "SOL", "dir_4h": "bull", "strength_4h": 1.5,
+                 "div_4h": "bull", "dir_1d": "bull", "strength_1d": 1.2,
+                 "div_1d": "bull", "bull_tf_count": 2, "known_tf_count": 2,
+                 "all_bull": True, "bull_div_tfs": "4h,1d", "bear_div_tfs": "",
+                 "multi_tf_bull_div": True, "score": 6}]
+        if not require_all_bull:
+            rows.append({"coin": "DOGE", "dir_4h": "bear", "strength_4h": -1.0,
+                         "div_4h": "", "dir_1d": "bear", "strength_1d": -1.2,
+                         "div_1d": "", "bull_tf_count": 0, "known_tf_count": 2,
+                         "all_bull": False, "bull_div_tfs": "",
+                         "bear_div_tfs": "", "multi_tf_bull_div": False,
+                         "score": 0})
+        return pd.DataFrame(rows)
+
 
 client = TestClient(api.app)
 api.app.dependency_overrides[api.get_service] = lambda: FakeService()
@@ -83,6 +99,20 @@ def test_backtest_endpoint():
     body = client.get("/backtest",
                       params={"coin": "SOL", "base": "BTC", "timeframe": "1d"}).json()
     assert body["n"] > 0 and body["mean_fwd"] > 0
+
+
+def test_report_endpoint():
+    body = client.get("/report", params={"base": "USDT"}).json()
+    assert body["base"] == "USDT"
+    coins = [r["coin"] for r in body["rows"]]
+    assert coins == ["SOL", "DOGE"]
+    sol = body["rows"][0]
+    assert sol["all_bull"] is True and sol["multi_tf_bull_div"] is True
+
+
+def test_report_endpoint_all_bull_filter():
+    body = client.get("/report", params={"all_bull": "true"}).json()
+    assert [r["coin"] for r in body["rows"]] == ["SOL"]
 
 
 def test_chart_endpoint():

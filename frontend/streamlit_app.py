@@ -40,6 +40,13 @@ def build(coins, bases, timeframes, liquidity_gate):
     return df
 
 
+@st.cache_data(ttl=60, show_spinner="Building confluence report…")
+def build_report(coins, base, timeframes, div_lookback, all_bull):
+    svc = get_service()
+    return svc.report(list(coins), base, list(timeframes),
+                      div_lookback=div_lookback, require_all_bull=all_bull)
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def futures_map():
     try:
@@ -180,13 +187,68 @@ def main():
     c3.metric("Breadth 1d (% bull vs USDT)",
               f"{b1d:.0f}%" if b1d == b1d else "—")
 
-    tab_screen, tab_filter, tab_sector, tab_chart, tab_bt, tab_journal = st.tabs(
-        ["Screener", "Filters", "Sectors", "Chart", "Backtest", "Journal"])
+    (tab_screen, tab_report, tab_filter, tab_sector, tab_chart, tab_bt,
+     tab_journal) = st.tabs(
+        ["Screener", "Report", "Filters", "Sectors", "Chart", "Backtest",
+         "Journal"])
 
     with tab_screen:
         for base in bases:
             st.subheader(f"vs {base}")
             render_heatmap(df, base, timeframes)
+
+    with tab_report:
+        st.caption("Coins bullish on ALL selected timeframes at once, with recent "
+                   "VuManChu divergences per timeframe. 💎 = fully aligned, "
+                   "🔥 = bull divergence on 2+ timeframes.")
+        rc1, rc2, rc3, rc4 = st.columns([1, 2, 1, 1])
+        rbase = rc1.selectbox("Base", bases, key="rep_base",
+                              index=bases.index("USDT") if "USDT" in bases else 0)
+        default_tfs = [t for t in ("15m", "4h", "1d", "1w") if t in timeframes] \
+            or timeframes
+        rtfs = rc2.multiselect("Timeframes (all must be bull)", timeframes,
+                               default=default_tfs, key="rep_tfs")
+        lookback = rc3.slider("Div lookback (candles)", 3, 40, 10, key="rep_lb")
+        only_aligned = rc4.checkbox("Only fully aligned", value=False,
+                                    key="rep_all")
+        if not rtfs:
+            st.warning("Pick at least one timeframe.")
+        else:
+            rdf = build_report(tuple(coins), rbase, tuple(rtfs), lookback,
+                               only_aligned)
+            if rdf.empty:
+                st.info("No coins matched.")
+            else:
+                disp = pd.DataFrame(index=rdf["coin"])
+                badges = []
+                for _, r in rdf.iterrows():
+                    b = ("💎" if r["all_bull"] else "") + \
+                        ("🔥" if r["multi_tf_bull_div"] else "")
+                    badges.append(b)
+                disp[""] = badges
+                for tf in rtfs:
+                    cells = []
+                    for _, r in rdf.iterrows():
+                        s = r[f"strength_{tf}"]
+                        cells.append(_cell_text(
+                            r[f"dir_{tf}"],
+                            float(s) if s is not None else float("nan")))
+                    disp[tf] = cells
+                    divs = []
+                    for _, r in rdf.iterrows():
+                        d = r[f"div_{tf}"]
+                        divs.append({"bull": "🟢 div", "bear": "🔴 div",
+                                     "bull+bear": "🟢🔴 div"}.get(d, ""))
+                    disp[f"{tf} div"] = divs
+                disp["score"] = rdf["score"].values
+                st.dataframe(disp, use_container_width=True)
+                aligned = rdf[rdf["all_bull"]]["coin"].tolist()
+                multi = rdf[rdf["multi_tf_bull_div"]]["coin"].tolist()
+                m1, m2 = st.columns(2)
+                m1.metric("Fully aligned bull", len(aligned),
+                          ", ".join(aligned) if aligned else None)
+                m2.metric("Multi-TF bull divergence", len(multi),
+                          ", ".join(multi) if multi else None)
 
     with tab_filter:
         st.caption("Combine conditions with AND to scan. Presets are saved filters.")

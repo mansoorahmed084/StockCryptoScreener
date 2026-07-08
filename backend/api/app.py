@@ -158,6 +158,20 @@ def chart(coin: str, base: str, timeframe: str, vumanchu: bool = True,
     return payload
 
 
+@app.get("/report")
+def report(base: str = "USDT", coins: str | None = None,
+           timeframes: str | None = None, div_lookback: int = 10,
+           all_bull: bool = False,
+           service: ScreenerService = Depends(get_service)) -> dict:
+    """Multi-timeframe bullish confluence + VuManChu divergence report."""
+    df = service.report(
+        _split(coins), base,
+        [t.strip() for t in timeframes.split(",")] if timeframes else None,
+        div_lookback=div_lookback, require_all_bull=all_bull)
+    return {"base": base.upper(), "div_lookback": div_lookback,
+            "rows": _clean(df.to_dict("records")) if not df.empty else []}
+
+
 @app.get("/backtest")
 def backtest(coin: str, base: str = "BTC", timeframe: str = "1d",
              direction: str = "bull", horizon: int = 10,

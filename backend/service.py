@@ -16,6 +16,7 @@ from backend.config import Config, load_config
 from backend.data.adapters import build_adapter
 from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
+from backend.screener import confluence as confluence_mod
 from backend.screener import matrix as matrix_mod
 from backend.screener import regime as regime_mod
 from backend.screener import rs as rs_mod
@@ -71,3 +72,18 @@ class ScreenerService:
     def ratio_frame(self, coin: str, base: str, timeframe: str) -> pd.DataFrame:
         """OHLCV of a ratio for charting/backtests."""
         return self.builder().ratio(coin, base, timeframe).frame
+
+    def report(self, coins: list[str] | None = None, base: str = "USDT",
+               timeframes: list[str] | None = None, *, div_lookback: int = 10,
+               liquidity_gate: bool = True,
+               require_all_bull: bool = False) -> pd.DataFrame:
+        """Multi-timeframe bullish-confluence report (RS alignment + VMC divs)."""
+        coins = [c.upper() for c in (coins or self.universe())]
+        params = confluence_mod.ConfluenceParams(
+            base=base.upper(),
+            timeframes=tuple(timeframes or ("15m", "4h", "1d", "1w")),
+            div_lookback=div_lookback,
+            liquidity_gate=liquidity_gate,
+            require_all_bull=require_all_bull,
+        )
+        return confluence_mod.build_report(self.builder(), self.config, coins, params)
