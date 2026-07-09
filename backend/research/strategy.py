@@ -191,6 +191,20 @@ def prepare(coin: str, df1h: pd.DataFrame, btc1h: pd.DataFrame,
     return prep
 
 
+def invert_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """Price inversion: a SHORT on X is a LONG on 1/X (high/low swap roles).
+
+    Lets the entire long-only pipeline (divergences, oversold, gates, engine)
+    price the short side unchanged. R-multiples are log-symmetric to true
+    shorts up to a small convexity term; funding is not modelled.
+    """
+    return pd.DataFrame({
+        "open": 1.0 / df["open"], "high": 1.0 / df["low"],
+        "low": 1.0 / df["high"], "close": 1.0 / df["close"],
+        "volume": df["volume"],
+    }, index=df.index)
+
+
 def prepare_daily(coin: str, df1d: pd.DataFrame, btc1d: pd.DataFrame,
                   config: Config, *, divw_active_weeks: int = 4) -> Prep:
     """Daily-native prep. Field mapping (Prep was named for the 1h path):

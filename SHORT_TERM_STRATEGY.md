@@ -111,3 +111,93 @@ separate edge from noise — gated variants flip sign between IS and OOS on
 n≈10–40. **Decision: extend the data, not the parameters.** Fetching ~3 years
 of 1h × the full 25-coin universe (pagination reaches back to ≥ early 2024);
 the SAME grid re-runs unchanged on the bigger sample — no new tuning.
+
+### Iteration C′ — 3 years × 25 coins: the LONG side is conclusively dead
+
+Same grid, 6× the trades: every variant 33–40% win IS (breakeven 39%), all
+avgR ≤ +0.02, OOS uniformly negative (23–34% win). The 18-month "positive
+pockets" were noise. Long capitulation @ 2R doesn't work at 4h. That kills the
+third long-side family in this track.
+
+### Iteration D — the SHORT side: first real edge of this track
+
+Rationale: the sample is half bear, CoinDCX lists perps, and the mirror
+mechanism (fading 4h **blow-off tops** — bear divergence with WT2 ≥ +45/+53 at
+the pivot, gated by "BTC not bull") had never been priced. Implemented by
+inverting prices (a short on X = a long on 1/X), so the entire audited long
+pipeline runs unchanged.
+
+| variant | IS n | IS win% | IS avgR | IS PF | OOS n | OOS win% | OOS avgR | OOS PF |
+|---|---|---|---|---|---|---|---|---|
+| ungated os−40/−45/−53 | 562–834 | 37–38 | −0.04…−0.09 | 0.88–0.94 | 159–229 | 40–44 | −0.10…0.00 | 0.87–1.00 |
+| os−45 + BTC-not-bull | 170 | 43.5 | +0.08 | 1.12 | 80 | 46.2 | +0.13 | 1.21 |
+| **os−53 + BTC-not-bull** | 113 | 45.1 | +0.12 | 1.18 | 52 | 46.2 | +0.15 | 1.22 |
+
+First configuration in this document positive on both sides of the split with
+real frequency. Drawdown (18–26% @1% risk) still too high → one refinement
+round, **selected on IS only**:
+
+| refinement | IS n | IS win% | IS avgR | IS PF | IS maxDD% | OOS n | OOS win% | OOS avgR | OOS maxDD% |
+|---|---|---|---|---|---|---|---|---|---|
+| **+ alt-not-bull gate (R1)** | 80 | **50.0** | **+0.29** | **1.51** | **10.9** | 29 | 55.2 | +0.41 | 9.8 |
+| rr 2.5 / buf 0.5 / buf 1.5 / hold 120 | 112–113 | 40–46 | −0.01…+0.15 | 0.98–1.24 | 20–25 | 50–52 | −0.10…+0.43 | 12–24 |
+
+R1 (don't fade a blow-off while the alt is still in a confirmed bull state)
+wins on IS decisively and the single OOS read confirms: **55.2% win, +0.41R,
+PF 1.71, max DD 9.8%.**
+
+### Iteration E — robustness
+
+Full-period nudges around R1 (each an independent backtest): os −45/−60,
+buffer 0.75/1.25, rr 1.75/2.25, hold 180 — **all profitable** (win 48–56%,
+PF 1.28–2.03); base = 109 trades, 51.4% win, +0.32R, PF 1.56, DD 10.9%.
+Per-coin: top coin ≈ 19% of total R (no single-coin dependency), though a
+loser tail exists (MANA/NEAR/BNB — kept; excluding them post-hoc would be
+curve-fitting). Per-year: **2023 +6.5R, 2024 +6.8R, 2025 +24.4R, 2026 −2.9R** —
+the current year is the weak spot (38% win over 16 trades; fading tops into a
+market that keeps knifing lower without the alt re-entering "bull" state).
+
+---
+
+## FINAL STRATEGY — "4h Blow-off Fade" (SHORT)
+
+⚠️ Requires **futures** (CoinDCX perps) — this is a short strategy.
+
+**Universe:** ~25 liquid USDT perps. **Signal TF:** 4h. **Execution:** 1h.
+
+**ENTRY (short) — all conditions at a 1h close:**
+1. **VMC bearish divergence on the 4h chart**: price higher high, WT2 lower
+   high, both oscillator pivots **above zero**, pivot confirmed by 3
+   subsequent 4h candles.
+2. **Blow-off extension:** WT2 ≥ **+53** at the divergence pivot.
+3. **BTC gate:** BTC/USDT 1d direction (repo classifier) is **not bull**.
+4. **Alt gate:** the alt's own 1d direction is **not bull** (never fade a
+   confirmed uptrend).
+5. Enter **short at the next 1h open** after all conditions are knowable.
+
+**STOP-LOSS:** divergence pivot high + 1.0×ATR(14, 1h). Skip if risk > ~8%.
+**TARGET:** fixed **2R** (R:R = 1:2 by construction). Time-stop 240×1h (10 days).
+**SIZING:** 0.5–1% equity risk per trade → max DD ≈ 5.5–11% backtested.
+
+**Backtested** (Jul 2023 → Jul 2026, 25 coins, 0.3% round-trip costs,
+conservative fills, no lookahead): **n=109, 51.4% win at 2R, +0.32R/trade,
+PF 1.56, max DD 10.9% @1% risk**; IS 50.0%/+0.29R · OOS 55.2%/+0.41R;
+~37 trades/year (≈3/month). Robust to all parameter nudges.
+
+**Caveats (read before trading):**
+- **2026 YTD is −2.9R** — the strategy's weak regime is a relentless bear
+  where alts never flip back to "bull" (the gate can't distinguish "top of a
+  bounce" from "middle of a knife"). Position sizing is the defense.
+- Perp **funding is not modelled** (typically ~0.01%/8h; avg hold ≈ 55h →
+  ≈ 0.03–0.04R headwind on average — the edge survives it, but it's real).
+- Shorts were priced via exact price inversion (log-symmetric to true shorts
+  up to a small convexity term).
+- n=109 → 95% CI on the 51.4% win rate ≈ ±9.4pts.
+- Complements the long-side [Daily Capitulation Divergence](STRATEGY_RESEARCH.md):
+  one profits from capitulation in non-bear regimes, the other from euphoria
+  in non-bull regimes — they are active in largely disjoint conditions.
+
+**What was tried and killed in this track** (see iterations above): 1h WT
+cross-up continuation in every gated form (anti-edge — 1h alts mean-revert),
+structured pullback entries (thrust/dip/EMA gates made drift *worse*), long
+4h capitulation @ 2R (breakeven at scale, noise pockets exposed by 6× data).

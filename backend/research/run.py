@@ -91,27 +91,27 @@ def table(rows: list[tuple[str, engine.Metrics, engine.Metrics]]) -> str:
 # The grid under test — edited between iterations; results go to
 # STRATEGY_RESEARCH.md.
 # ---------------------------------------------------------------------------
-# Short-term research iteration C (SHORT_TERM_STRATEGY.md): the daily winner's
-# recipe one TF down — 4h capitulation divergence + regime gate, TP 2R.
-_C4 = {"div_tf": "4h", "oversold_only": True, "rr": 2.0,
-       "sl": ("pivot", 1.0), "max_hold": 240}
+# Short-term research iteration D (SHORT_TERM_STRATEGY.md): the SHORT side.
+# Inverted prices, so "oversold -45 bull div" = blow-off top bear div with
+# WT2 >= +45 at pivot; "btc not bear" = BTC not bull. TP 2R unchanged.
+_S4 = {"div_tf": "4h", "oversold_only": True, "rr": 2.0,
+       "sl": ("pivot", 1.0), "max_hold": 240, "invert": True}
 
 VARIANTS: dict[str, dict] = {
-    "C1_os40":           {**_C4, "oversold_level": -40},
-    "C2_os45":           {**_C4, "oversold_level": -45},
-    "C3_os53":           {**_C4, "oversold_level": -53},
-    "C4_os45_btc":       {**_C4, "oversold_level": -45,
+    # refinement round on the S5 winner (selection on IS only)
+    "R0_S5_base":        {**_S4, "oversold_level": -53,
                           "btc_regime": "not_bear_1d"},
-    "C5_os53_btc":       {**_C4, "oversold_level": -53,
-                          "btc_regime": "not_bear_1d"},
-    "C6_os45_btc_alt":   {**_C4, "oversold_level": -45,
+    "R1_bothgates":      {**_S4, "oversold_level": -53,
                           "btc_regime": "not_bear_1d",
                           "alt_regime": "not_bear_1d"},
-    "C7_os45_btc_rr2.5": {**_C4, "oversold_level": -45, "rr": 2.5,
+    "R2_rr2.5":          {**_S4, "oversold_level": -53, "rr": 2.5,
                           "btc_regime": "not_bear_1d"},
-    "C8_os45_btc_lim":   {**_C4, "oversold_level": -45,
-                          "btc_regime": "not_bear_1d",
-                          "entry": ("limit_atr", 0.5, 12)},
+    "R3_buf0.5":         {**_S4, "oversold_level": -53, "sl": ("pivot", 0.5),
+                          "btc_regime": "not_bear_1d"},
+    "R4_buf1.5":         {**_S4, "oversold_level": -53, "sl": ("pivot", 1.5),
+                          "btc_regime": "not_bear_1d"},
+    "R5_hold120":        {**_S4, "oversold_level": -53, "max_hold": 120,
+                          "btc_regime": "not_bear_1d"},
 }
 
 
@@ -158,11 +158,16 @@ def main(argv=None) -> int:
         btc_prep = None
         variants = DAILY_VARIANTS
     else:
-        dataset = data_mod.load_dataset(["BTC"] + COINS, args.days,
+        coins_1h = DAILY_COINS if args.days > 600 else COINS
+        dataset = data_mod.load_dataset(["BTC"] + coins_1h, args.days,
                                         refresh=args.refresh)
         if "BTC" not in dataset:
             print("no BTC data; aborting")
             return 1
+        if any(p.get("invert") for p in VARIANTS.values()):
+            # short side: run the identical long pipeline on inverted prices
+            dataset = {c: strategy.invert_ohlcv(df) for c, df in dataset.items()}
+            log.info("running on INVERTED prices (short side)")
         preps = build_preps(dataset, config)
         btc_prep = build_btc_prep(dataset, config)
         variants = VARIANTS
