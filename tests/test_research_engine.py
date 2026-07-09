@@ -153,6 +153,52 @@ def test_trailing_stop_ratchets_up_and_exits():
     assert t.r > 0                  # trailed into profit
 
 
+def test_scale_out_then_breakeven_stop_is_small_win():
+    # risk = 2 (entry 100, stop 98); scale half at +1R (102), stop -> entry;
+    # price then returns and stops the rest at breakeven -> +0.5R net (ex costs)
+    df = _df([
+        (100, 101, 99, 100),
+        (100, 100.5, 99.5, 100),   # entry at 100
+        (100, 102.5, 99.9, 102),   # hits 102 -> scale, stop moves to 100
+        (102, 102.5, 99.5, 99.8),  # low <= 100 -> remaining stopped at 100
+    ])
+    sig = Signal(ts=df.index[0], stop=98.0)
+    trades = simulate("X", df, [sig], rr_target=3.0, scale_out=(0.5, 1.0),
+                      fee_pct=0, slip_pct=0)
+    t = trades[0]
+    assert t.reason == "stop+scaled"
+    assert abs(t.r - 0.5) < 1e-9
+    assert t.r > 0                          # counted as a win, legitimately
+
+
+def test_scale_out_then_runner_target():
+    df = _df([
+        (100, 101, 99, 100),
+        (100, 100.5, 99.5, 100),
+        (100, 102.5, 99.9, 102),   # scale at 102 (+1R)
+        (102, 106.5, 101.5, 106),  # runner target 3R = 106
+    ])
+    sig = Signal(ts=df.index[0], stop=98.0)
+    trades = simulate("X", df, [sig], rr_target=3.0, scale_out=(0.5, 1.0),
+                      fee_pct=0, slip_pct=0)
+    t = trades[0]
+    assert t.reason == "target+scaled"
+    assert abs(t.r - 2.0) < 1e-9            # 0.5*1R + 0.5*3R
+
+
+def test_stop_before_scale_is_full_loss():
+    df = _df([
+        (100, 101, 99, 100),
+        (100, 100.5, 99.5, 100),
+        (100, 102.5, 97.5, 98),    # touches both 102 and 98 -> stop first
+    ])
+    sig = Signal(ts=df.index[0], stop=98.0)
+    trades = simulate("X", df, [sig], rr_target=3.0, scale_out=(0.5, 1.0),
+                      fee_pct=0, slip_pct=0)
+    assert trades[0].reason == "stop"
+    assert abs(trades[0].r - (-1.0)) < 1e-9
+
+
 def test_metrics_drawdown():
     from backend.research.engine import Trade
     ts = pd.Timestamp("2025-01-01", tz="UTC")

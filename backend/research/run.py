@@ -70,7 +70,9 @@ def run_variant(preps: dict, params: dict, cutoff: pd.Timestamp,
             rr_target=params.get("rr", 1.5),
             exit_signal=exit_sig,
             trail_stop=trail,
-            max_hold=params.get("max_hold"))
+            max_hold=params.get("max_hold"),
+            scale_out=params.get("scale_out"),
+            be_after_scale=params.get("be_after_scale", True))
         all_trades += trades
     is_t = [t for t in all_trades if t.entry_ts < cutoff]
     oos_t = [t for t in all_trades if t.entry_ts >= cutoff]
@@ -97,21 +99,20 @@ def table(rows: list[tuple[str, engine.Metrics, engine.Metrics]]) -> str:
 _S4 = {"div_tf": "4h", "oversold_only": True, "rr": 2.0,
        "sl": ("pivot", 1.0), "max_hold": 240, "invert": True}
 
+# Iteration F: scale-out exits on the fade (half off at +1R -> stop to BE,
+# runner to rr). Accuracy = % trades net-positive; a scaled BE-stop books ~+0.5R.
+_F = {**_S4, "oversold_level": -53, "btc_regime": "not_bear_1d",
+      "alt_regime": "not_bear_1d"}
+
 VARIANTS: dict[str, dict] = {
-    # refinement round on the S5 winner (selection on IS only)
-    "R0_S5_base":        {**_S4, "oversold_level": -53,
-                          "btc_regime": "not_bear_1d"},
-    "R1_bothgates":      {**_S4, "oversold_level": -53,
-                          "btc_regime": "not_bear_1d",
-                          "alt_regime": "not_bear_1d"},
-    "R2_rr2.5":          {**_S4, "oversold_level": -53, "rr": 2.5,
-                          "btc_regime": "not_bear_1d"},
-    "R3_buf0.5":         {**_S4, "oversold_level": -53, "sl": ("pivot", 0.5),
-                          "btc_regime": "not_bear_1d"},
-    "R4_buf1.5":         {**_S4, "oversold_level": -53, "sl": ("pivot", 1.5),
-                          "btc_regime": "not_bear_1d"},
-    "R5_hold120":        {**_S4, "oversold_level": -53, "max_hold": 120,
-                          "btc_regime": "not_bear_1d"},
+    "F0_fixed2R (ref)":  {**_F},
+    "F1_scale1R_run2.5": {**_F, "rr": 2.5, "scale_out": (0.5, 1.0)},
+    "F2_scale1R_run3":   {**_F, "rr": 3.0, "scale_out": (0.5, 1.0)},
+    "F3_scale.75_run2.5": {**_F, "rr": 2.5, "scale_out": (0.5, 0.75)},
+    "F4_scale.75_run3":  {**_F, "rr": 3.0, "scale_out": (0.5, 0.75)},
+    "F5_scale60_run3":   {**_F, "rr": 3.0, "scale_out": (0.6, 1.0)},
+    "F6_os60_scale_run3": {**_F, "oversold_level": -60, "rr": 3.0,
+                           "scale_out": (0.5, 1.0)},
 }
 
 
@@ -120,14 +121,14 @@ VARIANTS: dict[str, dict] = {
 # Iteration 6: candidates PRE-REGISTERED before seeing the 25-coin data.
 _D = {"div_tf": "1h", "oversold_only": True, "oversold_level": -45,
       "sl": ("pivot", 0.5)}
+_DG = {**_D, "btc_regime": "not_bear_1d"}
 DAILY_VARIANTS: dict[str, dict] = {
-    "D1_os45_tp1.5":     {**_D, "rr": 1.5},
-    "D2_os45_tp1.5_btc": {**_D, "rr": 1.5, "btc_regime": "not_bear_1d"},
-    "D3_os45_wtexit":    {**_D, "rr": None, "exit": "wt_bear_cross",
-                          "exit_level": 0, "max_hold": 40},
-    "D4_os45_tp1":       {**_D, "rr": 1.0},
-    "D5_os53_tp1.5":     {**_D, "oversold_level": -53, "rr": 1.5},
-    "D6_os45_tp1_btc":   {**_D, "rr": 1.0, "btc_regime": "not_bear_1d"},
+    "G0_fixed2R (ref)":   {**_DG, "rr": 2.0},
+    "G1_scale1R_run2":    {**_DG, "rr": 2.0, "scale_out": (0.5, 1.0)},
+    "G2_scale1R_run2.5":  {**_DG, "rr": 2.5, "scale_out": (0.5, 1.0)},
+    "G3_scale1R_run3":    {**_DG, "rr": 3.0, "scale_out": (0.5, 1.0)},
+    "G4_scale60_run2.5":  {**_DG, "rr": 2.5, "scale_out": (0.6, 1.0)},
+    "G5_scale.75_run2.5": {**_DG, "rr": 2.5, "scale_out": (0.5, 0.75)},
 }
 
 

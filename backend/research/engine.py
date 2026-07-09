@@ -68,12 +68,21 @@ def simulate(coin: str, df: pd.DataFrame, signals: list[Signal], *,
              exit_signal: pd.Series | None = None,
              trail_stop: pd.Series | None = None,
              max_hold: int | None = None,
+             scale_out: tuple[float, float] | None = None,
+             be_after_scale: bool = True,
              fee_pct: float = FEE_PCT, slip_pct: float = SLIP_PCT) -> list[Trade]:
     """Run the signal list through the candles; returns closed trades.
 
     exit_signal: boolean series (same index) — True at a candle close requests
     an exit at the NEXT open. trail_stop: price series — the stop is raised to
     this level (never lowered) at each candle close.
+
+    scale_out=(fraction, at_r): book ``fraction`` of the position at
+    entry + at_r×risk; if ``be_after_scale`` the stop then moves to entry.
+    The remainder exits at ``rr_target`` / stop / time as usual, and the trade's
+    R is the blended result. Conservative ordering still applies: on any candle
+    touching both stop and a favorable level, the stop fills first, and no
+    favorable fill can happen on a limit-entry fill bar.
     """
     if df.empty or not signals:
         return []
@@ -118,6 +127,14 @@ def simulate(coin: str, df: pd.DataFrame, signals: list[Signal], *,
         risk = entry - stop
         target = entry + rr_target * risk if rr_target else None
 
+        scale_price = None
+        scale_frac = 0.0
+        if scale_out is not None and rr_target is not None:
+            scale_frac, at_r = scale_out
+            scale_price = entry + at_r * risk
+        scaled = False
+        realized = 0.0  # slip-adjusted pnl (price units × fraction) already booked
+
         exit_price = None
         reason = "eod"
         j = entry_i
@@ -127,7 +144,7 @@ def simulate(coin: str, df: pd.DataFrame, signals: list[Signal], *,
             if pending_exit:
                 exit_price, reason = opens[j] * (1 - slip_pct), "signal_exit"
                 break
-            # conservative intrabar order: stop first, then target
+            # conservative intrabar order: stop first, then favorable fills
             if j != entry_i and opens[j] <= stop:
                 exit_price, reason = opens[j] * (1 - slip_pct), "stop"
                 break
@@ -135,13 +152,20 @@ def simulate(coin: str, df: pd.DataFrame, signals: list[Signal], *,
                 exit_price, reason = stop * (1 - slip_pct), "stop"
                 break
             # On a limit-fill bar the intrabar sequence is unknowable — price
-            # reached the limit by falling; assuming it also bounced to the
-            # target within the same bar would be optimistic. Targets fill from
-            # the next bar onward.
-            if (target is not None and j != limit_fill_bar
-                    and highs[j] >= target):
-                exit_price, reason = target * (1 - slip_pct), "target"
-                break
+            # reached the limit by falling; assuming it also bounced to a
+            # favorable level within the same bar would be optimistic. Scale
+            # and target fills happen from the next bar onward.
+            if j != limit_fill_bar:
+                if (not scaled and scale_price is not None
+                        and highs[j] >= scale_price):
+                    fill = max(opens[j], scale_price)  # favorable gaps fill at open
+                    realized = scale_frac * (fill * (1 - slip_pct) - entry)
+                    scaled = True
+                    if be_after_scale:
+                        stop = max(stop, entry)
+                if target is not None and highs[j] >= target:
+                    exit_price, reason = target * (1 - slip_pct), "target"
+                    break
             if max_hold is not None and j - entry_i + 1 >= max_hold:
                 exit_price, reason = opens[min(j + 1, len(idx) - 1)] * (1 - slip_pct), "time"
                 j = min(j + 1, len(idx) - 1)
@@ -154,9 +178,12 @@ def simulate(coin: str, df: pd.DataFrame, signals: list[Signal], *,
         if exit_price is None:  # ran out of data with position open
             exit_price, reason, j = opens[-1] * (1 - slip_pct), "eod", len(idx) - 1
 
-        gross_pct = exit_price / entry - 1.0
+        rem_frac = 1.0 - (scale_frac if scaled else 0.0)
+        gross_pct = (realized + rem_frac * (exit_price - entry)) / entry
         net_pct = gross_pct - round_trip
         net_r = net_pct * entry / risk
+        if scaled:
+            reason += "+scaled"
         trades.append(Trade(
             coin=coin, entry_ts=idx[entry_i], exit_ts=idx[min(j, len(idx) - 1)],
             entry=entry, exit=exit_price, stop=sig.stop, target=target,

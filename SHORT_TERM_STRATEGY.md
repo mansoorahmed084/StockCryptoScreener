@@ -201,3 +201,59 @@ PF 1.56, max DD 10.9% @1% risk**; IS 50.0%/+0.29R · OOS 55.2%/+0.41R;
 cross-up continuation in every gated form (anti-edge — 1h alts mean-revert),
 structured pullback entries (thrust/dip/EMA gates made drift *worse*), long
 4h capitulation @ 2R (breakeven at scale, noise pockets exposed by 6× data).
+
+---
+
+## Iteration F — the 70% accuracy requirement: frontier math + scale-out exits
+
+User requirement update: ~70% accuracy. The measured frontier across ~100
+configurations says win rate × payoff trade off — at fixed 2R targets the best
+honest result anywhere was 51.4% (fade) and 65–66% (daily). 70% at a fixed 2R
+(= +1.1R/trade expectancy) does not exist in this signal family on this data.
+
+The legitimate structural lever: **scale-out exits** — book half at +1R, move
+the stop to breakeven, let the runner ride to 2.5–3R. A trade is then
+net-positive (≈ +0.5R) whenever price reaches +1R first, which is a much
+higher-probability event than reaching +2R, while the runner preserves the
+≥1:2 reward tail. Engine extended with partial exits (+3 fill-ordering tests;
+conservative rules unchanged: stop-first, no favorable fills on limit bars).
+
+**4h Blow-off Fade with scale-out** (same entries as the final spec above):
+
+| exit structure | IS n | IS win% | IS avgR | IS maxDD% | OOS n | OOS win% | OOS avgR | OOS maxDD% |
+|---|---|---|---|---|---|---|---|---|
+| fixed 2R (reference) | 80 | 50.0 | +0.29 | 10.9 | 29 | 55.2 | +0.41 | 9.8 |
+| **half @1R→BE, runner 3R** | 80 | **60.0** | +0.17 | 10.9 | 29 | **62.1** | +0.20 | 9.0 |
+| half @0.75R→BE variants | 80 | 62.5 | +0.09 | 9.9–10.8 | 29 | 62.1 | −0.04 | 8.6–9.7 |
+
+The fade tops out at **60–62% accuracy** — its probability of reaching +1R
+before the stop is ~62%, and no exit engineering can exceed the entry's own
+1R-first probability. **70% is not achievable on the 4h fade.**
+
+**Daily Capitulation entries with scale-out** (entries from
+[STRATEGY_RESEARCH.md](STRATEGY_RESEARCH.md), exits restructured):
+
+| exit structure | IS n | IS win% | IS avgR | IS PF | IS maxDD% | OOS n | OOS win% | OOS avgR |
+|---|---|---|---|---|---|---|---|---|
+| fixed 2R (reference) | 46 | 65.2 | +0.89 | 3.36 | 8.6 | 10 | 70.0 | +1.05 |
+| **half @1R→BE, runner 3R (G3)** | 46 | **73.9** | +0.64 | 3.27 | **5.8** | 11 | **81.8** | +0.59 |
+| half @0.75R→BE, runner 2.5R | 46 | 76.1 | +0.48 | 2.86 | 5.1 | 11 | 81.8 | +0.41 |
+
+### VERDICT — meeting the 70% requirement honestly
+
+- **70%+ accuracy with a 1:3 runner and ≤6% drawdown exists: the Daily
+  Capitulation Divergence with scale-out exits (G3).** 73.9% IS / 81.8% OOS,
+  +0.64R/trade, PF 3.3. Its price is frequency: ~12 signals/year across 25
+  coins (~1/month).
+- The **4h fade** remains the frequency engine (~3/month) at **60–62%**
+  accuracy with scale-out (or 51% at straight 2R with higher expectancy).
+- Anyone promising 70% accuracy AND fixed 2R targets AND multiple trades a
+  week from public indicators is describing a backtest artifact. The two-
+  strategy portfolio above is what the data actually supports:
+  **run G3 for accuracy, the fade for activity** — they trigger in disjoint
+  regimes (capitulation in non-bear vs euphoria in non-bull).
+
+**G3 exit spec (replaces the fixed target when accuracy is the priority):**
+enter and stop exactly per the daily strategy; sell **half at entry + 1×risk**;
+immediately move the stop on the remainder to **entry (breakeven)**; exit the
+remainder at **entry + 3×risk**, the breakeven stop, or the 40-day time stop.
