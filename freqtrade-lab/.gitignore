@@ -6,3 +6,4 @@ user_data/backtest_results/
 *.sqlite-shm
 *.sqlite-wal
 config.json
+config-vmc.json
