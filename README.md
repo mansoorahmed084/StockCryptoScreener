@@ -77,6 +77,23 @@ python -m backend.cli watch --interval 5      # always-on alert scanner
 python -m backend.cli backtest --coin SOL --base BTC --timeframe 1d
 ```
 
+## Execution & backtesting — `freqtrade-lab/`
+
+The screener answers *which* coin. [freqtrade-lab/](freqtrade-lab/README.md)
+answers *when* to enter and exit, and can place the orders automatically.
+
+It runs [Freqtrade](https://www.freqtrade.io/) against Binance spot data with
+`dry_run` on (paper money). It has its own `.venv` because Freqtrade pins
+dependency versions that clash with the screener's.
+
+```bash
+cd freqtrade-lab
+.venv/Scripts/freqtrade.exe backtesting --config config.json --strategy-list EmaCross RsiDip BbandsBreakout --timeframe 1h --timerange 20260308-20260905
+```
+
+Baseline results for three reference strategies are in
+[freqtrade-lab/RESULTS.md](freqtrade-lab/RESULTS.md).
+
 ## Deployment
 
 ```bash

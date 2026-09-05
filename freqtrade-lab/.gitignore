@@ -1,0 +1,8 @@
+.venv/
+user_data/logs/
+user_data/data/
+user_data/backtest_results/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+config.json
