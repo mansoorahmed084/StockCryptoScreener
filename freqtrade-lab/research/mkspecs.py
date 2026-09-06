@@ -294,9 +294,61 @@ def batch8() -> list[dict]:
     return out
 
 
+def batch9() -> list[dict]:
+    """Drawdown refinement of the batch-8 leader.
+
+    Batch 8 found 4h EMA20 pullback + stochastic cross + daily gate + fixed 3R:
+    49 trades/year at +0.285R, four times the expectancy of the plain pullback.
+    The stochastic cross is doing real work. What it does NOT have is an
+    acceptable drawdown: 40.5R, with a 15-trade losing streak.
+
+    Scale-out did not help this entry (batch 8 rows 9-10: drawdown fell to 21.8R
+    but expectancy collapsed to +0.01R), so drawdown has to come from the entry
+    and the stop instead. Sweeps stop width, swing lookback, how many bars the
+    reset may lag, EMA length, gate choice, and lower fixed targets - a 2R
+    target should convert more trades and shorten losing runs.
+    """
+    out = []
+    exits = [("t2R", {"legs": [[2.0, 1.0]]}),
+             ("t2.5R", {"legs": [[2.5, 1.0]]}),
+             ("fix3R", {"legs": [[3.0, 1.0]]}),
+             ("G1", {"legs": [[1.0, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+             ("G15", {"legs": [[1.5, 0.5], [3.0, 0.5]], "be_after_leg": 0})]
+    for side in ("long", "short"):
+        allow = ["bull", "neutral"] if side == "long" else ["bear", "neutral"]
+        for gname, gate in (("eth1d", {"kind": "eth_1d", "allow": allow}),
+                            ("btc1d", {"kind": "btc_1d", "allow": allow})):
+            for ema_len in (20, 34):
+                for amult in (0.5, 1.0, 1.5, 2.0):
+                    for swing in (5, 10):
+                        for within in (2, 5):
+                            for ename, exit_ in exits:
+                                out.append({
+                                    "label": f"pb9 4h {side} ema{ema_len} "
+                                             f"atr{amult:g} sw{swing} w{within} "
+                                             f"{gname} {ename}",
+                                    "family": "pullback_reset", "tf": "4h",
+                                    "side": side,
+                                    "params": {"ema_len": ema_len,
+                                               "stoch_max": None,
+                                               "stoch_cross": True,
+                                               "rsi_max": None,
+                                               "rsi_turning": False,
+                                               "swing_len": swing,
+                                               "within": within,
+                                               "atr_mult": amult},
+                                    "gate": gate,
+                                    "exit": {**exit_, "time_stop_bars": 120},
+                                })
+    return out
+
+
+
+
+
 BATCHES = {"batch2": batch2, "batch3": batch3, "batch4": batch4,
            "batch5": batch5, "batch6": batch6, "batch7": batch7,
-           "batch8": batch8}
+           "batch8": batch8, "batch9": batch9}
 
 
 def main() -> None:

@@ -402,11 +402,82 @@ together. It is also the most expensive: it cuts the sample from 866 to 50.
 
 ## Batch 8 — the reset filters on a high-frequency trigger (720 runs)
 
-Running. Batch 6 gave frequency without quality; batch 7 gave quality without
-frequency. This bolts the trader's reset conditions onto the EMA pullback to see
-whether the combination keeps enough of both.
+Batch 6 gave frequency without quality. Batch 7 gave quality without frequency.
+This bolts the trader's reset conditions onto the EMA pullback.
 
-A second modelling correction went in here: the trader describes a **sequence**
-(reset, then cross, then turn up), and demanding all of it on a single candle
-gives n=0. Each reset condition may now be satisfied anywhere in the last
-`within` bars, with only "RSI turning up" required on the trigger bar itself.
+A modelling correction went in first: the trader describes a **sequence**
+(reset, then cross, then turn up), and demanding all of it on one candle gives
+n=0. Each reset condition may now be satisfied anywhere in the last `within`
+bars, with only "RSI turning up" required on the trigger bar itself.
+
+**The headline comparison — the same entry, with and without the stochastic cross**
+
+| | without cross | **with the trader's cross** |
+|---|---|---|
+| trades/year | 115.3 | **48.6** |
+| win_net% | 35.1 | **37.5** |
+| avgR | +0.255 | **+0.285** |
+| PF | 1.39 | **1.46** |
+| max drawdown | 68.6R | **40.5R** |
+| **worst losing streak** | **38** | **15** |
+| OOS n | 97 | 35 |
+| OOS win% | 44.3 | **51.4** |
+
+**Full ranking by R/DD**
+
+| config | n | /yr | win_net% | avgR | PF | maxDD_R | R/DD | streak | OOS n | OOS win% |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 4h ema20, no cross, eth1d, fix 3R | 684 | 115.3 | 35.1 | +0.255 | 1.39 | 68.6 | **2.54** | 38 | 97 | 44.3 |
+| **4h ema20, cross, eth1d, fix 3R** | 288 | 48.6 | 37.5 | **+0.285** | 1.46 | 40.5 | **2.03** | **15** | 35 | 51.4 |
+| 4h ema50, no cross, eth1d, fix 3R | 377 | 63.6 | 33.7 | +0.191 | 1.29 | 46.7 | 1.54 | 39 | 58 | 39.7 |
+| 1h ema20, sto30, cross, rsi45, eth1d, fix 3R | 239 | 40.3 | 33.5 | +0.213 | 1.31 | 51.6 | 0.99 | 16 | 33 | 51.5 |
+| 4h ema50, no cross, eth1d, G05 | 377 | 63.6 | **66.8** | +0.059 | 1.18 | **23.9** | 0.93 | **11** | 58 | **69.0** |
+
+**Findings**
+
+29. **The trader's stochastic cross is primarily a DRAWDOWN tool.** It was
+    pitched as an entry-quality filter, and it does raise expectancy — but the
+    bigger effect is that it halves peak drawdown (68.6R → 40.5R) and cuts the
+    worst losing streak from 38 to 15. Against a brief that names drawdown as
+    the thing to minimise, this is the most valuable single filter found in
+    phase 2. It costs a little over half the trades.
+30. **The stochastic cross also improves out-of-sample behaviour** (44.3% →
+    51.4%), which is what a real filter does rather than a curve-fit one.
+31. **Scale-out does not work on this entry.** Rows 9-10 of the raw batch: the
+    same config with G05 cuts drawdown to 21.8R but collapses expectancy to
+    +0.01R. This entry needs the full 3R run to pay; the divergence entry did
+    not. Exit shape is not transferable between entry types.
+32. **R/DD alone is a misleading ranking.** The no-cross config ranks first on
+    R/DD (2.54) while carrying a 38-trade losing streak. No one trades through
+    that. `worst_streak` has to be read alongside it.
+33. **Frequency and drawdown trade against each other directly.** 115/yr costs
+    68.6R of drawdown; 49/yr costs 40.5R; 12/yr (phase 1) cost 9R. There is no
+    configuration in 4600+ runs that is simultaneously frequent, low-drawdown
+    and high-expectancy.
+
+---
+
+## Batch 9 — drawdown refinement (640 runs)
+
+Running. Takes the batch-8 leader (4h EMA20 pullback + stochastic cross + daily
+gate) and sweeps stop width, swing lookback, reset lag, EMA length, gate choice,
+and lower fixed targets (2R and 2.5R alongside 3R). Since scale-out is ruled out
+for this entry, drawdown has to come from the stop and the target instead. A 2R
+target should convert more trades and shorten losing runs, at the cost of the
+1:3 reward ratio — which is the trade the brief now has to choose between.
+
+---
+
+## Where phase 2 stands
+
+| candidate | /yr | win_net% | avgR | maxDD_R | streak | OOS n | OOS win% |
+|---|---|---|---|---|---|---|---|
+| **4h pullback + cross, fix 3R** | 48.6 | 37.5 | +0.285 | 40.5 | 15 | 35 | 51.4 |
+| 4h pullback, ema50, G05 | 63.6 | **66.8** | +0.059 | **23.9** | **11** | 58 | **69.0** |
+| phase-1 1h VMC gated (for reference) | 12.0 | 67.6 | +0.300 | 9.0 | — | 10 | 80.0 |
+
+The frequency brief is met — 49 to 64 trades a year against 12. Drawdown is not
+yet where it should be: 24R to 40R at 1% risk means a 24-40% equity drawdown,
+against 9R for the low-frequency phase-1 strategy. Halving risk per trade halves
+the drawdown and the return with it. Batch 9 is the attempt to do better than
+that blunt trade.
