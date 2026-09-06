@@ -459,25 +459,106 @@ bars, with only "RSI turning up" required on the trigger bar itself.
 
 ## Batch 9 — drawdown refinement (640 runs)
 
-Running. Takes the batch-8 leader (4h EMA20 pullback + stochastic cross + daily
-gate) and sweeps stop width, swing lookback, reset lag, EMA length, gate choice,
-and lower fixed targets (2R and 2.5R alongside 3R). Since scale-out is ruled out
-for this entry, drawdown has to come from the stop and the target instead. A 2R
-target should convert more trades and shorten losing runs, at the cost of the
-1:3 reward ratio — which is the trade the brief now has to choose between.
+Sweeps the batch-8 leader on stop width, swing lookback, reset lag, EMA length,
+gate and target.
+
+**Two dials turned out to be real, and one killed a whole side of the book**
+
+| dial | median avgR / maxDD / streak | verdict |
+|---|---|---|
+| `within` (reset lag) | **2: +0.119 / 28R / 14** · 5: +0.072 / 59R / 28 | the drawdown lever — halves DD and streak |
+| `atr_mult` | 0.5: +0.003 · 1: +0.076 · 1.5: +0.127 · **2: +0.181** | monotonic, wider stop better |
+| `side` | **long: +0.220** · short: **−0.003** | the short mirror has no edge on this entry |
+| `ema` | 20: +0.100 / 45R · 34: +0.089 / **34R** | 34 trades less, hurts less |
+| `gate` | btc1d: +0.098 · eth1d: +0.095 | indistinguishable now |
+| `target` | fix3R: +0.179 / streak 25 · G1: +0.032 / **streak 14** | expectancy vs streak, pick one |
+
+**Findings**
+
+34. **Requiring the reset to be RECENT is the drawdown fix.** Allowing the
+    stochastic cross to be up to 5 bars stale doubles drawdown (28R → 59R) and
+    doubles the worst losing streak (14 → 28). Two bars is the setting. This is
+    the trader's own "and THEN it tries to go up" — the sequence has to be
+    tight, and the data agrees emphatically.
+35. **The short side is dead on this entry** (−0.003R vs +0.220R). The mirror
+    worked for the pure stoch/RSI setup in batch 7; it does not survive on the
+    pullback trigger.
 
 ---
 
-## Where phase 2 stands
+# THE FREQUENCY CEILING — a correction that changes the answer
 
-| candidate | /yr | win_net% | avgR | maxDD_R | streak | OOS n | OOS win% |
-|---|---|---|---|---|---|---|---|
-| **4h pullback + cross, fix 3R** | 48.6 | 37.5 | +0.285 | 40.5 | 15 | 35 | 51.4 |
-| 4h pullback, ema50, G05 | 63.6 | **66.8** | +0.059 | **23.9** | **11** | 58 | **69.0** |
-| phase-1 1h VMC gated (for reference) | 12.0 | 67.6 | +0.300 | 9.0 | — | 10 | 80.0 |
+The freqtrade cross-check of the batch-9 leader disagreed with the harness on
+trade count by 4x: harness 46/year, freqtrade 12.3/year. The harness was wrong,
+and the reason matters more than the strategy.
 
-The frequency brief is met — 49 to 64 trades a year against 12. Drawdown is not
-yet where it should be: 24R to 40R at 1% risk means a 24-40% equity drawdown,
-against 9R for the low-frequency phase-1 strategy. Halving risk per trade halves
-the drawdown and the return with it. Batch 9 is the attempt to do better than
-that blunt trade.
+**The harness simulates every signal independently.** It assumed you could hold
+many overlapping ETH longs at once. On one pair with one position you cannot.
+
+Measured directly on the leading config, 2021 onward:
+
+| | |
+|---|---|
+| signals the entry fires | 255 |
+| dropped because a position was already open | **186** |
+| actually takeable, one at a time | **69** (12.2/yr) |
+
+Freqtrade independently arrived at 70 trades. The two engines agree once the
+harness is asked the same question.
+
+**Every trades/year figure in batches 6, 8 and 9 above is inflated for this
+reason.** The win rates, expectancy and R/DD are sound — they are per-trade
+measures — but the frequency column assumed overlapping positions.
+
+**The one-position-at-a-time numbers are better on drawdown, not worse:**
+
+| | overlapping (harness) | sequential (real) |
+|---|---|---|
+| trades/year | 46.0 | **12.2** |
+| win_net% | 45.4 | 43.5 |
+| avgR | +0.513 | +0.253 |
+| **max drawdown** | 20.4R | **7.4R** |
+| **worst streak** | 14 | **6** |
+
+Overlapping positions compound drawdown, because correlated ETH longs lose
+together. Taking one at a time nearly triples the drawdown efficiency.
+
+## Freqtrade cross-check, round 3
+
+| variant | trades | /yr | win% | total profit | max DD | avg hold |
+|---|---|---|---|---|---|---|
+| **Eth4hPullback** (3R) | 70 | 12.3 | 42.9 | +17.02% | **9.72%** | 10.0 d |
+| Eth4hPullbackLowDD (1R+3R) | 106 | 18.7 | 49.1 | +9.79% | 15.57% | **4.1 d** |
+
+---
+
+# WHERE PHASE 2 LANDS
+
+**Drawdown: solved.** 9.72% at 1% risk, worst losing streak 6, against 40R
+(≈40%) before batch 9. The two things that did it were the daily gate and
+requiring the reset within 2 bars.
+
+**Frequency: structurally capped, not solved.** On one coin holding one
+position, average hold time sets the ceiling:
+
+| avg hold | max trades/year | measured |
+|---|---|---|
+| 10 days (3R target) | ~36 | **12.3** |
+| 4 days (1R+3R) | ~90 | **18.7** |
+
+Signal clustering eats the rest. **No entry filter can raise this** — only
+shorter holds, a shorter timeframe, or more coins can.
+
+Three honest routes past it, none of them free:
+
+1. **Shorter holds.** The LowDD variant already gets 18.7/yr by exiting at 4
+   days instead of 10. It costs expectancy (+0.16%/trade vs +1.80%).
+2. **Drop to 15m.** Data is downloaded. Holds shrink, trade count rises, but
+   costs (0.3% round trip) eat a larger share of every move.
+3. **More coins.** The single most effective option, and the one the repo's own
+   daily strategy already uses — but the brief says ETH/USDT.
+
+**Caveat on the leaders.** The best in-sample config (btc1d gate, ATR×2, fixed
+3R) scores 31.6% over 19 out-of-sample trades; the best out-of-sample config
+(eth1d gate, ATR×0.5, book half at 1R) scores 66.7% over 33. They are not the
+same configuration. That gap is unresolved and is the first thing to settle.
