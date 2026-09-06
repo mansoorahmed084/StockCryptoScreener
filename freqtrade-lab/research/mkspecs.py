@@ -144,7 +144,112 @@ def batch5() -> list[dict]:
     return out
 
 
-BATCHES = {"batch2": batch2, "batch3": batch3, "batch4": batch4, "batch5": batch5}
+HF_FAMILIES = ["ema_pullback", "rsi_reversion", "donchian_break",
+               "vol_spike_reversal", "keltner_squeeze", "wt_oversold_cross"]
+
+LOWDD_EXITS = [
+    ("fix3R", {"legs": [[3.0, 1.0]]}),
+    ("G05", {"legs": [[0.5, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+    ("G075", {"legs": [[0.75, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+    ("G3", {"legs": [[1.0, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+]
+
+
+def batch6() -> list[dict]:
+    """Discovery pass over six high-frequency families.
+
+    Divergence entries cap at 12-18 trades/year, which is not tradeable. These
+    fire on single-bar conditions. Coarse grid on purpose: the job here is to
+    find which families produce BOTH frequency and edge, not to tune any of them.
+    """
+    out = []
+    for fam in HF_FAMILIES:
+        for tf, tstop in (("1h", 240), ("4h", 120)):
+            for gname, gate in (("nogate", {"kind": "none"}),
+                                ("eth1d", {"kind": "eth_1d",
+                                           "allow": ["bull", "neutral"]})):
+                for amult in (1.0, 2.0):
+                    for ename, exit_ in LOWDD_EXITS:
+                        out.append({
+                            "label": f"{fam} {tf} atr{amult:g} {gname} {ename}",
+                            "family": fam, "tf": tf, "side": "long",
+                            "params": {"atr_mult": amult},
+                            "gate": gate,
+                            "exit": {**exit_, "time_stop_bars": tstop},
+                        })
+    return out
+
+
+# The trader described a 2-3% move, not an R multiple, so both target styles
+# are tested side by side.
+USER_EXITS = [
+    ("pct2", {"legs": [[0.02, 1.0]], "target_mode": "pct"}),
+    ("pct3", {"legs": [[0.03, 1.0]], "target_mode": "pct"}),
+    ("pctScale", {"legs": [[0.015, 0.5], [0.03, 0.5]], "be_after_leg": 0,
+                  "target_mode": "pct"}),
+    ("fix3R", {"legs": [[3.0, 1.0]]}),
+    ("G075", {"legs": [[0.75, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+]
+
+# Switch exactly one condition off at a time. That is what makes it an ablation
+# rather than a beauty contest between bundles.
+CONDITION_SETS = [
+    ("full", {}),
+    ("noTrend", {"use_trend": False}),
+    ("noReset", {"use_reset": False}),
+    ("noCross", {"use_cross": False}),
+    ("noRsi", {"use_rsi": False}),
+    ("withDiv", {"require_div": True}),
+]
+
+
+def batch7() -> list[dict]:
+    """Ablation of the trader's own setup, long and short, 4h and 1h.
+
+    "Overall trend is up" is applied as the DAILY regime gate, not a same-chart
+    EMA: a first pass with a same-timeframe EMA200 filter produced n=1 in six
+    years, because 4h RSI under 30 and 4h price above its own EMA200 almost
+    never coincide. The gate is the honest reading and it is the dial that
+    batch 5 already proved carries weight.
+
+    Question 1: does the bundle work?
+    Question 2: which condition carries it? Each is switched off in turn.
+    Question 3: is the trader's 2-3% target better than a risk-multiple target?
+    """
+    conds = [("full", {}), ("noCross", {"use_cross": False}),
+             ("noRsi", {"use_rsi": False}), ("withDiv", {"require_div": True})]
+    exits = [("pct2", {"legs": [[0.02, 1.0]], "target_mode": "pct"}),
+             ("pct3", {"legs": [[0.03, 1.0]], "target_mode": "pct"}),
+             ("pctScale", {"legs": [[0.015, 0.5], [0.03, 0.5]],
+                           "be_after_leg": 0, "target_mode": "pct"}),
+             ("fix3R", {"legs": [[3.0, 1.0]]})]
+    out = []
+    for tf, tstop in (("4h", 120), ("1h", 240)):
+        for side in ("long", "short"):
+            allow = ["bull", "neutral"] if side == "long" else ["bear", "neutral"]
+            for gname, gate in (("nogate", {"kind": "none"}),
+                                ("eth1d", {"kind": "eth_1d", "allow": allow})):
+                for rsi_x in (30.0, 35.0, 40.0):
+                    for stoch_r in (20.0, 30.0):
+                        for cname, cparams in conds:
+                            for ename, exit_ in exits:
+                                out.append({
+                                    "label": f"stochRsi {tf} {side} {cname} "
+                                             f"rsi{rsi_x:g} st{stoch_r:g} "
+                                             f"{gname} {ename}",
+                                    "family": "stoch_rsi_reset", "tf": tf,
+                                    "side": side,
+                                    "params": {**cparams, "atr_mult": 1.0,
+                                               "rsi_extreme": rsi_x,
+                                               "stoch_reset": stoch_r},
+                                    "gate": gate,
+                                    "exit": {**exit_, "time_stop_bars": tstop},
+                                })
+    return out
+
+
+BATCHES = {"batch2": batch2, "batch3": batch3, "batch4": batch4,
+           "batch5": batch5, "batch6": batch6, "batch7": batch7}
 
 
 def main() -> None:

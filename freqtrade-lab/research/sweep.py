@@ -25,11 +25,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import harness      # noqa: E402
-import strategies   # noqa: E402
+import harness        # noqa: E402
+import strategies     # noqa: E402
+import hf_strategies  # noqa: E402
+import user_setup     # noqa: E402
 
-DETAIL_FOR = {"4h": "1h", "1h": "5m", "1d": "1h"}
-BAR = {"1h": pd.Timedelta("1h"), "4h": pd.Timedelta("4h"), "1d": pd.Timedelta("1D")}
+DETAIL_FOR = {"4h": "1h", "1h": "5m", "15m": "5m", "1d": "1h"}
+BAR = {"15m": pd.Timedelta("15min"), "1h": pd.Timedelta("1h"),
+       "4h": pd.Timedelta("4h"), "1d": pd.Timedelta("1D")}
 OOS_START = "2026-01-27"
 PAIR = "ETH/USDT"
 
@@ -37,6 +40,13 @@ FAMILIES = {
     "vmc_divergence": strategies.vmc_divergence,
     "wt_cross": strategies.wt_cross,
     "bb_reversion": strategies.bb_reversion,
+    "ema_pullback": hf_strategies.ema_pullback,
+    "rsi_reversion": hf_strategies.rsi_reversion,
+    "donchian_break": hf_strategies.donchian_break,
+    "vol_spike_reversal": hf_strategies.vol_spike_reversal,
+    "keltner_squeeze": hf_strategies.keltner_squeeze,
+    "wt_oversold_cross": hf_strategies.wt_oversold_cross,
+    "stoch_rsi_reset": user_setup.stoch_rsi_reset,
 }
 
 _cache: dict = {}
@@ -61,6 +71,9 @@ def _gate(spec: dict, base: pd.DataFrame, tf: str):
     elif kind == "btc_1d":
         series = strategies.higher_tf_regime(base, _df("BTC/USDT", "1d"), "1d",
                                              pd.Timedelta("1D"))
+    elif kind == "eth_1h":
+        series = strategies.higher_tf_regime(base, _df(PAIR, "1h"), "1h",
+                                             pd.Timedelta("1h"))
     elif kind == "eth_4h":
         series = strategies.higher_tf_regime(base, _df(PAIR, "4h"), "4h",
                                              pd.Timedelta("4h"))
@@ -94,6 +107,7 @@ def run_one(spec: dict) -> dict:
         legs=[tuple(x) for x in e.get("legs", [[3.0, 1.0]])],
         be_after_leg=e.get("be_after_leg"),
         time_stop_bars=e.get("time_stop_bars", 120),
+        target_mode=e.get("target_mode", "R"),
     )
     trades = harness.simulate(signals, base, detail, plan, base_bar=BAR[tf])
 
@@ -107,19 +121,20 @@ def run_one(spec: dict) -> dict:
 
 
 def table(results: list[dict]) -> str:
-    head = ("| strategy | tf | exit | n | win_net% | win_3R% | avgR | PF | maxDD_R "
-            "| IS win% | OOS n | OOS win% |")
-    sep = "|" + "---|" * 12
+    head = ("| strategy | tf | exit | n | /yr | win_net% | win_3R% | avgR | PF "
+            "| maxDD_R | R/DD | streak | OOS n | OOS win% |")
+    sep = "|" + "---|" * 14
     lines = [head, sep]
     for r in results:
         a, i, o = r["all"], r["is"], r["oos"]
         if not a.get("n"):
-            lines.append(f"| {r['label']} | {r['tf']} | {r['exit']} | 0 | — | — | — | — | — | — | — | — |")
+            lines.append(f"| {r['label']} | {r['tf']} | {r['exit']} | 0 |" + " — |" * 10)
             continue
         lines.append(
             f"| {r['label']} | {r['tf']} | {r['exit']} | {a['n']} | "
-            f"**{a['win_net_pct']}** | {a['win_target_pct']} | {a['avg_r']} | "
-            f"{a['pf']} | {a['max_dd_r']} | {i.get('win_net_pct','—')} | "
+            f"{a.get('trades_per_year','—')} | **{a['win_net_pct']}** | "
+            f"{a['win_target_pct']} | {a['avg_r']} | {a['pf']} | {a['max_dd_r']} | "
+            f"{a.get('r_per_dd','—')} | {a.get('worst_streak','—')} | "
             f"{o.get('n',0)} | {o.get('win_net_pct','—')} |")
     return "\n".join(lines)
 

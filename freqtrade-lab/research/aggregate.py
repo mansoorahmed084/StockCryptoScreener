@@ -24,6 +24,8 @@ import numpy as np
 RESULTS = Path(__file__).resolve().parent / "results"
 MIN_N = 40
 MIN_OOS_N = 4
+# The new brief: 12 trades/year is not tradeable. Roughly weekly is.
+MIN_PER_YEAR = 40.0
 
 
 def load(prefix: str) -> list[dict]:
@@ -109,10 +111,11 @@ def main() -> None:
     limit = int(sys.argv[2]) if len(sys.argv) > 2 else 15
     every = load(prefix)
     kept = [r for r in every
-            if r["all"]["n"] >= MIN_N and r["oos"].get("n", 0) >= MIN_OOS_N]
+            if r["all"]["n"] >= MIN_N and r["oos"].get("n", 0) >= MIN_OOS_N
+            and (r["all"].get("trades_per_year") or 0) >= MIN_PER_YEAR]
 
-    print(f"# {prefix}: {len(every)} runs, {len(kept)} pass n>={MIN_N} "
-          f"and OOS n>={MIN_OOS_N}")
+    print(f"# {prefix}: {len(every)} runs, {len(kept)} pass n>={MIN_N}, "
+          f"OOS n>={MIN_OOS_N} and >={MIN_PER_YEAR:g} trades/year")
     if not kept:
         print("\nNothing clears the sample-size floor. That is the finding.")
         best = sorted(every, key=lambda r: -r["all"]["n"])[:10]

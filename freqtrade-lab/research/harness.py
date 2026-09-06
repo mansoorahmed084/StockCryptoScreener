@@ -56,10 +56,23 @@ class ExitPlan:
     legs: list[tuple[float, float]] = field(default_factory=lambda: [(3.0, 1.0)])
     be_after_leg: int | None = None
     time_stop_bars: int = 120
+    # "R"   -> leg values are risk multiples (target = entry + r * risk)
+    # "pct" -> leg values are price percentages (target = entry * (1 + p))
+    #          The user's observed setup names a 2-3% move, not an R multiple,
+    #          so the harness has to be able to express targets that way.
+    target_mode: str = "R"
+
+    def target_price(self, entry: float, risk: float, direction: int,
+                     value: float) -> float:
+        if self.target_mode == "pct":
+            return entry * (1 + direction * value)
+        return entry + direction * value * risk
 
     @property
     def label(self) -> str:
-        legs = "+".join(f"{f:.0%}@{r:g}R" for r, f in self.legs)
+        unit = "%" if self.target_mode == "pct" else "R"
+        scale = 100 if self.target_mode == "pct" else 1
+        legs = "+".join(f"{f:.0%}@{r * scale:g}{unit}" for r, f in self.legs)
         be = f" BE@leg{self.be_after_leg}" if self.be_after_leg is not None else ""
         return legs + be
 
@@ -123,7 +136,7 @@ def _walk(detail: pd.DataFrame, start: int, direction: int, entry: float,
         # --- then any target legs this bar reaches, in order ---
         while leg_i < len(legs):
             r_mult, frac = legs[leg_i]
-            tgt = entry + direction * r_mult * risk
+            tgt = plan.target_price(entry, risk, direction, r_mult)
             reached = hi >= tgt if direction > 0 else lo <= tgt
             if not reached:
                 break
@@ -203,9 +216,23 @@ def metrics(trades: list[Trade]) -> dict:
         "total_r": round(rs.sum(), 1),
         "pf": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
         "max_dd_r": round(dd.max(), 1),
+        # return per unit of pain: the number to maximise when drawdown is the
+        # constraint. A strategy earning 20R with a 4R drawdown beats one
+        # earning 30R with a 15R drawdown.
+        "r_per_dd": round(rs.sum() / dd.max(), 2) if dd.max() > 0 else float("inf"),
+        "worst_streak": int(_worst_streak(rs)),
         "avg_bars": round(np.mean([t.bars_held for t in trades]), 1),
         "trades_per_year": None,   # filled by the runner, which knows the span
     }
+
+
+def _worst_streak(rs: np.ndarray) -> int:
+    """Longest run of consecutive losers — what actually makes people quit."""
+    worst = run = 0
+    for r in rs:
+        run = run + 1 if r <= 0 else 0
+        worst = max(worst, run)
+    return worst
 
 
 def split_metrics(trades: list[Trade], oos_start: str) -> dict:
