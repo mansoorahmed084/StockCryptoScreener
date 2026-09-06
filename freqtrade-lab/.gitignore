@@ -7,3 +7,8 @@ user_data/backtest_results/
 *.sqlite-wal
 config.json
 config-vmc.json
+config-eth.json
+research/results/
+config-eth1.json
+research/specs/
+config-eth2.json

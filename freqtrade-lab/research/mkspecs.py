@@ -1,0 +1,163 @@
+"""Generate the parameter grid for a sweep and split it into N worker files.
+
+    python research/mkspecs.py batch2 4
+
+Writes research/specs/batch2_0.json .. batch2_3.json so several processes can
+chew through the grid at once.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+SPECS_DIR = Path(__file__).resolve().parent / "specs"
+
+GATES = [
+    ("nogate", {"kind": "none"}),
+    ("btc1d", {"kind": "btc_1d", "allow": ["bull", "neutral"]}),
+    ("eth1d", {"kind": "eth_1d", "allow": ["bull", "neutral"]}),
+    ("eth4h", {"kind": "eth_4h", "allow": ["bull", "neutral"]}),
+]
+
+EXITS = [
+    ("fix3R", {"legs": [[3.0, 1.0]], "time_stop_bars": 120}),
+    ("G3", {"legs": [[1.0, 0.5], [3.0, 0.5]], "be_after_leg": 0,
+            "time_stop_bars": 120}),
+    ("G3b", {"legs": [[1.0, 0.34], [2.0, 0.33], [3.0, 0.33]], "be_after_leg": 0,
+             "time_stop_bars": 120}),
+]
+
+
+def batch2() -> list[dict]:
+    """4h capitulation long — the only arm with a real edge in batch 1.
+
+    Sweeps how deep the oversold has to be, how far the stop sits, how wide the
+    pivot is (which sets both sensitivity and the confirmation lag), the regime
+    gate, and the exit shape.
+    """
+    out = []
+    for wt2 in (-30.0, -35.0, -40.0, -45.0, -50.0, -55.0, -60.0):
+        for amult in (0.25, 0.5, 1.0, 1.5):
+            for piv in (2, 3, 4):
+                for gname, gate in GATES:
+                    for ename, exit_ in EXITS:
+                        out.append({
+                            "label": f"4hcap wt2<={wt2:g} atr{amult:g} piv{piv} {gname} {ename}",
+                            "family": "vmc_divergence", "tf": "4h", "side": "long",
+                            "params": {"wt2_extreme": wt2, "atr_mult": amult,
+                                       "pivot_lookback": piv},
+                            "gate": gate, "exit": exit_,
+                        })
+    return out
+
+
+def batch3() -> list[dict]:
+    """1h capitulation long — same grid, coarser, plus a volatility floor.
+
+    Batch 1 put raw 1h at 30.9% / +0.10R. The question is whether a regime gate
+    or a volatility floor can lift it, or whether 1h is simply too noisy.
+    """
+    out = []
+    for wt2 in (-45.0, -50.0, -55.0, -60.0):
+        for amult in (0.5, 1.0, 1.5):
+            for piv in (3, 4, 5):
+                for gname, gate in GATES:
+                    for vol in (None, 0.5, 0.7):
+                        for ename, exit_ in EXITS[:2]:
+                            out.append({
+                                "label": f"1hcap wt2<={wt2:g} atr{amult:g} piv{piv} "
+                                         f"{gname} vol{vol} {ename}",
+                                "family": "vmc_divergence", "tf": "1h", "side": "long",
+                                "params": {"wt2_extreme": wt2, "atr_mult": amult,
+                                           "pivot_lookback": piv},
+                                "gate": gate, "vol_min": vol,
+                                "exit": {**exit_, "time_stop_bars": 240},
+                            })
+    return out
+
+
+WIDE_EXITS = [
+    ("fix3R", {"legs": [[3.0, 1.0]]}),
+    ("G3", {"legs": [[1.0, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+    ("G075", {"legs": [[0.75, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+    ("G15", {"legs": [[1.5, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+    ("Gthird", {"legs": [[1.0, 0.34], [2.0, 0.33], [3.0, 0.33]], "be_after_leg": 0}),
+    ("Grunner", {"legs": [[1.0, 0.3], [3.0, 0.7]], "be_after_leg": 0}),
+    ("Gbank", {"legs": [[1.0, 0.7], [3.0, 0.3]], "be_after_leg": 0}),
+]
+
+
+def batch4() -> list[dict]:
+    """4h capitulation, second pass.
+
+    Batch 2 said three things: every regime gate starves ETH of signals, the
+    stop wants to be WIDE (avgR rose monotonically to the 1.5 grid edge), and
+    exit shape trades win rate against expectancy exactly as the repo's
+    Iteration F predicted. So: push atr_mult past the edge, raise the risk cap
+    so wide stops are not silently filtered out, and test seven exit shapes.
+    """
+    out = []
+    for wt2 in (-35.0, -40.0, -45.0, -50.0):
+        for amult in (1.5, 2.0, 2.5, 3.0, 4.0):
+            for maxrisk in (0.10, 0.15, 0.20):
+                for piv in (2, 3):
+                    for ename, exit_ in WIDE_EXITS:
+                        out.append({
+                            "label": f"4hcap wt2<={wt2:g} atr{amult:g} risk{maxrisk:g} "
+                                     f"piv{piv} nogate {ename}",
+                            "family": "vmc_divergence", "tf": "4h", "side": "long",
+                            "params": {"wt2_extreme": wt2, "atr_mult": amult,
+                                       "pivot_lookback": piv,
+                                       "max_risk_pct": maxrisk},
+                            "gate": {"kind": "none"},
+                            "exit": {**exit_, "time_stop_bars": 120},
+                        })
+    return out
+
+
+def batch5() -> list[dict]:
+    """1h capitulation, refined — batch 3's surprise.
+
+    On 4h every regime gate starved the signal. On 1h the opposite: the ETH
+    daily gate was the single strongest dial (+0.115 avgR vs -0.170 ungated),
+    because 1h produces enough signals to afford a filter. The volatility floor
+    hurt everywhere, so it is dropped. Wider pivots (4-5) beat 3, so the pivot
+    range moves up. Exits now include the G075 shape that topped batch 4.
+    """
+    out = []
+    for gname, gate in (("eth1d", {"kind": "eth_1d", "allow": ["bull", "neutral"]}),
+                        ("btc1d", {"kind": "btc_1d", "allow": ["bull", "neutral"]})):
+        for wt2 in (-40.0, -45.0, -50.0, -55.0):
+            for amult in (0.75, 1.0, 1.25, 1.5, 2.0):
+                for piv in (4, 5, 6, 7):
+                    for ename, exit_ in WIDE_EXITS:
+                        out.append({
+                            "label": f"1hcap wt2<={wt2:g} atr{amult:g} piv{piv} "
+                                     f"{gname} volNone {ename}",
+                            "family": "vmc_divergence", "tf": "1h", "side": "long",
+                            "params": {"wt2_extreme": wt2, "atr_mult": amult,
+                                       "pivot_lookback": piv},
+                            "gate": gate,
+                            "exit": {**exit_, "time_stop_bars": 240},
+                        })
+    return out
+
+
+BATCHES = {"batch2": batch2, "batch3": batch3, "batch4": batch4, "batch5": batch5}
+
+
+def main() -> None:
+    name, workers = sys.argv[1], int(sys.argv[2])
+    specs = BATCHES[name]()
+    SPECS_DIR.mkdir(parents=True, exist_ok=True)
+    for w in range(workers):
+        chunk = specs[w::workers]
+        path = SPECS_DIR / f"{name}_{w}.json"
+        path.write_text(json.dumps(chunk, indent=1), encoding="utf-8")
+        print(f"{path.name}: {len(chunk)} runs")
+    print(f"total {len(specs)} runs")
+
+
+if __name__ == "__main__":
+    main()
