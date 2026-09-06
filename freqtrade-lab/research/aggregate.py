@@ -91,18 +91,18 @@ def neighbour_score(rows: list[dict], metric: str) -> dict[str, float]:
 
 
 def table(rows: list[dict], nb: dict, limit: int) -> str:
-    head = ("| # | config | n | /yr | win_net% | win_3R% | avgR | nbr avgR | PF "
-            "| maxDD_R | IS win% | OOS n | OOS win% |")
-    lines = [head, "|" + "---|" * 13]
+    head = ("| # | config | n | /yr | win_net% | hit_tgt% | avgR | nbr avgR | PF "
+            "| maxDD_R | R/DD | streak | OOS n | OOS win% |")
+    lines = [head, "|" + "---|" * 14]
     for i, r in enumerate(rows[:limit], 1):
-        a, isx, o = r["all"], r["is"], r["oos"]
+        a, o = r["all"], r["oos"]
         n_score = nb.get(r["label"], float("nan"))
         lines.append(
             f"| {i} | {r['label']} | {a['n']} | {a.get('trades_per_year','—')} | "
             f"**{a['win_net_pct']}** | {a['win_target_pct']} | {a['avg_r']} | "
             f"{n_score:+.3f} | {a['pf']} | {a['max_dd_r']} | "
-            f"{isx.get('win_net_pct','—')} | {o.get('n',0)} | "
-            f"{o.get('win_net_pct','—')} |")
+            f"**{a.get('r_per_dd','—')}** | {a.get('worst_streak','—')} | "
+            f"{o.get('n',0)} | {o.get('win_net_pct','—')} |")
     return "\n".join(lines)
 
 
@@ -124,6 +124,9 @@ def main() -> None:
         return
 
     nb = neighbour_score(kept, "avg_r")
+
+    print("\n## Ranked by return per unit of drawdown (the drawdown brief)\n")
+    print(table(sorted(kept, key=lambda r: -r["all"].get("r_per_dd", 0)), nb, limit))
 
     print("\n## Ranked by expectancy (avgR)\n")
     print(table(sorted(kept, key=lambda r: -r["all"]["avg_r"]), nb, limit))

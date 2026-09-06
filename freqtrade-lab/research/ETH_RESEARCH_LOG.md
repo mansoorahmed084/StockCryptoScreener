@@ -305,3 +305,108 @@ is what the recommended strategy does.
   not eliminate it.
 - One coin, one venue, ~5.9 years covering roughly two full cycles.
 - Next honest step is forward paper trading, not more optimisation.
+
+
+---
+
+# PHASE 2 — the frequency brief
+
+Brief updated: 12 trades a year is not tradeable. Minimise drawdown, keep hard
+stops, go out of the way to make it short-term tradeable. New selection floor:
+**>= 40 trades/year**, and results are now ranked by **R/DD** (total R earned per
+unit of peak drawdown) rather than raw expectancy. Two new metrics: `R/DD` and
+`worst_streak`, the longest run of consecutive losers.
+
+## Batch 6 — six high-frequency families (144 runs)
+
+Divergence entries need a confirmed pivot PAIR, which is why they cap at 12-18
+trades/year. These fire on single-bar conditions instead.
+
+| config | n | /yr | win_net% | avgR | PF | maxDD_R | **R/DD** | streak | OOS n | OOS win% |
+|---|---|---|---|---|---|---|---|---|---|---|
+| donchian_break 4h, eth1d, fix3R | 471 | 79.4 | 33.1 | +0.228 | 1.33 | 44.6 | **2.40** | 29 | 43 | 23.3 |
+| **ema_pullback 4h, eth1d, G05** | 495 | 83.5 | **68.7** | +0.078 | 1.25 | **21.8** | **1.77** | 13 | **78** | **62.8** |
+| ema_pullback 4h, eth1d, G3 | 495 | 83.5 | 54.5 | +0.128 | 1.28 | 36.3 | 1.74 | 20 | 78 | 48.7 |
+| ema_pullback 4h, **nogate**, G3 | 559 | 94.3 | 53.0 | +0.096 | 1.21 | **60.1** | 1.21 | — | 78 | 48.7 |
+
+**Findings**
+
+20. **Frequency is solved.** The EMA pullback runs 83 trades/year against the
+    divergence strategy's 12, and it is the first configuration in this study
+    with a properly sized out-of-sample window: **78 OOS trades at 62.8%**.
+21. **The daily gate is a drawdown tool, not just an edge tool.** Same entry,
+    same exit: 60.1R drawdown ungated, 21.8R gated. It nearly cuts the pain in
+    three. This is the single most effective drawdown control found.
+22. **Donchian scores best on R/DD but is untradeable.** A 29-trade losing
+    streak, and its OOS win rate collapses from 33% to 23%. R/DD alone is not a
+    sufficient ranking metric; `worst_streak` has to be read next to it.
+23. **Frequency was bought with quality.** avgR fell from +0.30 (divergence) to
+    +0.078. 83 trades a year at +0.078R is +6.5R/year — better than 12 trades at
+    +0.30R (+3.6R/year), but the drawdown is far worse.
+
+---
+
+## Batch 7 — ABLATION of the trader's own setup (768 runs)
+
+The observed setup: on 4h, oscillator resets and crosses up from below, RSI
+under 30 and turning up, overall trend up. Divergence makes it stronger. Expect
+a 2-3% move. Mirror for shorts.
+
+**Correction made while building it.** Reading "overall trend is up" as a
+same-chart EMA200 filter produced **n=1 in six years** — on 4h, price above its
+own EMA200 and RSI under 30 are near-contradictory. The higher-timeframe daily
+regime is the correct reading, so the trend condition is applied as the daily
+gate.
+
+**Does each condition earn its place?** Matched pairs: identical configs with
+exactly one condition switched.
+
+| condition | matched pairs | median avgR with | without | **contribution** | n with | n without |
+|---|---|---|---|---|---|---|
+| stochastic cross | 160 | −0.156 | −0.183 | **+0.027** | 150 | 576 |
+| RSI threshold | 160 | −0.156 | −0.170 | **+0.014** | 150 | 1135 |
+| **VMC divergence** | 8 | −0.191 | −0.098 | **+0.093** | 866 | 50 |
+
+**The trader's instincts check out directionally.** Every condition contributes
+positively, and the one flagged as "even more a good buying signal" — the
+divergence — contributes more than the stochastic cross and the RSI filter put
+together. It is also the most expensive: it cuts the sample from 866 to 50.
+
+**Best full-bundle configurations**
+
+| config | n | /yr | win_net% | hit_tgt% | avgR | PF | maxDD_R | OOS n |
+|---|---|---|---|---|---|---|---|---|
+| 4h long, rsi30, st30, no gate, fix 3R | 31 | 5.2 | 35.5 | 25.8 | **+0.255** | 1.38 | 9.3 | 1 |
+| 4h short, rsi40, st20, eth1d, fix 3R | 44 | 7.4 | 31.8 | 31.8 | +0.229 | 1.32 | 8.7 | 4 |
+| **4h long, rsi30, st20, no gate, 3% target** | 31 | 5.2 | **71.0** | **71.0** | +0.119 | 1.40 | **3.5** | 1 |
+| 4h long, rsi35, st20, no gate, fix 3R | 73 | 12.3 | 31.5 | 26.0 | +0.154 | 1.22 | 7.6 | 4 |
+
+**Findings**
+
+24. **The 2-3% observation is measurably correct.** The tight version of the
+    setup wins **71% of the time** going for a 3% move, with a 3.5R drawdown —
+    the lowest of anything tested. The observation was accurate.
+25. **But it fires 5 times a year.** The tight bundle that produces 71% is rare.
+    Loosening the thresholds to get frequency drives expectancy negative: the
+    family's median avgR across all 768 runs is **−0.156**.
+26. **The 2-3% target loses money in general** (pct2 −0.174, pct3 −0.169 vs
+    fix3R −0.124 median avgR). It wins often, but the stop is wider than the
+    target in most configurations, so the rare losses outweigh the frequent
+    small wins. High win rate, negative expectancy — the classic trap.
+27. **4h beats 1h decisively for this setup** (median avgR −0.080 vs −0.194).
+    The trader's choice of 4h was right.
+28. **Long and short are near-identical** (−0.170 vs −0.159). The mirror works;
+    there is no long-only bias in this setup.
+
+---
+
+## Batch 8 — the reset filters on a high-frequency trigger (720 runs)
+
+Running. Batch 6 gave frequency without quality; batch 7 gave quality without
+frequency. This bolts the trader's reset conditions onto the EMA pullback to see
+whether the combination keeps enough of both.
+
+A second modelling correction went in here: the trader describes a **sequence**
+(reset, then cross, then turn up), and demanding all of it on a single candle
+gives n=0. Each reset condition may now be satisfied anywhere in the last
+`within` bars, with only "RSI turning up" required on the trigger bar itself.

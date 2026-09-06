@@ -248,8 +248,55 @@ def batch7() -> list[dict]:
     return out
 
 
+def batch8() -> list[dict]:
+    """The trader's reset filters bolted onto the high-frequency pullback.
+
+    Batch 6 found the EMA pullback runs 83 trades/year at 68.7% net-win behind
+    the daily gate, but earns only +0.078R per trade with a 21.8R drawdown.
+    Frequency is solved; quality is not. The trader's own rule says a pullback
+    is only worth taking once the oscillators have RESET. This measures exactly
+    that: does demanding stochastic-oversold-and-crossing, and RSI low and
+    turning up, raise expectancy enough to be worth the trades it removes?
+
+    stoch_max=None / rsi_max=None / stoch_cross=False are the control arms.
+    """
+    out = []
+    exits = [("G05", {"legs": [[0.5, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+             ("G075", {"legs": [[0.75, 0.5], [3.0, 0.5]], "be_after_leg": 0}),
+             ("fix3R", {"legs": [[3.0, 1.0]]}),
+             ("pct2", {"legs": [[0.02, 1.0]], "target_mode": "pct"}),
+             ("pct3", {"legs": [[0.03, 1.0]], "target_mode": "pct"})]
+    for tf, tstop in (("4h", 120), ("1h", 240)):
+        for side in ("long", "short"):
+            allow = ["bull", "neutral"] if side == "long" else ["bear", "neutral"]
+            gate = {"kind": "eth_1d", "allow": allow}
+            for ema_len in (20, 50):
+                for stoch_max in (None, 30.0, 20.0):
+                    for cross in (True, False):
+                        for rsi_max in (None, 45.0, 35.0):
+                            for ename, exit_ in exits:
+                                sm = "None" if stoch_max is None else f"{stoch_max:g}"
+                                rm = "None" if rsi_max is None else f"{rsi_max:g}"
+                                out.append({
+                                    "label": f"pbReset {tf} {side} ema{ema_len} "
+                                             f"sto{sm} x{int(cross)} rsi{rm} "
+                                             f"eth1d {ename}",
+                                    "family": "pullback_reset", "tf": tf,
+                                    "side": side,
+                                    "params": {"ema_len": ema_len,
+                                               "stoch_max": stoch_max,
+                                               "stoch_cross": cross,
+                                               "rsi_max": rsi_max,
+                                               "atr_mult": 1.0},
+                                    "gate": gate,
+                                    "exit": {**exit_, "time_stop_bars": tstop},
+                                })
+    return out
+
+
 BATCHES = {"batch2": batch2, "batch3": batch3, "batch4": batch4,
-           "batch5": batch5, "batch6": batch6, "batch7": batch7}
+           "batch5": batch5, "batch6": batch6, "batch7": batch7,
+           "batch8": batch8}
 
 
 def main() -> None:

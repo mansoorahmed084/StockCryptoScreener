@@ -29,6 +29,7 @@ import harness        # noqa: E402
 import strategies     # noqa: E402
 import hf_strategies  # noqa: E402
 import user_setup     # noqa: E402
+import confluence     # noqa: E402
 
 DETAIL_FOR = {"4h": "1h", "1h": "5m", "15m": "5m", "1d": "1h"}
 BAR = {"15m": pd.Timedelta("15min"), "1h": pd.Timedelta("1h"),
@@ -47,6 +48,7 @@ FAMILIES = {
     "keltner_squeeze": hf_strategies.keltner_squeeze,
     "wt_oversold_cross": hf_strategies.wt_oversold_cross,
     "stoch_rsi_reset": user_setup.stoch_rsi_reset,
+    "pullback_reset": confluence.pullback_reset,
 }
 
 _cache: dict = {}
