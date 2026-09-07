@@ -52,7 +52,9 @@ class Eth4hPullback(IStrategy):
     SWING_LEN = 5
     ATR_STOP_MULT = 2.0
     MAX_RISK_PCT = 0.10
-    GATE_PAIR = "BTC/USDT"
+    # None means "gate each pair on its own daily trend" — the correct
+    # generalisation when the strategy runs over a basket rather than one coin.
+    GATE_PAIR: str | None = "BTC/USDT"
     GATE_ALLOW = ("bull", "neutral")
 
     TARGET_R = 3.0
@@ -73,21 +75,26 @@ class Eth4hPullback(IStrategy):
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self._params_1d = load_config().classifier_params("1d")
-        self._gate_cache: pd.Series | None = None
+        self._gate_cache: dict[str, pd.Series] = {}
 
     def informative_pairs(self):
-        return [(self.GATE_PAIR, "1d")]
+        if self.GATE_PAIR is not None:
+            return [(self.GATE_PAIR, "1d")]
+        pairs = self.dp.current_whitelist() if self.dp else []
+        return [(p, "1d") for p in pairs]
 
-    def _gate_ok(self, index: pd.DatetimeIndex) -> np.ndarray:
-        if self._gate_cache is None:
-            daily = self.dp.get_pair_dataframe(self.GATE_PAIR, "1d")
+    def _gate_ok(self, index: pd.DatetimeIndex, pair: str) -> np.ndarray:
+        gate_pair = self.GATE_PAIR or pair
+        if gate_pair not in self._gate_cache:
+            daily = self.dp.get_pair_dataframe(gate_pair, "1d")
             if daily is None or daily.empty:
-                raise RuntimeError(f"{self.GATE_PAIR} 1d data is required")
+                raise RuntimeError(f"{gate_pair} 1d data is required")
             hist = rs.classify_history(daily.set_index("date")["close"],
                                        self._params_1d, drop_forming=False)
-            self._gate_cache = pd.Series(hist["direction"].to_numpy(),
-                                         index=hist.index + pd.Timedelta("1D"))
-        state = self._gate_cache.reindex(index, method="ffill").fillna("unknown")
+            self._gate_cache[gate_pair] = pd.Series(
+                hist["direction"].to_numpy(), index=hist.index + pd.Timedelta("1D"))
+        state = (self._gate_cache[gate_pair]
+                 .reindex(index, method="ffill").fillna("unknown"))
         return state.isin(self.GATE_ALLOW).to_numpy()
 
     @staticmethod
@@ -121,7 +128,7 @@ class Eth4hPullback(IStrategy):
 
         risk_ok = ((df["close"] - stop) / df["close"]).between(0, self.MAX_RISK_PCT)
         signal = (pullback & cross_recent & risk_ok & stop.notna()
-                  & self._gate_ok(df.index))
+                  & self._gate_ok(df.index, metadata["pair"]))
 
         dataframe["vmc_stop"] = stop.to_numpy()
         dataframe["vmc_signal"] = signal.to_numpy().astype(int)
@@ -212,3 +219,15 @@ class Eth4hPullbackLowDD(Eth4hPullback):
     GATE_PAIR = "ETH/USDT"
     FIRST_LEG_R = 1.0            # book half at 1R, stop to breakeven
     position_adjustment_enable = True
+
+
+class Multi4hPullback(Eth4hPullback):
+    """Basket version: gate every coin on its OWN daily trend."""
+
+    GATE_PAIR = None
+
+
+class Multi4hPullbackBtcGate(Eth4hPullback):
+    """Basket version: one market-wide gate on BTC, as the repo's daily strategy does."""
+
+    GATE_PAIR = "BTC/USDT"

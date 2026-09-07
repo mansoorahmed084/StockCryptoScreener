@@ -562,3 +562,92 @@ Three honest routes past it, none of them free:
 3R) scores 31.6% over 19 out-of-sample trades; the best out-of-sample config
 (eth1d gate, ATR×0.5, book half at 1R) scores 66.7% over 33. They are not the
 same configuration. That gap is unresolved and is the first thing to settle.
+
+
+---
+
+# PHASE 3 — the multi-coin test, and what it proved
+
+The plan was to lift returns by running the ETH strategies over the repo's
+29-coin universe, on the reasoning that more coins buys more independent bets.
+Projected 17% CAGR. **That projection was wrong, and the way it was wrong is the
+most important result in this whole study.**
+
+29 coins, 2021-01 to 2026-09, 1% risk per trade, 0.15% costs per side, 4h
+signals with 1h detail fills, position limit swept at 3 / 6 / 10.
+
+| strategy | designed on | trades | win% | total | CAGR | max DD |
+|---|---|---|---|---|---|---|
+| **VmcCapitulation** (daily, 1.5R) | **29-coin basket** | 65 | 60.0 | **+39.55%** | **+6.05%** | **9.96%** |
+| VmcCapitulation1R (daily) | 29-coin basket | 65 | 66.2 | +24.31% | +3.91% | 8.58% |
+| Multi4hPullbackBtcGate | ETH only | 393 | 31.0 | −9.95% | −1.83% | 45.39% |
+| EthVmcFixed3R | ETH only | 539 | 26.9 | −16.89% | −3.21% | 48.52% |
+| EthVmcScaleOut | ETH only | 589 | 42.1 | −30.68% | −6.26% | 44.23% |
+| Multi4hPullback | ETH only | 453 | 30.5 | −35.55% | −7.45% | 59.26% |
+
+Raising the position limit from 3 to 10 made the ETH-derived strategies worse,
+not better — drawdowns reached 83%.
+
+## Finding 36 — the ETH strategies were overfit, and this is the proof
+
+Every strategy tuned on ETH **loses money** on the other 28 coins, with
+drawdowns of 44-83%. The one strategy designed on a basket from the start
+returns +39.55% with a 9.96% drawdown on the same data, same engine, same costs.
+
+This is a clean natural experiment. The difference is not the signal family —
+`VmcCapitulation` and `EthVmcScaleOut` use the *same* VMC divergence entry. The
+difference is what they were fitted to.
+
+Phases 1 and 2 searched roughly 5,300 configurations against one coin. The
+guards used — n ≥ 40 floors, marginal analysis, neighbour scoring, an
+independent freqtrade cross-check, out-of-sample splits — were enough to catch
+noise *within* ETH. **None of them could catch the fact that the whole search
+was fitted to ETH.** Out-of-sample in time is not out-of-sample in instrument.
+
+The 6.55% CAGR reported for `EthVmcFixed3R` on ETH should now be read as an
+upper bound produced by selection, not a forecast.
+
+## Finding 37 — more coins did not multiply returns
+
+The reasoning behind the 17% projection was that 29 coins gives roughly 4
+independent bets. In practice, on the strategy that does work, going from 3 to
+10 concurrent positions moved the total from +21.36% to +39.55% while drawdown
+rose from 7.59% to 9.96%. Real, but a long way from 4x, because crypto
+alts fall together.
+
+## Where this leaves the numbers
+
+Every honest measurement in this project lands in the same place:
+
+| strategy | scope | CAGR at 1% risk | max DD |
+|---|---|---|---|
+| VmcCapitulation daily | 29 coins | 6.05% | 9.96% |
+| EthVmcFixed3R | ETH only (likely overfit) | 6.55% | 6.13% |
+| EthVmcScaleOut | ETH only (likely overfit) | 5.55% | 3.21% |
+
+**5-6.5% CAGR at 1% risk is the measured ceiling**, and the only strategy that
+has survived an instrument-level out-of-sample test is the repo's own
+pre-existing `VmcCapitulation` from STRATEGY_RESEARCH.md. Nothing built in
+phases 1 or 2 beat it.
+
+The only remaining lever is risk per trade, which scales return and drawdown
+together:
+
+| risk/trade | CAGR | on 1 lac | worst drawdown |
+|---|---|---|---|
+| 1% | 6.1% | ₹6,054 | −₹9,960 |
+| 2% | 10.8% | ₹10,825 | −₹19,920 |
+| 3% | 14.8% | ₹14,794 | −₹29,880 |
+| 5% | 21.2% | ₹21,219 | −₹49,800 |
+
+## What should happen next
+
+Not more optimisation. The lesson of finding 36 is that more searching against
+fixed history produces better backtests and no better strategies. The two
+things that would actually add information:
+
+1. **Forward paper trading** of `VmcCapitulation` on the 29-coin basket. It is
+   the only candidate with an instrument-level out-of-sample result.
+2. **Instrument-level validation built into the workflow** — any future search
+   should fit on one subset of coins and test on a held-out subset, not just
+   split by date.
