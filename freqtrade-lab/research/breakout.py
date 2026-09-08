@@ -41,6 +41,42 @@ from backend.indicators import common                    # noqa: E402
 
 PIVOT = 3
 
+# A full grid re-derives the same divergence markers thousands of times. The
+# pivot scan is the expensive part and depends only on (frame, pivot_lookback),
+# so cache it. Keyed by id+len, which is safe because frames are loaded once and
+# reused by reference from harness.load's caller.
+_VMC: dict = {}
+
+
+def _vmc(df: pd.DataFrame, pivot_lookback: int):
+    key = (id(df), len(df), pivot_lookback)
+    if key not in _VMC:
+        res = VuManChuCipherB(pivot_lookback=pivot_lookback).compute(df)
+        bulls = [(df.index.get_loc(m.ts), m.ts) for m in res.markers
+                 if m.kind == "bull_div"]
+        _VMC[key] = (bulls, res.panes.get("wt2"))
+    return _VMC[key]
+
+
+_MFI: dict = {}
+
+
+def _mfi(df: pd.DataFrame):
+    key = (id(df), len(df))
+    if key not in _MFI:
+        _MFI[key] = common.vumanchu_moneyflow(df).to_numpy()
+    return _MFI[key]
+
+
+_ATR: dict = {}
+
+
+def _atr_c(df: pd.DataFrame, length: int):
+    key = (id(df), len(df), length)
+    if key not in _ATR:
+        _ATR[key] = atr(df, length).to_numpy()
+    return _ATR[key]
+
 
 def divergence_breakout(
         df: pd.DataFrame, *, side: str = "long",
@@ -96,23 +132,18 @@ def divergence_breakout(
             out = out.loc[keep]
         return out
 
-    res = VuManChuCipherB(pivot_lookback=pivot_lookback).compute(df)
-    wt2 = res.panes.get("wt2")
+    bulls, wt2 = _vmc(df, pivot_lookback)
     if wt2 is None:
         return pd.DataFrame(columns=["direction", "stop"])
 
-    a = atr(df, atr_len).to_numpy()
-    mfi = (common.vumanchu_moneyflow(df).to_numpy()
-           if mfi_min is not None else None)
+    a = _atr_c(df, atr_len)
+    mfi = _mfi(df) if mfi_min is not None else None
     highs, lows, closes = (df["high"].to_numpy(), df["low"].to_numpy(),
                            df["close"].to_numpy())
     n = len(df)
     rows = []
 
-    for m in res.markers:
-        if m.kind != "bull_div":
-            continue
-        p = df.index.get_loc(m.ts)
+    for p, _ts in bulls:
         c = p + pivot_lookback                    # divergence confirmed here
         if c >= n - 1 or float(wt2.iloc[p]) > wt2_max:
             continue

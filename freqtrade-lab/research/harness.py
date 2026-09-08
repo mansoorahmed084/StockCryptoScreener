@@ -32,8 +32,23 @@ DEFAULT_COST = 0.0015
 
 
 # --------------------------------------------------------------------- data
+_FRAMES: dict = {}
+
+
 def load(pair: str, timeframe: str) -> pd.DataFrame:
-    """Load one OHLCV feather as a DatetimeIndex frame."""
+    """Load one OHLCV feather as a DatetimeIndex frame.
+
+    Cached and returned BY REFERENCE. Callers must not mutate the result. The
+    identity matters as well as the speed: downstream indicator caches key on
+    id(df), so re-reading the file each call would silently defeat them.
+    """
+    key = (pair, timeframe)
+    if key not in _FRAMES:
+        _FRAMES[key] = _read(pair, timeframe)
+    return _FRAMES[key]
+
+
+def _read(pair: str, timeframe: str) -> pd.DataFrame:
     fname = f"{pair.replace('/', '_')}-{timeframe}.feather"
     path = DATA_DIR / fname
     if not path.exists():
