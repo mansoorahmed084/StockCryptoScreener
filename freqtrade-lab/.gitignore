@@ -13,3 +13,4 @@ config-eth1.json
 research/specs/
 config-eth2.json
 config-multi.json
+config-15m.json

@@ -651,3 +651,96 @@ things that would actually add information:
 2. **Instrument-level validation built into the workflow** — any future search
    should fit on one subset of coins and test on a held-out subset, not just
    split by date.
+
+
+---
+
+# PHASE 4 — the impulse / pullback / divergent double bottom
+
+The trader supplied an ARB/USDT 15m chart of a setup they trade: a large run
+up, a pullback, a VMC bullish divergence, then a retrace that forms a DOUBLE
+BOTTOM, with the second bottom as the entry. Reported as high accuracy and high
+reward:risk.
+
+Coded in [pattern.py](pattern.py) as `impulse_double_bottom`. The neat property
+is that the divergence and the double bottom are the *same two points*: two
+price lows at roughly equal levels with the oscillator making a higher low
+between them. So it is one object, detectable in one pass. Signals are emitted
+on the bar that confirms the second low, so nothing looks forward.
+
+**This is the first phase validated on HELD-OUT COINS**, per finding 36. Eight
+coins to fit on (BTC, ETH, ADA, DOGE, LINK, DOT, ATOM, XLM), eight the search
+never sees (BNB, XRP, SOL, AVAX, LTC, ETC, NEAR, UNI).
+
+## The ETH-only result, which looked promising
+
+| tf | selectivity | signals/yr | win% | avgR | PF |
+|---|---|---|---|---|---|
+| 15m | loose | 1364 | 27.4 | −0.189 | 0.76 |
+| 15m | strict | 4 | 21.7 | −0.407 | 0.48 |
+| 1h | loose | 473 | 27.9 | −0.051 | 0.93 |
+| 4h | loose | 83 | 29.3 | +0.086 | 1.12 |
+| 4h | mid | 20 | 32.8 | +0.205 | 1.30 |
+| **4h** | **strict** | **4** | **39.1** | **+0.440** | **1.70** |
+
+On ETH the pattern looked real on 4h and improved monotonically with
+selectivity — the signature of a genuine effect.
+
+## Finding 38 — why 15m cannot work, whatever the pattern
+
+| timeframe | median 1R | round-trip cost | **cost as share of 1R** |
+|---|---|---|---|
+| 15m | 1.71% | 0.30% | **18%** |
+| 1h | 2.34% | 0.30% | 13% |
+| 4h | 3.53% | 0.30% | **9%** |
+
+At zero cost the 15m version scores −0.029R — essentially breakeven. Real fees
+take it to −0.213R. **The pattern is not wrong on 15m; the stop is simply too
+close for the fee to be survivable.** This applies to any 15m strategy stopping
+~1.7% away, not just this one.
+
+## Finding 39 — it does not survive held-out coins, at any setting
+
+52 configurations across three timeframes, three selectivity levels, divergence
+on and off, gated and ungated, two exit shapes.
+
+| | |
+|---|---|
+| positive on the FIT coins | 3 of 52 |
+| positive on the HELD-OUT coins | 2 of 52 |
+| **positive on BOTH** | **0 of 52** |
+| **correlation, FIT avgR vs HOLDOUT avgR** | **−0.01** |
+
+A correlation of −0.01 is the whole result. Tuning this pattern on one basket
+carries **zero** information about another basket. The two configs that scored
+positive on holdout were the two *worst* on fit (−0.384R, −0.497R), which is
+what sign-flipping noise looks like, not an edge.
+
+The ETH 4h strict result (+0.440R) did not survive. Its nearest multi-coin
+equivalent scored +0.203R on fit and **−0.288R** on holdout.
+
+| median HOLDOUT avgR | |
+|---|---|
+| 15m | −0.198 |
+| 1h | −0.145 |
+| 4h | −0.212 |
+| with divergence | −0.186 |
+| without divergence | −0.150 |
+
+The divergence made results slightly *worse* here, contradicting the phase-2
+ETH-only finding where it was the strongest single condition. That reversal is
+itself evidence for finding 36.
+
+## What phase 4 establishes
+
+1. The held-out-coin protocol works, and it is cheap. It killed in one run a
+   pattern that three separate ETH-only analyses would have endorsed.
+2. Short timeframes carry a structural cost penalty that is independent of the
+   signal. 18% of every R on 15m is not recoverable by better entries.
+3. A pattern being genuinely present on a chart, and being mechanically
+   tradeable after costs across instruments, are different claims. The first
+   can be true while the second is false.
+
+Running tally across the whole project: **0 strategies developed in phases
+1-4 have survived an instrument-level out-of-sample test.** The only one that
+has is `VmcCapitulation`, which predates all of it.
