@@ -67,6 +67,12 @@ def impulse_double_bottom(
         db_max_bars: int = 60,
         require_divergence: bool = True,
         require_higher_low: bool = False,   # stricter: low2 strictly above low1
+        # --- VMC money-flow area: the green/red band on the trader's chart.
+        # green = vumanchu_moneyflow > 0. None disables the filter, 0.0 means
+        # "only trade while the area is green".
+        mfi_min: float | None = None,
+        mfi_rising: bool = False,
+        mfi_period: int = 60, mfi_mult: float = 150.0,
         # --- risk ---
         atr_mult: float = 0.5, atr_len: int = 14,
         max_risk_pct: float = 0.10,
@@ -89,8 +95,10 @@ def impulse_double_bottom(
             imp_lookback=imp_lookback, pb_min_pct=pb_min_pct,
             pb_max_pct=pb_max_pct, db_tol=db_tol, db_min_bars=db_min_bars,
             db_max_bars=db_max_bars, require_divergence=require_divergence,
-            require_higher_low=require_higher_low, atr_mult=atr_mult,
-            atr_len=atr_len, max_risk_pct=max_risk_pct, gate=None)
+            require_higher_low=require_higher_low, mfi_min=mfi_min,
+            mfi_rising=mfi_rising, mfi_period=mfi_period, mfi_mult=mfi_mult,
+            atr_mult=atr_mult, atr_len=atr_len, max_risk_pct=max_risk_pct,
+            gate=None)
         if out.empty:
             return out
         out["direction"] = -1
@@ -102,6 +110,8 @@ def impulse_double_bottom(
         return out
 
     wt1, wt2 = wavetrend.wavetrend(df)
+    mfi_v = (common.vumanchu_moneyflow(df, mfi_period, mfi_mult).to_numpy()
+             if (mfi_min is not None or mfi_rising) else None)
     a = atr(df, atr_len).to_numpy()
     low_mask, high_mask = _pivots(df["low"], pivot_n)
     _, close_high_mask = _pivots(df["high"], pivot_n)
@@ -157,6 +167,13 @@ def impulse_double_bottom(
             pullback = (swing_high - l1) / swing_high
             if not (pb_min_pct <= pullback <= pb_max_pct):
                 continue
+
+            # --- money-flow area, read on the confirmation bar (knowable)
+            if mfi_v is not None:
+                if mfi_min is not None and not (mfi_v[i_conf] >= mfi_min):
+                    break
+                if mfi_rising and not (mfi_v[i_conf] > mfi_v[i_conf - 1]):
+                    break
 
             ts = df.index[i_conf]
             if gate is not None and gate.get(ts, "unknown") not in gate_allow:
