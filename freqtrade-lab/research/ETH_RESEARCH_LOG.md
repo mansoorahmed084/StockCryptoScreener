@@ -813,3 +813,89 @@ Worth noting what did *not* catch it: freqtrade's `lookahead-analysis` was never
 run on this, the held-out-coin protocol would have passed it (the bias is
 present in every coin equally), and the per-coin agreement made it look more
 trustworthy, not less. Only reading the code caught it.
+
+
+---
+
+# PHASE 6 — the trader's five charts: structure break + volatile alts
+
+Five 15m charts supplied (STX, S, SEI, DOT, TAO). All share a shape this project
+had not been testing, and two things in them turned out to matter.
+
+**1. The entry is the STRUCTURE BREAK, not the divergence.** Every chart shows
+price breaking a trendline or the swing high that capped the pullback, and the
+impulsive move happening after that break. Everything tested in phases 1-5
+entered at the moment the divergence confirmed. Coded in
+[breakout.py](breakout.py) as `divergence_breakout`, with the hand-drawn
+trendline approximated two ways: break of the highest high since the pivot
+("swing"), and break of a falling line fitted through those highs ("slope").
+Both are functions of bars at or before the trigger.
+
+**2. The coins are not large caps.** STX, SEI, TAO and S are volatile mid-caps.
+Measured median 15m bar range:
+
+| | median 15m range | cost as share of it |
+|---|---|---|
+| ENA / FET / TIA / TAO | 0.77-0.90% | ~35% |
+| the alt median | ~0.68% | ~44% |
+| ETH | 0.441% | 68% |
+| BTC | 0.333% | 90% |
+
+The alts move roughly twice as much per bar as BTC, which halves the relative
+cost drag. Finding 38 said 15m cannot work because the stop is too close for the
+fee; picking more volatile instruments is the direct attack on that.
+
+## Finding 42 — both of the trader's additions are real, and they stack
+
+25 alts, 13 fit / 12 held out, 15m, 3R target, matched comparison:
+
+| entry trigger | money flow | FIT avgR | HOLDOUT avgR |
+|---|---|---|---|
+| at the divergence (phases 1-5) | off | −0.278 | −0.269 |
+| at the divergence | green only | −0.218 | −0.251 |
+| break the swing high | off | −0.233 | −0.226 |
+| break the swing high | green only | −0.180 | −0.130 |
+| break a falling line | off | −0.195 | −0.248 |
+| **break a falling line** | **green only** | **−0.094** | −0.183 |
+
+Waiting for the break is worth roughly +0.05R, the money-flow filter another
++0.10R, and they compose. Both improve fit and holdout together, which is what a
+real effect looks like. But on 15m the combination only halves the loss.
+
+## Finding 43 — the same setup on 1h is the first positive held-out result
+
+| tf | median 1R | cost/R | FIT avgR | HOLDOUT avgR | PF | holdout coins positive |
+|---|---|---|---|---|---|---|
+| 15m | 2.30% | 13% | −0.094 | −0.183 | 0.76 | 1/12 |
+| **1h** | **5.18%** | **6%** | **+0.035** | **+0.049** | **1.07** | **6/9** |
+
+Positive on both baskets, on the majority of held-out coins, for the first time
+in this project. The mechanism is the cost ratio: the same setup on a 5.18% stop
+survives a fee that a 2.30% stop does not.
+
+## Finding 44 — but the dials do not form a plateau, so this is not tradeable yet
+
+Sweeping on FIT and reading HOLDOUT:
+
+| wt2 <= | atr_mult | FIT avgR | HOLDOUT avgR |
+|---|---|---|---|
+| −40 | 0.5 | +0.027 | −0.005 |
+| −40 | 1.0 | +0.035 | **+0.049** |
+| −40 | 2.0 | +0.060 | +0.015 |
+| −50 | 0.5 | +0.065 | −0.033 |
+| **−50** | **1.0** | **+0.082** | **+0.093** |
+| −50 | 2.0 | +0.033 | −0.019 |
+
+The best cell on FIT is also the best on HOLDOUT (+0.093R, PF 1.13, 6/8 coins) —
+the first time fit has predicted holdout here. But its immediate neighbours flip
+negative: atr 0.5 gives −0.033 and atr 2.0 gives −0.019 against +0.093 in
+between. That is a ridge, not a plateau, and finding 8 says a real effect looks
+like the latter.
+
+**Status: promising, not proven.** The two structural additions are supported by
+matched comparisons across both baskets. The specific parameter choice is not.
+An honest reading of the family is "around breakeven on 1h alts, with a real
+mechanism behind the improvement".
+
+4h on this universe is untested — these alts only have history from 2023, and no
+4h configuration cleared the n>=60 floor.

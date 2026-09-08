@@ -1,0 +1,134 @@
+"""Divergence, then a STRUCTURE BREAK as the trigger.
+
+Five 15m charts supplied by the trader (STX, S, SEI, DOT, TAO) all share the
+same shape, and it is not the shape this project has been testing:
+
+    1. price falls / ranges into a low
+    2. a VMC bullish divergence prints at that low
+    3. price then BREAKS a trendline or the swing high that capped the pullback
+    4. the impulsive move happens after the break
+
+Everything tested so far entered at step 2, the moment the divergence confirmed.
+The charts enter at step 3. That is a real difference and it is knowable -- the
+break is an event in the past when you act on it, not a peek at the future.
+
+The trendline on a chart is drawn by eye, so it is approximated here two ways:
+
+    "swing"  break above the highest high since the divergence pivot
+    "slope"  break above a falling line fitted through the highs since the
+             pivot, which is closer to what a hand-drawn descending trendline
+             does: it lets you in earlier as the line falls toward price
+
+Both are pure functions of bars at or before the trigger.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from strategies import atr                              # noqa: E402
+from backend.indicators.vumanchu import VuManChuCipherB  # noqa: E402
+from backend.indicators import common                    # noqa: E402
+
+PIVOT = 3
+
+
+def divergence_breakout(
+        df: pd.DataFrame, *, side: str = "long",
+        # --- the divergence ---
+        wt2_max: float = -40.0,
+        pivot_lookback: int = PIVOT,
+        # --- the trigger ---
+        trigger: str = "swing",       # "swing" | "slope" | "none"
+        wait_bars: int = 24,          # how long the break may take
+        min_wait: int = 1,            # bars that must pass before a break counts
+        # --- filters ---
+        mfi_min: float | None = None,   # VMC money-flow area, 0.0 = green only
+        require_hold: bool = True,      # void it if the pivot low is broken first
+        # --- risk ---
+        atr_mult: float = 1.0, atr_len: int = 14,
+        max_risk_pct: float = 0.12,
+        gate: pd.Series | None = None,
+        gate_allow: tuple[str, ...] = ("bull", "neutral"),
+) -> pd.DataFrame:
+    """One signal per divergence that goes on to break structure."""
+    res = VuManChuCipherB(pivot_lookback=pivot_lookback).compute(df)
+    wt2 = res.panes.get("wt2")
+    if wt2 is None:
+        return pd.DataFrame(columns=["direction", "stop"])
+
+    a = atr(df, atr_len).to_numpy()
+    mfi = (common.vumanchu_moneyflow(df).to_numpy()
+           if mfi_min is not None else None)
+    highs, lows, closes = (df["high"].to_numpy(), df["low"].to_numpy(),
+                           df["close"].to_numpy())
+    n = len(df)
+    rows = []
+
+    for m in res.markers:
+        if m.kind != "bull_div":
+            continue
+        p = df.index.get_loc(m.ts)
+        c = p + pivot_lookback                    # divergence confirmed here
+        if c >= n - 1 or float(wt2.iloc[p]) > wt2_max:
+            continue
+        pivot_low = float(lows[p])
+        end = min(n, c + wait_bars + 1)
+        if c + min_wait >= end:
+            continue
+
+        trig_bar = None
+        for i in range(c + min_wait, end):
+            # the setup dies if price loses the low that made the divergence
+            if require_hold and lows[i] < pivot_low:
+                break
+            if trigger == "none":
+                trig_bar = i
+                break
+            window_hi = highs[c:i]                # highs strictly before bar i
+            if window_hi.size == 0:
+                continue
+            if trigger == "swing":
+                level = float(window_hi.max())
+            else:                                  # "slope": a falling line
+                k = window_hi.size
+                if k < 3:
+                    continue
+                xs = np.arange(k, dtype=float)
+                slope, intercept = np.polyfit(xs, window_hi, 1)
+                if slope > 0:                      # only fade a FALLING line
+                    level = float(window_hi.max())
+                else:
+                    level = float(intercept + slope * k)
+            if closes[i] > level:
+                trig_bar = i
+                break
+
+        if trig_bar is None or not np.isfinite(a[trig_bar]):
+            continue
+        if mfi is not None and not (mfi[trig_bar] >= mfi_min):
+            continue
+        ts = df.index[trig_bar]
+        if gate is not None and gate.get(ts, "unknown") not in gate_allow:
+            continue
+
+        # stop under the low that produced the divergence
+        stop = min(pivot_low, float(lows[c:trig_bar + 1].min())) - atr_mult * a[trig_bar]
+        ref = float(closes[trig_bar])
+        if stop <= 0 or ref <= 0 or (ref - stop) / ref > max_risk_pct:
+            continue
+        rows.append({"ts": ts, "direction": 1, "stop": float(stop)})
+
+    if not rows:
+        return pd.DataFrame(columns=["direction", "stop"])
+    out = pd.DataFrame(rows).set_index("ts")
+    return out[~out.index.duplicated(keep="first")].sort_index()
