@@ -54,6 +54,12 @@ def divergence_breakout(
         # --- filters ---
         mfi_min: float | None = None,   # VMC money-flow area, 0.0 = green only
         require_hold: bool = True,      # void it if the pivot low is broken first
+        # --- market breadth: how oversold the WHOLE universe is at the trigger,
+        # as a percentile of its own history. Tests whether a cluster of
+        # simultaneous signals is a washout to buy or a knife to avoid.
+        breadth: pd.Series | None = None,
+        breadth_min: float | None = None,
+        breadth_max: float | None = None,
         # --- risk ---
         atr_mult: float = 1.0, atr_len: int = 14,
         max_risk_pct: float = 0.12,
@@ -118,6 +124,15 @@ def divergence_breakout(
         if mfi is not None and not (mfi[trig_bar] >= mfi_min):
             continue
         ts = df.index[trig_bar]
+        if breadth is not None and (breadth_min is not None
+                                    or breadth_max is not None):
+            bv = breadth.get(ts, np.nan)
+            if not np.isfinite(bv):
+                continue
+            if breadth_min is not None and bv < breadth_min:
+                continue
+            if breadth_max is not None and bv > breadth_max:
+                continue
         if gate is not None and gate.get(ts, "unknown") not in gate_allow:
             continue
 

@@ -168,6 +168,15 @@ def simulate(signals: pd.DataFrame, base: pd.DataFrame, detail: pd.DataFrame,
         base_bar = base.index[1] - base.index[0]
     trades: list[Trade] = []
 
+    # The detail frame must actually cover the signal, or the walk resolves the
+    # trade against bars from a completely different era. Some pairs have years
+    # more history on the signal timeframe than on the detail timeframe, and
+    # searchsorted silently returns position 0 for anything earlier -- pricing a
+    # 2021 entry against 2024 candles and manufacturing enormous fake R.
+    if len(detail) == 0:
+        return trades
+    det_start, det_end = detail.index[0], detail.index[-1]
+
     for ts, row in signals.iterrows():
         entry_ts = ts + base_bar               # enter at the next base bar's open
         if entry_ts not in base.index:
@@ -180,6 +189,8 @@ def simulate(signals: pd.DataFrame, base: pd.DataFrame, detail: pd.DataFrame,
         if direction < 0 and stop <= entry:
             continue
 
+        if entry_ts < det_start or entry_ts > det_end:
+            continue                           # outside the detail coverage
         start = detail.index.searchsorted(entry_ts, side="left")
         if start >= len(detail):
             continue

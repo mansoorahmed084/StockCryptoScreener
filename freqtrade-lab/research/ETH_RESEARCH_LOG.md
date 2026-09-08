@@ -899,3 +899,140 @@ mechanism behind the improvement".
 
 4h on this universe is untested — these alts only have history from 2023, and no
 4h configuration cleared the n>=60 floor.
+
+---
+
+# PHASE 7 — the campaign, and the strategy that came out of it
+
+Free hand to improvise. Method: only ingredients that already survived a
+held-out-coin test were allowed in without re-litigating, everything else had to
+earn its place. Universe expanded to 76 coins, split by hashing the coin name so
+fit/holdout membership carries no market-cap, listing-age or sector information.
+
+## A harness bug found first, and it mattered
+
+The opening run reported +2.021R average on a 3R-capped strategy with a 28.9%
+win rate. The arithmetic maximum there is about +0.16R, so it was wrong.
+
+Cause: 8 of the first 24 coins have 1h history from 2020 but 15m detail only
+from 2024. `simulate()` used `searchsorted`, which silently returns position 0
+for a timestamp before the detail starts — pricing a 2021 entry against 2024
+candles. `simulate()` now refuses any signal outside the detail coverage.
+Earlier phases are unaffected, because their detail and signal frames were
+downloaded over matching ranges.
+
+## Finding 45 — the supported ingredients compose, monotonically
+
+1h, 76 coins, on the HELD-OUT half:
+
+| stack | avgR | PF | maxDD_R | coins positive |
+|---|---|---|---|---|
+| bare divergence | −0.168 | 0.79 | 826.0 | 1/36 |
+| + structure break | −0.097 | 0.87 | 317.4 | 10/36 |
+| + money flow green | −0.086 | 0.88 | 83.4 | 13/34 |
+| + daily regime gate | **−0.002** | **1.00** | **39.1** | 8/19 |
+
+Every ingredient improves the held-out number, and drawdown falls 826R → 39R.
+But the stack tops out at breakeven on 1h.
+
+## Finding 46 — market breadth is not a filter
+
+The hypothesis was that a divergence printing while 60% of the universe is
+oversold is a different event from one printing while 5% is — either a washout
+to buy or a knife to avoid. Breadth is strongly clustered (median 4% of the
+universe oversold, 90th percentile 64.7%), so the question was real.
+
+| breadth bucket | FIT avgR | HOLDOUT avgR |
+|---|---|---|
+| LOW | +0.029 | −0.097 |
+| MID | −0.171 | −0.178 |
+| HIGH | +0.096 | −0.197 |
+
+Neither. No bucket is positive out of sample, and HIGH flips sign between the
+two baskets. Rejected.
+
+## Finding 47 — the exit was not the problem
+
+| target | HOLDOUT avgR |
+|---|---|
+| 1R | −0.121 |
+| 1.5R | −0.095 |
+| 2R | −0.115 |
+| 2.5R | −0.045 |
+| **3R** | **−0.002** |
+| scale-outs (4 shapes) | −0.094 to −0.142 |
+
+3R was already the best available. Shorter targets and every scale-out are
+worse. The edge in this entry lives in the tail, not the body — so on 1h there
+was nothing left to fix.
+
+## Finding 48 — the same stack on DAILY works, at every setting
+
+Every cost finding in this project points the same way, and the one strategy
+that had ever survived a held-out test already lived on daily. So: same
+ingredients, daily candles, 76 coins, history back to 2018.
+
+| wt2 <= | trigger | FIT avgR | **HOLDOUT avgR** | PF | maxDD_R | coins + |
+|---|---|---|---|---|---|---|
+| −30 | none | +0.268 | **+0.133** | 1.19 | 29.2 | 11/24 |
+| **−30** | **break** | +0.455 | **+0.342** | **1.54** | **6.7** | 4/4 |
+| −40 | none | +0.315 | +0.030 | 1.04 | 31.6 | 6/19 |
+| −40 | break | +0.574 | +0.266 | 1.41 | 6.7 | 4/4 |
+| −50 | none | +0.429 | +0.149 | 1.22 | 12.3 | 5/9 |
+| −50 | break | +0.804 | +0.301 | 1.48 | 4.1 | 1/2 |
+
+**Every row is positive on held-out coins**, and the structure break improves
+every single pairing while cutting drawdown from ~30R to ~6R. That is a plateau
+across the `wt2` dial, not a ridge — the shape finding 8 says a real effect has.
+
+## Freqtrade cross-check
+
+[DailyDivBreakout.py](../user_data/strategies/DailyDivBreakout.py), independent
+engine, 1h detail fills, 0.15% per side:
+
+| coin set | trades | win% | profit | max DD |
+|---|---|---|---|---|
+| FIT (40 coins) | 64 | 37.5 | +25.21% | 11.52% |
+| **HELD OUT (36 coins)** | **69** | **37.7** | **+32.94%** | **9.30%** |
+
+Held out beat fit. Win rates match the harness within 2 points.
+
+## The result
+
+Full 76-coin universe, 2020-01 to 2026-09, 1% risk per trade, max 10 concurrent:
+
+| | DailyDivBreakout | VmcCapitulation (previous best) |
+|---|---|---|
+| CAGR | **10.53%** | 5.12% |
+| on 1 lac | **₹10,535/yr** | ₹5,115/yr |
+| total | +95.24% | +39.55% |
+| profit factor | **1.73** | 1.66 |
+| win rate | 37.1% at 3R | 60% at 1.5R |
+| max drawdown | **18.61%** | 9.96% |
+| trades/year | 19.8 | 9.7 |
+
+Roughly double the return of the previous best, at roughly double the drawdown.
+
+## What is wrong with it
+
+**2023 produced 69% of all profit.** Year by year, per lac: 2020 +14,010 ·
+2021 −1,160 · 2022 −13,390 · **2023 +65,860** · 2024 +20,480 · 2025 −3,420 ·
+2026 +12,850. Four up years, three down. A strategy that needs one exceptional
+year to carry six is not the same thing as one that earns steadily, and the
+held-out test does not protect against that — both baskets lived through 2023.
+
+**Drawdown is 18.6% closed, 32.2% on balance.** Worse than the brief asked for.
+
+**19.8 trades a year** is back to the frequency problem, because daily bars are
+slow. The cost economics that make daily work are the same thing that makes it
+infrequent.
+
+## Standing position after seven phases
+
+This is the first strategy developed here that is positive on coins it was never
+tuned on, in two independent engines, at every parameter setting tested. That is
+a real result and it is the one worth forward-testing.
+
+It is not a solved problem. The honest next step is paper trading, not another
+campaign — the profit concentration in 2023 is exactly the kind of thing that
+only forward evidence can settle.
