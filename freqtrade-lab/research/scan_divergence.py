@@ -33,6 +33,11 @@ from backend.indicators import common                    # noqa: E402
 from backend.screener import rs                          # noqa: E402
 
 PIVOT = 3
+# Breach depth below which a break is reported as "marginal" rather than
+# "broken". Reporting only -- breach_test.py measured shallow breaches at
+# -0.196R against -0.204R for deep ones on 4h across 29 coins, i.e. no
+# difference, so a marginal breach still does NOT count as an active signal.
+MARGINAL_BREACH = 0.01
 TIMEFRAMES = ["1w", "1d", "4h", "1h", "15m"]
 
 # How long a divergence counts as "active", per timeframe. Chosen so each means
@@ -82,17 +87,23 @@ def last_valid_bull_div(df: pd.DataFrame) -> dict:
     cands.sort()                                  # newest first
 
     invalidated = 0
+    worst_marginal = None
     for ago, p in cands:
         pivot_low = float(lows[p])
-        # any bar AFTER the pivot that traded below it breaks the structure
-        broken = bool(n > p + 1 and lows[p + 1:].min() < pivot_low)
-        if broken:
+        since = float(lows[p + 1:].min()) if n > p + 1 else pivot_low
+        depth = (pivot_low - since) / pivot_low if pivot_low > 0 else 0.0
+        if depth > 0:
             invalidated += 1
+            # remember the shallowest recent break for reporting, but do NOT
+            # promote it to active: measured no better than a deep break
+            if depth <= MARGINAL_BREACH and worst_marginal is None:
+                worst_marginal = {"ago": ago, "wt2": float(wt2.iloc[p]),
+                                  "low": pivot_low, "breach": depth}
             continue
         return {"ago": ago, "wt2": float(wt2.iloc[p]), "low": pivot_low,
-                "invalidated": invalidated,
+                "invalidated": invalidated, "breach": 0.0,
                 "wt2_now": float(wt2.iloc[-1])}
-    return {"ago": None, "invalidated": invalidated}
+    return {"ago": None, "invalidated": invalidated, "marginal": worst_marginal}
 
 
 def main() -> None:
@@ -149,8 +160,12 @@ def main() -> None:
         for tf in TIMEFRAMES:
             v = r.get(tf)
             if not v or v.get("ago") is None:
-                cells.append("—" if not v or not v.get("invalidated")
-                             else f"void x{v['invalidated']}")
+                mg = (v or {}).get("marginal")
+                if mg:
+                    cells.append(f"marg {mg['ago']}b (-{mg['breach']*100:.1f}%)")
+                else:
+                    cells.append("—" if not v or not v.get("invalidated")
+                                 else f"void x{v['invalidated']}")
             else:
                 mark = "**" if v["ago"] <= windows[tf] else ""
                 cells.append(f"{mark}{v['ago']}b{mark} (wt {v['wt2']:.0f})")

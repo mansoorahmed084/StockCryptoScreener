@@ -744,3 +744,72 @@ itself evidence for finding 36.
 Running tally across the whole project: **0 strategies developed in phases
 1-4 have survived an instrument-level out-of-sample test.** The only one that
 has is `VmcCapitulation`, which predates all of it.
+
+
+---
+
+# PHASE 5 — breach tolerance, and a lookahead trap worth remembering
+
+The live scanner voids a bull divergence the moment price trades below the pivot
+low that formed it. Four live cases breached by under 1%, and a breach that
+shallow is arguably the *second low of a double bottom* rather than an
+invalidation. Testable, so [breach_test.py](breach_test.py) tests it.
+
+Every confirmed divergence goes into one bucket:
+
+| bucket | entry | uses future information? |
+|---|---|---|
+| ALL | confirmation bar | no — the honest baseline |
+| CLEAN | confirmation bar, *if* no breach followed | **YES — not tradeable** |
+| SHALLOW | on the reclaim after a breach <= tol | no |
+| DEEP | on the break, breach > tol | no |
+
+## Results, 29 coins
+
+**4h**
+
+| bucket | n | win% | avgR | PF | maxDD_R | coins positive |
+|---|---|---|---|---|---|---|
+| ALL | 1922 | 24.8 | −0.135 | 0.83 | 276.3 | 7/29 |
+| CLEAN *(lookahead)* | 713 | 43.5 | *+0.516* | *1.91* | *10.1* | *28/29* |
+| SHALLOW | 584 | 21.9 | **−0.196** | 0.76 | 124.0 | 9/29 |
+| DEEP | 643 | 21.9 | **−0.204** | 0.75 | 167.1 | 7/29 |
+
+**1h**
+
+| bucket | n | win% | avgR | PF | coins positive |
+|---|---|---|---|---|---|
+| ALL | 4952 | 25.8 | −0.195 | 0.75 | 0/16 |
+| CLEAN *(lookahead)* | 1476 | 53.7 | *+0.709* | *2.59* | *16/16* |
+| SHALLOW | 2339 | 23.1 | **−0.242** | 0.71 | 0/16 |
+| DEEP | 1073 | 27.9 | **−0.045** | 0.94 | 6/16 |
+
+## Finding 40 — shallow breaches are not better, so the strict rule stays
+
+On 4h, shallow (−0.196R) and deep (−0.204R) are indistinguishable. On 1h,
+shallow is *worse* (−0.242R vs −0.045R). There is no timeframe where waiting for
+a shallow dip and buying the reclaim beats simply discarding the signal.
+
+The double-bottom reading of a shallow breach is intuitive and wrong. A break is
+a break. The scanner keeps voiding all of them; `MARGINAL_BREACH` now reports
+breach depth as context (`marg 30b (-0.1%)`) but never promotes a marginal break
+to an active signal.
+
+## Finding 41 — measure the size of your own lookahead traps
+
+The CLEAN bucket is the same population as ALL minus the trades that later went
+against it. It scores **+0.516R on 4h and +0.709R on 1h, positive on 28/29 and
+16/16 coins** — the strongest, broadest, most convincing-looking result anywhere
+in this project. It is entirely an artefact. The classification reads bars that
+sit *after* the entry it labels.
+
+The illusion is worth **+0.65R on 4h and +0.90R on 1h** against the honest
+baseline. That is the scale of what a single innocuous-looking filter can
+manufacture. Anything in this project reporting better than roughly +0.5R with
+near-universal per-coin agreement should be assumed contaminated until the
+entry-versus-information ordering has been checked by hand.
+
+Worth noting what did *not* catch it: freqtrade's `lookahead-analysis` was never
+run on this, the held-out-coin protocol would have passed it (the bias is
+present in every coin equally), and the per-coin agreement made it look more
+trustworthy, not less. Only reading the code caught it.
