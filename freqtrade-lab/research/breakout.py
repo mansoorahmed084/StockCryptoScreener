@@ -67,6 +67,35 @@ def divergence_breakout(
         gate_allow: tuple[str, ...] = ("bull", "neutral"),
 ) -> pd.DataFrame:
     """One signal per divergence that goes on to break structure."""
+    if side == "short":
+        # Price inversion: a short on X is a long on 1/X with high and low
+        # swapped, so the whole long pipeline -- divergence, oversold, falling
+        # trendline, money flow -- prices the short side unchanged. This is the
+        # technique backend/research/strategy.py already uses. WaveTrend is
+        # odd-symmetric in price (ci negates when hlc3 negates, d is unchanged),
+        # so a bull divergence on the inverted series IS a bear divergence on
+        # the original. Funding is NOT modelled.
+        flip = pd.DataFrame({"open": 1.0 / df["open"], "high": 1.0 / df["low"],
+                             "low": 1.0 / df["high"], "close": 1.0 / df["close"],
+                             "volume": df["volume"]}, index=df.index)
+        out = divergence_breakout(
+            flip, side="long", wt2_max=wt2_max, pivot_lookback=pivot_lookback,
+            trigger=trigger, wait_bars=wait_bars, min_wait=min_wait,
+            mfi_min=mfi_min, require_hold=require_hold, breadth=breadth,
+            breadth_min=breadth_min, breadth_max=breadth_max,
+            atr_mult=atr_mult, atr_len=atr_len, max_risk_pct=max_risk_pct,
+            gate=None, gate_allow=gate_allow)
+        if out.empty:
+            return out
+        out = out.copy()
+        out["direction"] = -1
+        out["stop"] = 1.0 / out["stop"]          # back to real price space
+        if gate is not None:
+            keep = [ts for ts in out.index
+                    if gate.get(ts, "unknown") in gate_allow]
+            out = out.loc[keep]
+        return out
+
     res = VuManChuCipherB(pivot_lookback=pivot_lookback).compute(df)
     wt2 = res.panes.get("wt2")
     if wt2 is None:

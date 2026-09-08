@@ -1036,3 +1036,86 @@ a real result and it is the one worth forward-testing.
 It is not a solved problem. The honest next step is paper trading, not another
 campaign — the profit concentration in 2023 is exactly the kind of thing that
 only forward evidence can settle.
+
+---
+
+## The short mirror
+
+Built by price inversion — a short on X is a long on 1/X with high and low
+swapped — which is the technique `backend/research/strategy.py` already uses.
+WaveTrend is odd-symmetric in price, so a bull divergence on the inverted series
+*is* a bear divergence on the original. **Funding is not modelled.**
+
+Thresholds are symmetric: −30 means WT2 ≤ −30 for longs, WT2 ≥ +30 for shorts.
+
+| side | wt2 | trigger | FIT avgR | **HELD-OUT avgR** | PF | coins + |
+|---|---|---|---|---|---|---|
+| long | −30 | break | +0.455 | **+0.342** | 1.54 | 4/4 |
+| long | −40 | break | +0.574 | **+0.266** | 1.41 | 4/4 |
+| long | −50 | break | +0.804 | **+0.301** | 1.48 | 1/2 |
+| short | −30 | none | −0.052 | **−0.222** | 0.68 | 1/5 |
+| short | −40 | none | +0.151 | **−0.237** | 0.66 | 0/5 |
+| short | −50 | none | +0.031 | **−0.193** | 0.72 | 1/4 |
+
+### Finding 49 — the short mirror does not work on its own
+
+Negative on held-out coins at every threshold, profit factor 0.66–0.72, positive
+on at most 1 coin in 5. The structure-break trigger could not even be tested on
+the short side: it starved the sample below 30 trades, because falling-line
+breaks are common in crypto and rising-line breakdowns are not.
+
+This repeats phase 2, where the short mirror of the pullback entry measured
+−0.003R against +0.220R for longs. Two different entries, same answer. The
+likely cause is structural: the universe rose over 2020–2026, and it is today's
+listings, so anything that failed and delisted is absent. Both facts flatter
+longs and punish shorts.
+
+### Finding 50 — but shorts win in exactly the years longs lose
+
+Portfolio simulation, ₹1,00,000, 1% risk per trade, max 10 concurrent, walked in
+chronological order so overlapping signals contend for slots
+([portfolio.py](portfolio.py)):
+
+| year | LONG pnl | SHORT pnl | **COMBINED pnl** | combined return |
+|---|---|---|---|---|
+| 2020 | +17,900 | −8,904 | **+7,402** | +7.4% |
+| 2021 | **−1,193** | **+4,222** | **+3,840** | +3.6% |
+| 2022 | **−5,379** | **+9,678** | **+8,059** | +7.2% |
+| 2023 | +24,640 | −17,078 | **+2,705** | +2.3% |
+| 2024 | +15,731 | −3,114 | **+10,647** | +8.7% |
+| 2025 | **−3,544** | **+3,422** | **+2,128** | +1.6% |
+| 2026 | +13,001 | +2,983 | **+23,090** | +17.1% |
+
+The three years the long book lost money — 2021, 2022, 2025 — are three of the
+four years the short book made money. The correlation is strongly negative, and
+the consequence is the interesting part:
+
+| | LONG only | SHORT only | COMBINED |
+|---|---|---|---|
+| CAGR | **+7.41%** | −1.37% | +7.07% |
+| profit factor | **1.59** | 0.90 | 1.31 |
+| max drawdown | **17.24%** | 26.34% | 20.78% |
+| **losing years** | **3 of 7** | 3 of 7 | **0 of 7** |
+| worst year | −5,379 | −17,078 | **+2,128** |
+| share of profit from best year | **69%** (2023) | — | **40%** (2026) |
+
+**Adding a losing book made the account more consistent.** Combined gives up
+0.34 points of CAGR and takes 3.5 points more drawdown, and in exchange every
+single year is positive and the profit concentration that was the long book's
+main weakness drops from 69% to 40%.
+
+That is a real diversification effect, not a rounding artefact — but note what
+it is not. The short book has **negative expectancy**. It is being carried as a
+hedge, and a hedge with negative expectancy costs money on average. Whether that
+is worth paying depends on whether the smoother equity curve is what you need.
+
+### Caveats specific to the combined result
+
+* Shorts here are a price-inversion approximation. A real short needs futures,
+  and **funding costs are not modelled** — on perpetuals those are charged every
+  8 hours and would make the short book worse than shown.
+* This portfolio simulation gives a lower long-only CAGR (7.41%) than the
+  freqtrade run of the same rules (10.53%), because the two handle position
+  sizing and slot contention differently. Treat the range 7–10% as the honest
+  uncertainty, not either endpoint as the number.
+* Seven years, one of them partial at each end.
