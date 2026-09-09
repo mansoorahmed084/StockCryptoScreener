@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from itertools import product
 from pathlib import Path
 
@@ -121,6 +122,37 @@ def score(coins: list[str], tf: str, cfg: dict) -> dict:
     return m
 
 
+def cfg_key(cfg: dict) -> str:
+    """Stable identity for a grid cell, so a resumed worker can skip what it did."""
+    return "|".join(f"{k}={cfg[k]}" for k in GRID)
+
+
+def read_done(jl: Path, legacy: Path) -> tuple[set, int]:
+    """Cells already on disk, from the append log and from any older whole-file run."""
+    done, n = set(), 0
+    if legacy.exists():
+        try:
+            for r in json.loads(legacy.read_text(encoding="utf-8")):
+                done.add(cfg_key(r["cfg"]))
+                n += 1
+        except (json.JSONDecodeError, KeyError):
+            pass
+    if jl.exists():
+        with jl.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue        # a torn last line from a killed worker
+                if cfg_key(r["cfg"]) not in done:
+                    done.add(cfg_key(r["cfg"]))
+                    n += 1
+    return done, n
+
+
 def main() -> None:
     tf = sys.argv[1] if len(sys.argv) > 1 else "1d"
     widx = int(sys.argv[2]) if len(sys.argv) > 2 else 0
@@ -134,23 +166,38 @@ def main() -> None:
     keys = list(GRID)
     combos = [dict(zip(keys, v)) for v in product(*(GRID[k] for k in keys))]
     mine = combos[widx::wcnt]
-    out = []
-    for i, cfg in enumerate(mine):
-        try:
-            f = score(fit, tf, cfg)
-            if not f.get("n") or f["n"] < 30:
-                continue
-            h = score(hold, tf, cfg)
-            out.append({"cfg": cfg, "fit": f, "hold": h})
-        except Exception as exc:
-            out.append({"cfg": cfg, "error": f"{type(exc).__name__}: {exc}"})
-        if i % 200 == 0:
-            print(f"worker {widx}: {i}/{len(mine)}", file=sys.stderr, flush=True)
 
-    dest = Path(__file__).resolve().parent / "results" / f"opt_{tf}_{widx}.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(out, indent=1, default=str), encoding="utf-8")
-    print(f"worker {widx}: wrote {len(out)} scored configs of {len(mine)}")
+    res = Path(__file__).resolve().parent / "results"
+    res.mkdir(parents=True, exist_ok=True)
+    legacy = res / f"opt_{tf}_{widx}.json"
+    jl = res / f"opt_{tf}_{widx}.jsonl"
+
+    # One appended line per scored cell. The first version of this held every
+    # result in a list and re-serialised the whole list on each checkpoint; six
+    # of those in parallel exhausted a 7 GB box and killed five of six workers
+    # mid-grid. Appending costs one row of memory and cannot truncate the file.
+    done, have = read_done(jl, legacy)
+    todo = [c for c in mine if cfg_key(c) not in done]
+    print(f"worker {widx}: {have} on disk, {len(todo)} to go",
+          file=sys.stderr, flush=True)
+
+    with jl.open("a", encoding="utf-8") as fh:
+        for i, cfg in enumerate(todo):
+            try:
+                f = score(fit, tf, cfg)
+                if not f.get("n") or f["n"] < 30:
+                    row = {"cfg": cfg, "thin": f.get("n", 0)}
+                else:
+                    row = {"cfg": cfg, "fit": f, "hold": score(hold, tf, cfg)}
+            except Exception as exc:
+                row = {"cfg": cfg, "error": f"{type(exc).__name__}: {exc}"}
+            print(json.dumps(row, default=str), file=fh)
+            if (i + 1) % 25 == 0:
+                fh.flush()
+                print(f"worker {widx}: {i + 1}/{len(todo)}",
+                      file=sys.stderr, flush=True)
+
+    print(f"worker {widx}: finished, {have + len(todo)} cells of {len(mine)}")
 
 
 if __name__ == "__main__":

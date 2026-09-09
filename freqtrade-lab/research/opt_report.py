@@ -29,12 +29,37 @@ DIALS = ["side", "wt2_max", "trigger", "wait_bars", "atr_mult", "mfi_min",
 
 
 def load(tf: str) -> list[dict]:
-    rows = []
+    """Every scored cell, from the append logs and from any older whole-file run.
+
+    Both shapes exist on disk: the grid was restarted after the first version of
+    the optimiser was replaced. Cells are de-duplicated on the config itself.
+    """
+    seen, rows = set(), []
     for p in sorted(RESULTS.glob(f"opt_{tf}_*.json")):
-        rows += json.loads(p.read_text(encoding="utf-8"))
-    return [r for r in rows if "error" not in r
-            and r.get("fit", {}).get("n", 0) >= MIN_FIT_N
-            and r.get("hold", {}).get("n", 0) >= MIN_HOLD_N]
+        try:
+            rows += json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+    for p in sorted(RESULTS.glob(f"opt_{tf}_*.jsonl")):
+        with p.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    out = []
+    for r in rows:
+        k = key(r["cfg"])
+        if k in seen:
+            continue
+        seen.add(k)
+        if ("error" not in r and r.get("fit", {}).get("n", 0) >= MIN_FIT_N
+                and r.get("hold", {}).get("n", 0) >= MIN_HOLD_N):
+            out.append(r)
+    return out
 
 
 def key(cfg: dict) -> tuple:
@@ -42,16 +67,27 @@ def key(cfg: dict) -> tuple:
 
 
 def neighbour_scores(rows: list[dict], metric: str) -> dict:
+    """Mean holdout metric of every config one dial away.
+
+    Built by substituting each dial's other observed values and looking the
+    result up, rather than comparing every pair. The full grid clears the
+    sample floors in the thousands, and the pairwise form is 9*n^2 Python
+    iterations -- minutes to hours. Same numbers, linear in the grid.
+    """
     by = {key(r["cfg"]): r for r in rows}
+    values: list[set] = [set() for _ in DIALS]
+    for k in by:
+        for i, v in enumerate(k):
+            values[i].add(v)
     out = {}
-    for k, r in by.items():
+    for k in by:
         vals = []
         for i in range(len(DIALS)):
-            for other_k, other in by.items():
-                if other_k is k or other_k == k:
+            for v in values[i]:
+                if v == k[i]:
                     continue
-                diff = sum(1 for a, b in zip(k, other_k) if a != b)
-                if diff == 1:
+                other = by.get(k[:i] + (v,) + k[i + 1:])
+                if other is not None:
                     vals.append(other["hold"].get(metric, 0.0))
         out[k] = float(np.mean(vals)) if len(vals) >= 3 else float("nan")
     return out
