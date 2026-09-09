@@ -21,12 +21,38 @@ CAGR  ≈ annual_R × risk%          maxDD ≈ maxDD_R × risk%
 What you actually own is the **ratio annual_R / maxDD_R**. Risk% only picks a
 point on that line — you cannot size your way out of a bad ratio.
 
-| book | annual_R | maxDD_R | **ratio** | CAGR at 30% DD | at 50% DD |
-|---|---|---|---|---|---|
-| daily long + structure break (best) | 3.74 | 6.7 | **0.56** | 17% | 28% |
-| VmcCapitulation (repo's original) | 3.9 | 9.96 | 0.39 | 12% | 20% |
-| long + short combined | 4.3 | 20.8 | 0.21 | 6% | 10% |
-| daily long, no trigger | 5.1 | 29.2 | 0.17 | 5% | 9% |
+Every maxDD_R below is measured **in date order**. Until 2026-09-09 none of
+them were: `metrics()` walked the trade list in the order it was handed, and a
+pooled basket is built coin by coin, so the drawdown described the coin loop
+rather than the passage of time. It understated the real figure by two to
+three times. The fix and the evidence are in section 4.
+
+| book (HOLDOUT coins) | annual_R | maxDD_R | **ratio** | was printed as | CAGR at 30% DD | at 50% DD |
+|---|---|---|---|---|---|---|
+| **long-term trendline break (best)** | 26.11 | 26.5 | **0.99** | 3.26 | — see note | — |
+| **2xATR stop + 4R target** (grid, section 5) | 11.80 | 22.9 | **0.52** | 2.33 | 16% | 26% |
+| daily long + structure break | 3.74 | 10.3 | 0.36 | 0.56 | 11% | 18% |
+| long + short combined | 2.72 | 10.6 | 0.26 | 0.21 | 8% | 13% |
+| daily long, no trigger | 4.20 | 33.7 | 0.12 | 0.17 | 4% | 6% |
+| VmcCapitulation (repo's original) | 3.9 | *not re-run* | — | 0.39 | — | — |
+
+Only the structure-break row's annual_R reproduces exactly against current
+code. The combined and no-trigger rows were rebuilt from the grid's dials and
+land near, not on, their old values — re-derived rather than restored.
+VmcCapitulation has not been re-run at all.
+
+**Nothing about the rankings changed.** annual_R, avg_r, PF and the win rates
+do not depend on trade order, so every search in this repo selected on sound
+numbers. Only maxDD_R, r_per_dd and worst_streak were wrong, and only where a
+basket was pooled across coins. What changed is the size of the prize: the best
+ratio on the board is 0.99, not 3.26.
+
+*Note on the trendline row:* that pooled ratio assumes every signal could be
+taken. It cannot — the signals cluster. The honest account number is **CAGR
+14.5% at a 21.0% drawdown** in freqtrade (17.4% in the harness once the sizing
+flaw below is fixed), against **10.7% at 18.5%** for the strategy beneath it on
+the identical freqtrade run. Better, not double. See
+[STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
 
 **To beat ~17% CAGR at a tolerable drawdown, the ratio must rise.** Only two
 things move it, and neither is a parameter tweak:
@@ -41,6 +67,33 @@ which measures whether an edge exists but not how much money it makes.
 ---
 
 ## 2. What is PROVEN (survived held-out coins + two engines)
+
+**TrendlineBreakout** (best) — documented in
+[STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
+
+Daily candles, long only. A descending line anchored at the highest high of the
+last 200 days, sloped so no later high pokes through it; the break must be 60+
+days after the anchor, price must have fallen 25% beneath it, 3 highs must sit
+on it, and break volume must be 1.5x its 20-day mean. Stop = 20-day low
+- 1.5xATR(14). **Exit is a 3R trailing stop, not a target** — a fixed 3R
+measured a holdout ratio of 0.14 against 0.78 for the trail.
+
+| | value |
+|---|---|
+| CAGR, freqtrade, max 10 open | 14.54% (vs 10.71% for DailyDivBreakout, same run) |
+| CAGR, harness, sizing corrected | 17.4% |
+| max drawdown, closed trades | 21.0% (vs 18.5%) |
+| max drawdown, mark-to-market | **76%** — unexplained, check this first |
+| profit factor | 1.82 (vs 1.75) |
+| win rate | 37.7% |
+| filled trades/year | ~24 |
+
+Evidence: **468 of 468 grid cells positive on held-out coins**, median holdout
+ratio 1.86; 100% neighbour agreement on every top cell; 147/147 signals survive
+having the future physically deleted; holdout coins beat fit coins.
+Weaknesses are real and listed in the strategy doc — the signals are heavily
+correlated, 2 of 7 years lost money, and 2021 was flat because a bull market
+has no long descending lines to break.
 
 **DailyDivBreakout** — documented in
 [STRATEGY_DailyDivBreakout.md](STRATEGY_DailyDivBreakout.md).
@@ -85,7 +138,8 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | shorts (mirror of any entry) | −0.19 to −0.24R held out, PF 0.66–0.72 |
 | market breadth as a filter | no bucket positive out of sample; flips sign between baskets |
 | shallow-breach re-entry | −0.196R, no better than deep breaches |
-| exit re-engineering | 3R already optimal; all shorter targets and 4 scale-out shapes worse |
+| exit re-engineering (divergence family) | 3R already optimal; all shorter targets and 4 scale-out shapes worse |
+| a fixed target on the TRENDLINE family | opposite result: 3R gives ratio 0.14 vs 0.78 trailing. Do not carry the divergence family's exit across |
 | ETH-only optimisation (~5,300 configs) | every result lost money on other coins |
 | blow-off fade on one coin | −0.42R; needed the basket |
 | ATR volatility floor | harmful at every threshold |
@@ -115,11 +169,25 @@ These were learned the hard way; each caught a result that looked real.
    bars *after* its own entry. `lookahead-analysis` missed it, the held-out
    protocol would have passed it, and per-coin agreement made it look *more*
    trustworthy. Only reading the code caught it.
-4. **Sanity-check arithmetic.** A 3R-capped strategy winning 29% cannot average
+4. **`portfolio.py` compounds too early.** It walks trades in ENTRY order and
+   credits each trade's profit immediately, so a long hold funds positions
+   opened before it closed. Worth ~4.6 CAGR points on a 74-day-hold strategy,
+   less on short holds, but every number it produced is optimistic.
+   `tl_account.py` has the corrected event-queue version.
+5. **Sanity-check arithmetic.** A 3R-capped strategy winning 29% cannot average
    +2.02R. That impossibility exposed the detail-coverage bug below.
-5. **Cross-check in freqtrade** before believing the harness.
+6. **Cross-check in freqtrade** before believing the harness. It caught the
+   sizing flaw above: the harness said 22.0% CAGR and freqtrade said 14.5%.
 
 ### Harness bugs found and fixed (all in `harness.py`)
+- **Drawdown measured the coin loop, not time.** `metrics()` walked the trade
+  list as handed to it, and every basket runner builds that list coin by coin
+  (`pooled += tr`). So max_dd_r, r_per_dd and worst_streak described the order
+  the universe was iterated in. The understatement is large and it is not a
+  constant factor: the daily long book reads 6.7R by coin order and 10.3R by
+  date, the trendline book 8.0R and 26.5R. `metrics()` now sorts by exit time
+  before it measures. Order-independent numbers were never affected, so no
+  ranking or selection in this repo was wrong — only the stated cost of it.
 - **Detail coverage.** `searchsorted` returns 0 for a timestamp before the detail
   frame starts, pricing a 2021 entry against 2024 candles. `simulate()` now
   refuses signals outside detail coverage.
@@ -130,53 +198,98 @@ These were learned the hard way; each caught a result that looked real.
 
 ---
 
-## 5. UNFINISHED — the grid, and how to run it
+## 5. The grid — finished, and what it found
 
-A 12,960-config grid was launched and **did not finish**. Workers only write
-output at the end, so there are no partial results. Re-run it:
+All 12,960 cells scored, 2,255 of them clearing FIT n>=30 and HOLDOUT n>=20.
+Results in `research/results/opt_1d_*.jsonl`, ranking in
+`research/results/GRID_REPORT_1d.md`, verification in
+`research/results/VERIFY_1d.txt`.
 
 ```bash
 cd freqtrade-lab
-# 6 workers, ~13 minutes total
+# two workers at a time. Six exhausts a 7 GB box; that is what killed the
+# first two attempts. Workers append and resume, so a kill costs only the
+# cell in flight.
 for w in 0 1 2 3 4 5; do
-  ./.venv/Scripts/python.exe research/optimize.py 1d $w 6 > research/results/opt1d_$w.log 2>&1 &
+  ./.venv/Scripts/python.exe research/optimize.py 1d $w 6 >> research/results/opt1d_$w.log 2>&1 &
+  [ $((w % 2)) -eq 1 ] && wait
 done; wait
 
-# then
-PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/opt_report.py 1d 15
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/opt_report.py 1d 20
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/verify_grid.py 3
 ```
 
-Grid dimensions in [optimize.py](optimize.py): side × wt2_max(5) × trigger(3) ×
-wait_bars(3) × atr_mult(3) × mfi_min(2) × gate(3) × target(4) × require_hold(2).
-Ranked by **HOLDOUT annual_R**, with marginals and neighbour scores in
-[opt_report.py](opt_report.py).
+**The finding: a wider stop and a further target.** Two dials move the result
+and both trend monotonically across every value they take, which is the
+signature of a real effect rather than a lucky cell:
 
-**What to look for:** a config with annual_R well above 3.74 whose maxDD_R does
-not rise proportionally — i.e. a better ratio. Ignore any winner whose
-neighbours are negative.
+| dial | marginal HOLDOUT annual_R |
+|---|---|
+| atr_mult | 0.5: +0.58 · 1.0: +1.67 · **2.0: +2.47** |
+| target | 2R: +0.78 · 3R: +1.45 · **4R: +1.90** · G1_3R scale-out: +0.49 |
+
+Against DailyDivBreakout, on held-out coins, both in date order:
+
+| | baseline (1xATR, 3R) | 2xATR + 4R |
+|---|---|---|
+| annual_R | 3.74 | **11.80** |
+| maxDD_R | 10.3 | 22.9 |
+| **ratio** | 0.36 | **0.52** |
+| trades/year | 10.9 | 12.1 |
+| losing years | 3 of 7 | **1 of 6** |
+| holdout coins positive | 15/28 | **19/27** |
+| worst losing streak | 9 | 10 |
+
+The six cells around it score +9.0 to +11.8 holdout, so it is a plateau. It
+also passes the arithmetic check that matters: it reaches its target **less**
+often than the baseline (27% at 4R against 30% at 3R), which is what a further
+target must do. The gain comes from the wider stop cutting stop-outs from 62%
+to 49%. Five trades were still open at the data end, all five winners; drop
+them and holdout annual_R is +10.38 rather than +11.80.
+
+**Do not read the maxDD_R column in `GRID_REPORT_1d.md`.** Those cells were
+scored before the drawdown fix and still describe the coin loop. The ranking
+column, HOLDOUT annual_R, is order-independent and stands. `verify_grid.py`
+re-simulates the leaders and reports the honest drawdown, per-year and per-coin
+splits.
+
+**Not yet done:** DailyDivBreakout still ships 1xATR and 3R. Changing it is a
+one-line edit in `user_data/strategies/DailyDivBreakout.py` plus a freqtrade
+backtest to confirm the second engine agrees, which is the repo's own rule
+before believing the harness.
 
 ---
 
 ## 6. Next steps, ranked by expected value
 
-1. **Finish the grid** (above). It is the only systematic search of the frequency
-   dimension, which is the safe lever on the ratio.
+0. **Paper trade TrendlineBreakout.** It is the best thing here and the least
+   forward-tested. `research/scan_trendline.py` prints the current watchlist
+   and anything that has already broken.
+1. **Ship the grid's finding** (section 5). Move DailyDivBreakout to a 2xATR
+   stop and a 4R target, then confirm it in freqtrade. The harness says the
+   ratio goes 0.36 -> 0.52 on held-out coins; nothing is banked until the
+   second engine agrees.
 2. **Expand the universe to 150+ coins.** More independent trades is the
    highest-confidence way to raise annual_R without raising maxDD_R. Current
    universe is 76 (listed in [campaign.py](campaign.py)). This is a download
    plus a re-run — no new research.
-3. **Find a second uncorrelated positive-expectancy book.** The long+short work
+3. **Stack TrendlineBreakout with DailyDivBreakout.** This is now the concrete
+   version of step 4 below: two books, same universe, different triggers, both
+   positive on held-out coins. Nothing has measured their correlation yet.
+4. **Find a second uncorrelated positive-expectancy book.** The long+short work
    proved uncorrelated books flatten the equity curve; the problem was that the
    short book loses money. A second *positive* book would raise the ratio rather
    than lower it. Untried mechanisms: funding-rate carry, cross-sectional
    relative strength (the repo's own core feature, which this work never used),
    BTC-dominance rotation.
-4. **Walk-forward the oversold dial** instead of fixing it at −30.
-5. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
+5. **Walk-forward the oversold dial** instead of fixing it at −30.
+6. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
    produced 69% of its profit and no amount of backtesting can settle whether
    that was luck — only forward evidence can.
 
 ### Explicitly do NOT
+- Raise TrendlineBreakout's slot count to chase its 20-slot CAGR of 37.5%.
+  That is the same bet at higher size, not a better bet.
 - Re-optimise on a single coin.
 - Chase 15m or 1h without a genuinely new mechanism; costs are measured and fatal.
 - Report any result before checking neighbours and tracing entry-vs-information ordering.
@@ -197,15 +310,29 @@ neighbours are negative.
 [breadth.py](breadth.py) | universe-wide oversold breadth (rejected as a filter) |
 [portfolio.py](portfolio.py) | chronological, slot-capped, compounding account sim |
 [campaign.py](campaign.py) | 76-coin universe, hash split, stack/breadth/exit modes |
-[optimize.py](optimize.py) | the 12,960-config grid |
+[optimize.py](optimize.py) | the 12,960-config grid (divergence family) |
+[trendline.py](trendline.py) | `trendline_breakout` — the long-term descending line |
+[tl_campaign.py](tl_campaign.py) | single-dial sweeps: exits, line, quality, weekly |
+[tl_grid.py](tl_grid.py) | the 468-config trendline grid, checkpointed |
+[tl_report.py](tl_report.py) | marginals, fit ranking, neighbour agreement |
+[tl_portfolio.py](tl_portfolio.py) | account sim for the trendline book |
+[tl_final.py](tl_final.py) | the chosen config: slot cost, years, concentration |
+[scan_trendline.py](scan_trendline.py) | live: what broke, what is pressing the line |
 [opt_report.py](opt_report.py) | grid ranking with all four overfit guards |
+[verify_grid.py](verify_grid.py) | re-simulates the leaders: date-ordered drawdown, per-year and per-coin splits, against the proven book |
 [scan_divergence.py](scan_divergence.py) | live multi-timeframe divergence scan |
 [breach_test.py](breach_test.py) | shallow vs deep breach test |
 [ETH_RESEARCH_LOG.md](ETH_RESEARCH_LOG.md) | full derivation, 50 numbered findings |
 [STRATEGY_DailyDivBreakout.md](STRATEGY_DailyDivBreakout.md) | the strategy spec |
+[STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md) | the best strategy's spec |
 
-Freqtrade strategies live in `../user_data/strategies/`. `DailyDivBreakout.py`
-is the one that matters.
+Freqtrade strategies live in `../user_data/strategies/`. `TrendlineBreakout.py`
+is the one that matters; `DailyDivBreakout.py` is the previous best.
+
+**Harness note:** `ExitPlan` now supports a trailing stop (`trail_r`,
+`trail_start_r`), off by default so every earlier result is unchanged. The trail
+is raised from a bar's extreme only AFTER that bar's stop has been tested, so a
+single bar can never both extend and protect a trade.
 
 **Configs are gitignored** (they hold the API-server password and would hold
 exchange keys). Rebuild from `config.example.json`; whitelists are in

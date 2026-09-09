@@ -76,6 +76,14 @@ class ExitPlan:
     #          The user's observed setup names a 2-3% move, not an R multiple,
     #          so the harness has to be able to express targets that way.
     target_mode: str = "R"
+    # Trailing stop, off by default so every earlier result is unchanged.
+    # Once the trade is `trail_start_r` in favour, the stop follows the running
+    # extreme at `trail_r` risk-units behind it and only ever ratchets forward.
+    # Expressed in R so it is unit-free and scales with each trade's own risk.
+    # A long-term breakout is supposed to run; a fixed target caps it, and
+    # nothing else in this ExitPlan can express "hold until it turns".
+    trail_r: float | None = None
+    trail_start_r: float = 1.0
 
     def target_price(self, entry: float, risk: float, direction: int,
                      value: float) -> float:
@@ -89,7 +97,9 @@ class ExitPlan:
         scale = 100 if self.target_mode == "pct" else 1
         legs = "+".join(f"{f:.0%}@{r * scale:g}{unit}" for r, f in self.legs)
         be = f" BE@leg{self.be_after_leg}" if self.be_after_leg is not None else ""
-        return legs + be
+        tr = (f" trail{self.trail_r:g}R@{self.trail_start_r:g}R"
+              if self.trail_r is not None else "")
+        return legs + be + tr
 
 
 @dataclass
@@ -120,6 +130,7 @@ def _walk(detail: pd.DataFrame, start: int, direction: int, entry: float,
     remaining = 1.0
     realised = 0.0
     live_stop = stop
+    peak = entry              # running extreme, for the trailing stop
     leg_i = 0
     legs = plan.legs
     last_r = legs[-1][0]
@@ -164,6 +175,18 @@ def _walk(detail: pd.DataFrame, start: int, direction: int, entry: float,
                 live_stop = entry
             if remaining <= 1e-9:
                 return realised, index[i], full_target, "target"
+
+        # --- trailing stop last, from THIS bar's extreme ---
+        # Order matters: the stop for bar i is the one set by bars before it.
+        # Raising the trail from bar i's own high before testing bar i's low
+        # would let a single bar both extend and protect the trade.
+        if plan.trail_r is not None:
+            peak = max(peak, hi) if direction > 0 else min(peak, lo)
+            move = direction * (peak - entry) / risk
+            if move >= plan.trail_start_r:
+                cand = peak - direction * plan.trail_r * risk
+                if (cand > live_stop) if direction > 0 else (cand < live_stop):
+                    live_stop = cand
 
     realised += book(closes[-1], remaining)
     return realised, index[-1], full_target, "data_end"
@@ -221,9 +244,19 @@ def simulate(signals: pd.DataFrame, base: pd.DataFrame, detail: pd.DataFrame,
 
 # ----------------------------------------------------------------- metrics
 def metrics(trades: list[Trade]) -> dict:
-    """Both win definitions, because they answer different questions."""
+    """Both win definitions, because they answer different questions.
+
+    Trades are sorted by exit time first. Every caller that pools a basket
+    builds the list coin by coin, so the incoming order is the order the
+    universe was looped in. Path-dependent statistics -- max_dd_r, r_per_dd
+    and worst_streak -- read that loop order as if it were the passage of
+    time, and understate the real drawdown badly: the daily long book scores
+    6.7R pooled by coin and 10.3R pooled by date. Order-independent numbers
+    (n, avg_r, pf, the win rates) are unaffected by the sort.
+    """
     if not trades:
         return {"n": 0}
+    trades = sorted(trades, key=lambda t: t.exit_time)
     rs = np.array([t.r for t in trades])
     wins = rs > 0
     gross_win = rs[rs > 0].sum()
