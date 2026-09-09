@@ -84,6 +84,14 @@ class ExitPlan:
     # nothing else in this ExitPlan can express "hold until it turns".
     trail_r: float | None = None
     trail_start_r: float = 1.0
+    # Trailing stop expressed as a PERCENT of the running extreme instead of in
+    # risk units. This exists because an R-based trail scales with the entry
+    # stop: tighten the stop and the trail tightens with it, so a lower-timeframe
+    # entry buys nothing. A percent trail is scale-free -- it says "give back no
+    # more than X% of the high" whatever the stop was -- which is the only way
+    # to pair a tight entry stop with an exit wide enough to let a 100% move run.
+    # trail_r wins if both are set.
+    trail_pct: float | None = None
 
     def target_price(self, entry: float, risk: float, direction: int,
                      value: float) -> float:
@@ -98,7 +106,8 @@ class ExitPlan:
         legs = "+".join(f"{f:.0%}@{r * scale:g}{unit}" for r, f in self.legs)
         be = f" BE@leg{self.be_after_leg}" if self.be_after_leg is not None else ""
         tr = (f" trail{self.trail_r:g}R@{self.trail_start_r:g}R"
-              if self.trail_r is not None else "")
+              if self.trail_r is not None else
+              f" trail{self.trail_pct:.0%}" if self.trail_pct is not None else "")
         return legs + be + tr
 
 
@@ -180,13 +189,17 @@ def _walk(detail: pd.DataFrame, start: int, direction: int, entry: float,
         # Order matters: the stop for bar i is the one set by bars before it.
         # Raising the trail from bar i's own high before testing bar i's low
         # would let a single bar both extend and protect the trade.
-        if plan.trail_r is not None:
+        if plan.trail_r is not None or plan.trail_pct is not None:
             peak = max(peak, hi) if direction > 0 else min(peak, lo)
-            move = direction * (peak - entry) / risk
-            if move >= plan.trail_start_r:
-                cand = peak - direction * plan.trail_r * risk
-                if (cand > live_stop) if direction > 0 else (cand < live_stop):
-                    live_stop = cand
+            if plan.trail_r is not None:
+                move = direction * (peak - entry) / risk
+                cand = (peak - direction * plan.trail_r * risk
+                        if move >= plan.trail_start_r else None)
+            else:
+                cand = peak * (1 - direction * plan.trail_pct)
+            if cand is not None and (
+                    (cand > live_stop) if direction > 0 else (cand < live_stop)):
+                live_stop = cand
 
     realised += book(closes[-1], remaining)
     return realised, index[-1], full_target, "data_end"

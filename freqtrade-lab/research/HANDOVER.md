@@ -145,6 +145,7 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | ATR volatility floor | harmful at every threshold |
 | 1h WT cross-up continuation | −0.12R over 1198 trades |
 | lower fees as the fix | tested; changes almost nothing on daily, insufficient on 1h |
+| stacking the two proven books | correlation +0.300, same losing years; ratio helped in 1 of 9 combinations and reversed on the slot limit |
 
 **Long + short combined:** shorts have negative expectancy but win in exactly
 the years longs lose (2021, 2022, 2025). Combining gives **0 losing years out of
@@ -219,7 +220,12 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/opt_report.py 1d 20
 PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/verify_grid.py 3
 ```
 
-**The finding: a wider stop and a further target.** Two dials move the result
+**The finding: a wider stop and a further target.** The winning cell is
+`wt2_max -20, trigger slope, wait_bars 16, atr_mult 2.0, mfi none, gate none,
+target 4R, require_hold False` — quote it in full. "2xATR + 4R" is the headline
+but not the config: it also moves wt2_max from -30, wait_bars from 8 and
+require_hold from True. Changing only the stop and target gives 15 fit signals
+instead of 84 and a negative book. Two dials move the result
 and both trend monotonically across every value they take, which is the
 signature of a real effect rather than a lucky cell:
 
@@ -273,15 +279,21 @@ before believing the harness.
    highest-confidence way to raise annual_R without raising maxDD_R. Current
    universe is 76 (listed in [campaign.py](campaign.py)). This is a download
    plus a re-run — no new research.
-3. **Stack TrendlineBreakout with DailyDivBreakout.** This is now the concrete
-   version of step 4 below: two books, same universe, different triggers, both
-   positive on held-out coins. Nothing has measured their correlation yet.
-4. **Find a second uncorrelated positive-expectancy book.** The long+short work
-   proved uncorrelated books flatten the equity curve; the problem was that the
-   short book loses money. A second *positive* book would raise the ratio rather
-   than lower it. Untried mechanisms: funding-rate carry, cross-sectional
-   relative strength (the repo's own core feature, which this work never used),
-   BTC-dominance rotation.
+3. ~~**Stack TrendlineBreakout with DailyDivBreakout.**~~ **DONE — it does not
+   work.** Monthly R correlation +0.300; both books lose in 2022 and in 2025;
+   the ratio improves in 1 of 9 coin-set x slot-limit combinations and that one
+   reverses when the slot limit moves. Not slot contention — raising the cap to
+   20 and 40 does not rescue it. Both are long-only daily breakouts on the same
+   76 coins, so different indicators are not different exposures. Findings
+   51-52 in the research log; `research/stack.py` reproduces it.
+4. **Find a second book that differs in EXPOSURE, not in indicator.** Now the
+   top research priority, and finding 52 constrains it: another long-only
+   breakout on the same universe will fail exactly as the stack did, however
+   good its trigger. It must not be long crypto beta. Candidates:
+   **funding-rate carry** (paid by position imbalance, not price direction),
+   **cross-sectional relative strength** — long strong against short weak, so
+   the market component nets out, and it is the repo's own core feature that no
+   work here has used — or any market-neutral construction.
 5. **Walk-forward the oversold dial** instead of fixing it at −30.
 6. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
    produced 69% of its profit and no amount of backtesting can settle whether

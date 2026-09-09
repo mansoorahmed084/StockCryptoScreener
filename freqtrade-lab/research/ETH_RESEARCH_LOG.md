@@ -1119,3 +1119,108 @@ is worth paying depends on whether the smoother equity curve is what you need.
   sizing and slot contention differently. Treat the range 7–10% as the honest
   uncertainty, not either endpoint as the number.
 * Seven years, one of them partial at each end.
+
+---
+
+# STEP 3 — stacking TrendlineBreakout with DailyDivBreakout
+
+Two books, one universe, different triggers, both positive on held-out coins.
+Step 3 of the handover asked whether running them together raises the ratio.
+[stack.py](stack.py) answers it. Sizing uses `tl_account.simulate_honest`, which
+credits profit at exit, not `portfolio.py`.
+
+## Finding 51 — the two books are NOT uncorrelated, and stacking does not help
+
+The ratio `CAGR / maxDD` for every combination of coin set and slot limit.
+Stacking has to beat the better single book to be worth running:
+
+| coins | slots | trendline | divergence | **stacked** | verdict |
+|---|---|---|---|---|---|
+| FIT | 10 | 0.66 | 0.33 | **0.34** | worse |
+| HOLDOUT | 10 | 1.04 | 0.62 | **1.15** | better |
+| ALL | 10 | 0.87 | 0.47 | **0.64** | worse |
+| FIT | 20 | 0.72 | 0.42 | **0.45** | worse |
+| HOLDOUT | 20 | 0.98 | 0.54 | **0.79** | worse |
+| ALL | 20 | 0.98 | 0.45 | **0.69** | worse |
+| FIT | 40 | 0.46 | 0.42 | **0.48** | level |
+| HOLDOUT | 40 | 0.82 | 0.54 | **0.82** | level |
+| ALL | 40 | 0.88 | 0.47 | **0.57** | worse |
+
+**One of nine comparisons favours stacking**, and it does not replicate: HOLDOUT
+at 10 slots reads 1.15 against 1.04, then 0.79 against 0.98 at 20 slots and
+level at 40. That is the signature of a lucky cell, and by this repo's own rule
+a result that reverses when a dial moves is not a result.
+
+**It is not slot contention.** That was the obvious alternative explanation — two
+books competing for ten slots would look like this. Raising the cap to 20 and
+then 40 does not rescue it, so the books are not merely crowding each other out.
+
+## Finding 52 — they lose in the same years, which is why
+
+| year | trendline | divergence | stacked |
+|---|---|---|---|
+| 2020 | +57,058 | +21,920 | +83,867 |
+| 2021 | +7,097 | — | +8,309 |
+| **2022** | **−23,130** | **−10,311** | **−31,170** |
+| 2023 | +81,361 | +20,165 | +62,373 |
+| 2024 | +82,613 | +13,035 | +97,916 |
+| **2025** | **−31,721** | **−8,307** | **−47,287** |
+| 2026 | +18,493 | +31,064 | +20,268 |
+
+Both books lose in 2022 and in 2025. There is no year where one covers the
+other, which is the whole thing a second book is supposed to buy. Contrast the
+long+short work (findings 49–50), where the short book lost money overall but
+won in exactly the years the long book lost, and delivered zero losing years.
+
+Measured directly on monthly R booked at exit:
+
+| | |
+|---|---|
+| monthly R correlation | **+0.300** |
+| both up / both down / split | 14 / **16** / 15 |
+| trendline sd | 16.79 |
+| divergence sd | 13.46 |
+| stacked sd, actual | **24.47** |
+| stacked sd if perfectly uncorrelated | 21.52 |
+| stacked sd if perfectly correlated | 30.26 |
+
+Sixteen of the 45 decided months are down in both books. The realised standard
+deviation sits between the uncorrelated and correlated bounds and nearer the
+correlated end than a diversification story needs.
+
+The reason is structural and should have been predicted: both books are
+**long-only daily breakouts on the same 76 coins**. One buys a break of a
+200-day descending line, the other a break of a short falling line after a
+divergence. Different triggers, same bet — buy crypto strength after weakness.
+When the universe falls, both lose. Different *indicators* are not different
+*exposures*.
+
+**What stacking does deliver** is more money at disproportionately more pain.
+Whole universe, 40 slots: CAGR 28.50% → 29.01%, drawdown 32.54% → 51.18%. That
+is the "same bet at higher size" the handover already warns against, arriving
+through the side door.
+
+## A documentation correction
+
+The handover called the grid winner "2xATR stop + 4R target". That shorthand is
+incomplete and cost a wasted run. The winning cell in
+`results/VERIFY_1d.txt` also moves `wt2_max` from −30 to **−20**, `wait_bars`
+from 8 to **16**, and `require_hold` from True to **False**. Changing only the
+stop and target yields 15 fit signals rather than 84, and turns the book
+negative. Section 5 of the handover has been corrected.
+
+## What this means for step 4
+
+Step 4 — find a second uncorrelated positive-expectancy book — is now the
+priority, and finding 52 constrains it. A second book must differ in
+**exposure**, not in indicator. Candidates that are structurally different
+rather than cosmetically different:
+
+* **funding-rate carry** — paid by position imbalance, not by price direction
+* **cross-sectional relative strength** — long the strong against short the
+  weak, so the market component is netted out. This is the repo's own core
+  feature and no work here has used it.
+* **short-side or market-neutral exposure** of any kind
+
+Another long-only breakout on the same universe will fail the same way, however
+good its indicator is.
