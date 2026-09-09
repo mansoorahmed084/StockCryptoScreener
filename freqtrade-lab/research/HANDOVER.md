@@ -140,12 +140,16 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | shallow-breach re-entry | −0.196R, no better than deep breaches |
 | exit re-engineering (divergence family) | 3R already optimal; all shorter targets and 4 scale-out shapes worse |
 | a fixed target on the TRENDLINE family | opposite result: 3R gives ratio 0.14 vs 0.78 trailing. Do not carry the divergence family's exit across |
+| lower-timeframe entry TIMING (1h break, retest, EMA pullback) | all worse than taking the next daily open (marginals 1.77 / 1.01 / 1.00 vs 1.97). These breaks go immediately; waiting filters out the runners. 600-cell grid, [RESULTS_refined_entries.md](RESULTS_refined_entries.md) |
+| the broken trendline as the stop | 1.00, no better than the daily stop |
+| an R-based trail behind a tightened stop | the trail scales with the stop, so it cancels the gain exactly |
 | ETH-only optimisation (~5,300 configs) | every result lost money on other coins |
 | blow-off fade on one coin | −0.42R; needed the basket |
 | ATR volatility floor | harmful at every threshold |
 | 1h WT cross-up continuation | −0.12R over 1198 trades |
 | lower fees as the fix | tested; changes almost nothing on daily, insufficient on 1h |
 | stacking the two proven books | correlation +0.300, same losing years; ratio helped in 1 of 9 combinations and reversed on the slot limit |
+| cross-sectional RS as a return engine | correlation is genuinely low (+0.105) and Sharpe improves, but standalone drawdown is 55% and whole-universe CAGR ex-2021 is -1.5%. A diversifier, not an engine |
 
 **Long + short combined:** shorts have negative expectancy but win in exactly
 the years longs lose (2021, 2022, 2025). Combining gives **0 losing years out of
@@ -170,15 +174,24 @@ These were learned the hard way; each caught a result that looked real.
    bars *after* its own entry. `lookahead-analysis` missed it, the held-out
    protocol would have passed it, and per-coin agreement made it look *more*
    trustworthy. Only reading the code caught it.
-4. **`portfolio.py` compounds too early.** It walks trades in ENTRY order and
+4. **Position size is risk / stop distance.** Tightening a stop silently
+   increases position size: 1% risk behind a 6% stop is a 17% position, and ten
+   of those is 167% of the account, which spot cannot do. `tl_account.py` takes
+   a `max_exposure` cap; without it a tight-stop config reports returns it
+   could never have reached. It cost 14 CAGR points on the refined trendline.
+5. **`portfolio.py` compounds too early.** It walks trades in ENTRY order and
    credits each trade's profit immediately, so a long hold funds positions
    opened before it closed. Worth ~4.6 CAGR points on a 74-day-hold strategy,
    less on short holds, but every number it produced is optimistic.
    `tl_account.py` has the corrected event-queue version.
-5. **Sanity-check arithmetic.** A 3R-capped strategy winning 29% cannot average
+6. **Sanity-check arithmetic.** A 3R-capped strategy winning 29% cannot average
    +2.02R. That impossibility exposed the detail-coverage bug below.
-6. **Cross-check in freqtrade** before believing the harness. It caught the
+7. **Cross-check in freqtrade** before believing the harness. It caught the
    sizing flaw above: the harness said 22.0% CAGR and freqtrade said 14.5%.
+8. **Replay every signal with the future physically deleted.** On the refined
+   entry this caught a risk filter reading the next bar's open -- the price the
+   fill lands on, which is not knowable at the decision. Truncate at the
+   DECISION bar, not the entry bar.
 
 ### Harness bugs found and fixed (all in `harness.py`)
 - **Drawdown measured the coin loop, not time.** `metrics()` walked the trade
@@ -286,16 +299,27 @@ before believing the harness.
    20 and 40 does not rescue it. Both are long-only daily breakouts on the same
    76 coins, so different indicators are not different exposures. Findings
    51-52 in the research log; `research/stack.py` reproduces it.
-4. **Find a second book that differs in EXPOSURE, not in indicator.** Now the
-   top research priority, and finding 52 constrains it: another long-only
-   breakout on the same universe will fail exactly as the stack did, however
-   good its trigger. It must not be long crypto beta. Candidates:
-   **funding-rate carry** (paid by position imbalance, not price direction),
-   **cross-sectional relative strength** — long strong against short weak, so
-   the market component nets out, and it is the repo's own core feature that no
-   work here has used — or any market-neutral construction.
-5. **Walk-forward the oversold dial** instead of fixing it at −30.
-6. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
+4. ~~**Find a second book that differs in EXPOSURE.**~~ **PARTLY DONE.**
+   Cross-sectional relative strength (`research/xsect.py`, findings 53-55) is
+   the first thing here that is genuinely uncorrelated with the breakout books:
+   monthly correlation **+0.105**, 38 of 64 months disagreeing, against +0.300
+   for another breakout. The ranking signal is the repo's own
+   `rs.strength_series` on each coin's BTC ratio, and it beat plain return and
+   vol-adjusted return at nearly every setting. A 75/25 trendline/xsect blend
+   lifts Sharpe 0.82 -> 0.99 and CAGR 17.4% -> 21.0%, but leaves the
+   CAGR/maxDD ratio flat at 0.90 and needs a 23% drawdown. Standalone it draws
+   down 55% and, on the whole universe, is **-1.5% CAGR excluding 2021**.
+   Unfinished and worth finishing: `n_legs` was held at 5 while the universe
+   size varied, so the whole-universe rows hold the top 6.6% while the
+   half-basket rows hold the top 13% -- switch to deciles, add a volatility
+   target, then re-test ex-2021 on both baskets.
+5. **Find a THIRD book that differs in exposure.** Same reasoning as
+   step 4, now that a market-neutral construction is shown to decorrelate
+   properly. **Funding-rate carry** is the untried candidate — paid by position
+   imbalance rather than price direction, so it should be uncorrelated with
+   both a breakout book and a momentum book.
+6. **Walk-forward the oversold dial** instead of fixing it at −30.
+7. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
    produced 69% of its profit and no amount of backtesting can settle whether
    that was luck — only forward evidence can.
 
@@ -330,6 +354,11 @@ before believing the harness.
 [tl_portfolio.py](tl_portfolio.py) | account sim for the trendline book |
 [tl_final.py](tl_final.py) | the chosen config: slot cost, years, concentration |
 [scan_trendline.py](scan_trendline.py) | live: what broke, what is pressing the line |
+[refine.py](refine.py) | 1h entry timing and 1h stop placement for the daily signal |
+[rf_grid.py](rf_grid.py) | the 600-config entry/stop/exit grid |
+[rf_report.py](rf_report.py) | marginals with the control shown first |
+[rf_final.py](rf_final.py) | lookahead replay, 1h/15m fills, account with a capital cap |
+[tl_account.py](tl_account.py) | account sim: bank at exit, and cap total notional |
 [opt_report.py](opt_report.py) | grid ranking with all four overfit guards |
 [verify_grid.py](verify_grid.py) | re-simulates the leaders: date-ordered drawdown, per-year and per-coin splits, against the proven book |
 [scan_divergence.py](scan_divergence.py) | live multi-timeframe divergence scan |
@@ -337,6 +366,7 @@ before believing the harness.
 [ETH_RESEARCH_LOG.md](ETH_RESEARCH_LOG.md) | full derivation, 50 numbered findings |
 [STRATEGY_DailyDivBreakout.md](STRATEGY_DailyDivBreakout.md) | the strategy spec |
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md) | the best strategy's spec |
+[RESULTS_refined_entries.md](RESULTS_refined_entries.md) | the 600-permutation lower-timeframe study |
 
 Freqtrade strategies live in `../user_data/strategies/`. `TrendlineBreakout.py`
 is the one that matters; `DailyDivBreakout.py` is the previous best.

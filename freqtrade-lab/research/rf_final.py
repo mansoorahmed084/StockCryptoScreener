@@ -92,6 +92,30 @@ def pooled(trades: list) -> dict:
     return m
 
 
+def peak_exposure(trades: list, acct: pd.DataFrame) -> float:
+    """Highest total notional held at once, as a percent of equity at the time.
+
+    This is the number that says whether a config is reachable on spot at all.
+    """
+    sized = {(t.entry_time, c): t for t, c in trades}
+    events = []
+    for _, r in acct.iterrows():
+        t = sized.get((r["entry"], r["coin"]))
+        if t is None or not hasattr(t, "notional"):
+            continue
+        events.append((r["entry"], +t.notional, r["equity"]))
+        events.append((r["exit"], -t.notional, r["equity"]))
+    if not events:
+        return 0.0
+    live = peak = 0.0
+    eq = CAPITAL
+    for _ts, d, e in sorted(events, key=lambda x: x[0]):
+        live += d
+        peak = max(peak, 100 * live / max(eq, 1.0))
+        eq = e
+    return peak
+
+
 def lookahead_check(coins: list[str], kw: dict, per_coin: int = 5) -> None:
     checked = missing = 0
     for c in coins[:22]:
@@ -147,9 +171,13 @@ def main() -> None:
 
     print(f"\n## 3. The account — 15m fills, max {max_open} open, 1% risk, "
           "profit banked at exit")
-    print("| variant | coins | signals | filled | win% | **CAGR** | PF | "
-          "**maxDD** | losing years |")
-    print("|" + "---|" * 9)
+    print("Position size is risk divided by stop distance, so a 1% risk behind a")
+    print("6% stop is a 17% position. Ten of those is 167% of the account, which")
+    print("spot cannot do. `cap` is the ceiling on total notional held at once:")
+    print("`none` reproduces the unconstrained number, `1.0` is a real account.\n")
+    print("| variant | cap | coins | signals | filled | win% | **CAGR** | PF | "
+          "**maxDD** | peak exposure | losing years |")
+    print("|" + "---|" * 11)
     years = {}
     for name, kw in (("control", CONTROL), ("refined", REFINED)):
         for bname, cs in (("FIT", fit), ("HOLDOUT", hold), ("ALL", coins)):
@@ -157,17 +185,22 @@ def main() -> None:
                   if bname != "ALL" else collect(coins, kw, "15m"))
             if not tr:
                 continue
-            a = simulate_honest(tr, CAPITAL, 0.01, max_open)
-            if a.empty:
-                continue
-            yrs = (a["exit"].max() - a["entry"].min()).days / 365.25
-            s = portfolio.summary(a, yrs, CAPITAL)
-            by = portfolio.by_year(a, CAPITAL)
-            if bname == "ALL":
-                years[name] = by
-            print(f"| {name} | {bname} | {len(tr)} | {s['n']} | {s['win%']} | "
-                  f"**{s['cagr%']:.1f}%** | {s['pf']} | **{s['max_dd%']:.1f}%** | "
-                  f"{int((by['return%'] < 0).sum())}/{len(by)} |")
+            for cap in (None, 1.0):
+                a = simulate_honest(tr, CAPITAL, 0.01, max_open,
+                                    max_exposure=cap)
+                if a.empty:
+                    continue
+                yrs = (a["exit"].max() - a["entry"].min()).days / 365.25
+                s = portfolio.summary(a, yrs, CAPITAL)
+                by = portfolio.by_year(a, CAPITAL)
+                if bname == "ALL" and cap == 1.0:
+                    years[name] = by
+                peak = peak_exposure(tr, a)
+                print(f"| {name} | {'none' if cap is None else cap} | {bname} | "
+                      f"{len(tr)} | {s['n']} | {s['win%']} | "
+                      f"**{s['cagr%']:.1f}%** | {s['pf']} | "
+                      f"**{s['max_dd%']:.1f}%** | {peak:.0f}% | "
+                      f"{int((by['return%'] < 0).sum())}/{len(by)} |")
 
     for name, by in years.items():
         print(f"\n### {name}, whole universe, year by year")

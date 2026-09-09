@@ -1224,3 +1224,135 @@ rather than cosmetically different:
 
 Another long-only breakout on the same universe will fail the same way, however
 good its indicator is.
+
+---
+
+# STEP 4 — cross-sectional relative strength, the first genuinely different exposure
+
+Finding 52 said a second book must differ in **exposure**, not in indicator.
+This is the market-neutral version: every `hold` days, rank the universe, hold
+the strongest `n` coins against the weakest `n`, 0.5 gross each side so net is
+zero. Whatever the whole market does that period hits both legs and drops out.
+
+It is also the repo's own core feature. The ranking signal is
+`backend/screener/rs.py`'s blended strength z-score, computed on each coin's
+ratio to BTC — the thing the screener was built for and that no work in
+`freqtrade-lab` had used. [xsect.py](xsect.py) is the implementation; it is a
+rebalance book, not a trade list, so it needs its own simulator rather than the
+R-multiple harness.
+
+Score at date *t* uses closes to *t*; the position is entered at the next bar's
+**open** and exited at the open `hold` bars later. Costs charge a full turnover
+every rebalance, which is pessimistic.
+
+## Finding 53 — the plateau is real and the exposure is genuinely different
+
+`rs_vs_btc`, 5 legs each side, 14-day hold, positive on **both** baskets at
+every lookback tested:
+
+| lookback | FIT CAGR | HOLDOUT CAGR |
+|---|---|---|
+| 14 | +19.0% | +22.6% |
+| 30 | +22.3% | +20.4% |
+| 60 | +18.3% | +17.1% |
+| 90 | +18.6% | +17.8% |
+
+Four settings spanning a 6× range of lookback, all within a few points on both
+baskets. That is a plateau, and `rs_vs_btc` beat plain trailing return and
+volatility-adjusted return at nearly every setting — the repo's own score is
+doing real work.
+
+**And it is uncorrelated with the trendline book, which is the whole point:**
+
+| | vs trendline |
+|---|---|
+| monthly correlation | **+0.105** |
+| both up / both down / disagree | 12 / 14 / **38** |
+
+Compare the failed stack of the two breakout books: +0.300, with only 15 of 45
+months disagreeing. This is a real diversifier; that was not.
+
+## Finding 54 — but it does not raise the ratio, only the Sharpe
+
+79 overlapping months, whole universe:
+
+| book | CAGR | max DD | **ratio** | **Sharpe** |
+|---|---|---|---|---|
+| trendline only | +17.43% | 19.24% | **0.91** | 0.82 |
+| cross-sectional only | +22.69% | 54.75% | 0.41 | 0.63 |
+| **blend 75/25** | **+20.98%** | **23.29%** | **0.90** | **0.99** |
+| blend 50/50 | +23.00% | 32.76% | 0.70 | 0.89 |
+| blend 25/75 | +23.56% | 41.83% | 0.56 | 0.74 |
+
+The ratio does not move (0.91 → 0.90). **Sharpe rises 0.82 → 0.99**, a 21%
+improvement in risk-adjusted return.
+
+Those two disagree because they measure different things. Sharpe is driven by
+typical volatility, which diversification reliably reduces. The ratio is driven
+by the single worst drawdown, which only improves if the two books' worst events
+do not coincide — and 2022 was bad for both (−15.3% and −42.5%). Low correlation
+on average does not mean independent tails.
+
+**The honest reading:** the 75/25 blend buys +3.5 CAGR points for +4 drawdown
+points and a materially better Sharpe. Real, and modest. It is not an answer to
+"single-digit returns are peanuts".
+
+## Finding 55 — the cross-sectional edge is mostly one alt season
+
+| basket | full CAGR | **excluding 2021** | 2021 alone |
+|---|---|---|---|
+| FIT | +22.2% | **+11.6%** | +83% |
+| HOLDOUT | +20.3% | **+11.3%** | +68% |
+| **ALL (76 coins)** | +23.2% | **−1.5%** | **+342%** |
+
+Per year:
+
+| year | FIT | HOLDOUT | ALL |
+|---|---|---|---|
+| 2020 | +111.2% | +40.3% | +81.8% |
+| 2021 | +82.7% | +67.5% | **+342.4%** |
+| 2022 | −45.5% | −6.2% | −42.5% |
+| 2023 | +11.7% | +54.6% | +4.6% |
+| 2024 | +10.8% | +2.7% | −7.0% |
+| 2025 | +29.9% | +19.7% | +12.7% |
+| 2026 | +12.6% | −18.3% | −20.9% |
+
+Two things to take from this.
+
+**The whole-universe version is worse than either half**, which sounds
+impossible and is not. With a fixed 5 legs, the fraction of the universe held
+shrinks as the universe grows: 5 of 38 coins is the top 13%, 5 of 76 is the top
+6.6%. The bigger basket therefore holds *more extreme* names — more volatile,
+and here worse. **Leg count must scale with universe size**, and no result in
+this section should be read as a constant-`n_legs` finding.
+
+**Ex-2021, the half-baskets hold up and the whole universe does not.** FIT
++11.6% and HOLDOUT +11.3% ex-2021 is a striking agreement between two disjoint
+coin sets. But ALL at −1.5% means the concentrated version needs the alt season.
+2020–2021 was an exceptional regime for cross-sectional dispersion in alts, and
+2024 and 2026 are negative on the whole universe.
+
+## Verdict on step 4
+
+Partly successful. The hypothesis that motivated it is **confirmed**: a
+market-neutral construction is genuinely uncorrelated with the long-only
+breakout books, at +0.105 against +0.300 for another breakout. That is the first
+time anything here has cleared that bar.
+
+What it does not do is solve the returns problem. Standalone it has a 55%
+drawdown and needs 2021. Blended at 25% weight it improves Sharpe by a fifth and
+leaves the drawdown ratio untouched.
+
+**Next, in order:**
+
+1. **Scale legs with universe size** and re-run. `n_legs` was fixed while the
+   universe varied, which confounds every whole-universe number above. Holding
+   the top and bottom decile rather than a fixed count is the correct
+   formulation and is one change to [xsect.py](xsect.py).
+2. **Add a volatility target.** The book's 55% drawdown comes from unmanaged
+   leg volatility, not from the signal. Scaling exposure to a target volatility
+   is the standard fix and would move the ratio, which is the metric that
+   matters.
+3. **Re-test ex-2021 after 1 and 2.** If a decile-based, volatility-targeted
+   version is positive ex-2021 on both baskets, this becomes a real second book
+   rather than a Sharpe improvement.
