@@ -98,13 +98,19 @@ def score_panel(closes: pd.DataFrame, method: str, lookback: int) -> pd.DataFram
     raise ValueError(method)
 
 
-def run(opens: pd.DataFrame, closes: pd.DataFrame, method: str, lookback: int,
-        n_legs: int, hold: int, side: str = "ls",
-        cost: float = COST) -> pd.Series:
-    """Period returns of the book. Index is the exit date of each period."""
+def run_raw(opens: pd.DataFrame, closes: pd.DataFrame, method: str,
+            lookback: int, frac: float, hold: int,
+            side: str = "ls") -> pd.Series:
+    """Period returns BEFORE costs and BEFORE any exposure scaling.
+
+    `frac` is the fraction of the tradable universe held per leg, not a fixed
+    count. A fixed count silently changes the strategy as the universe grows:
+    5 of 38 coins is the top 13%, 5 of 76 is the top 6.6%, so the bigger basket
+    holds more extreme and more volatile names. Every whole-universe number in
+    finding 55 is confounded that way. A fraction holds the definition still.
+    """
     sc = score_panel(closes, method, lookback)
     dates = closes.index[closes.index >= START]
-    # rebalance dates: need a next bar to enter on and one `hold` later to exit
     idx = list(closes.index)
     pos = {d: i for i, d in enumerate(idx)}
     rets = {}
@@ -114,33 +120,54 @@ def run(opens: pd.DataFrame, closes: pd.DataFrame, method: str, lookback: int,
         if i + 1 + hold >= len(idx):
             break
         row = sc.loc[d].dropna()
-        # a coin only counts if it can actually be traded over the window
         entry = opens.iloc[i + 1]
         exit_ = opens.iloc[i + 1 + hold]
         tradable = row.index.intersection(
             entry.dropna().index).intersection(exit_.dropna().index)
         row = row.loc[tradable]
+        n_legs = max(2, int(round(frac * len(row))))
         if len(row) < 2 * n_legs:
             continue
         ranked = row.sort_values()
         weak, strong = ranked.index[:n_legs], ranked.index[-n_legs:]
-        fwd = (exit_ / entry - 1.0)
-
-        long_r = float(fwd[strong].mean())
-        short_r = float(fwd[weak].mean())
+        fwd = exit_ / entry - 1.0
+        long_r, short_r = float(fwd[strong].mean()), float(fwd[weak].mean())
         if side == "ls":
-            gross = 1.0
             r = 0.5 * long_r - 0.5 * short_r
         elif side == "long":
-            gross = 1.0
             r = long_r
-        elif side == "short":
-            gross = 1.0
-            r = -short_r
         else:
-            raise ValueError(side)
-        rets[idx[i + 1 + hold]] = r - 2 * cost * gross
+            r = -short_r
+        rets[idx[i + 1 + hold]] = r
     return pd.Series(rets).sort_index()
+
+
+def apply_exposure(raw: pd.Series, hold: int, target_vol: float | None = None,
+                   vol_window: int = 8, max_lev: float = 2.0,
+                   cost: float = COST) -> pd.Series:
+    """Scale to a target volatility, then charge costs on the scaled size.
+
+    The volatility estimate uses only periods STRICTLY BEFORE the one being
+    sized, so the exposure for a period is knowable when that period starts.
+    Without this the 55% standalone drawdown in finding 54 is just unmanaged
+    leg volatility, and the CAGR/maxDD ratio can never move.
+    """
+    if raw.empty:
+        return raw
+    per_year = 365.25 / hold
+    if target_vol is None:
+        return raw - 2 * cost                      # unscaled, gross 1.0
+    est = raw.shift(1).rolling(vol_window, min_periods=3).std() * np.sqrt(per_year)
+    lev = (target_vol / est).clip(upper=max_lev)
+    lev = lev.fillna(1.0)                          # before the window fills
+    return lev * raw - 2 * cost * lev
+
+
+def run(opens: pd.DataFrame, closes: pd.DataFrame, method: str, lookback: int,
+        frac: float, hold: int, side: str = "ls", cost: float = COST,
+        target_vol: float | None = None, max_lev: float = 2.0) -> pd.Series:
+    raw = run_raw(opens, closes, method, lookback, frac, hold, side)
+    return apply_exposure(raw, hold, target_vol, max_lev=max_lev, cost=cost)
 
 
 def stats(r: pd.Series, hold: int) -> dict:
@@ -184,13 +211,13 @@ def main() -> None:
           f"HOLDOUT {c_h.shape[1]} coins, cost {COST*100:g}%/side\n")
 
     if mode == "grid":
-        print("| score | lookback | legs | hold | side || FIT cagr | dd | ratio "
+        print("| score | lookback | frac | hold | side || FIT cagr | dd | ratio "
               "|| **HOLD cagr** | dd | **ratio** | sharpe | hit% |")
         print("|" + "---|" * 14)
         rows = []
         for method, lb, n, h, sd in product(
                 ("ret", "vol_adj", "rs_vs_btc"), (14, 30, 60, 90),
-                (5, 10), (7, 14, 30), ("ls",)):
+                (0.10, 0.15, 0.25), (7, 14, 30), ("ls",)):
             try:
                 rf = run(o_f, c_f, method, lb, n, h, sd)
                 rh = run(o_h, c_h, method, lb, n, h, sd)
@@ -202,7 +229,7 @@ def main() -> None:
             rows.append((method, lb, n, h, sd, sf, sh))
         rows.sort(key=lambda x: -x[6].get("ratio", -9))
         for method, lb, n, h, sd, sf, sh in rows:
-            print(f"| {method} | {lb} | {n} | {h} | {sd} || "
+            print(f"| {method} | {lb} | {n:.0%} | {h} | {sd} || "
                   f"{sf['cagr%']:+.1f}% | {sf['max_dd%']:.1f}% | {sf['ratio']} || "
                   f"**{sh['cagr%']:+.1f}%** | {sh['max_dd%']:.1f}% | "
                   f"**{sh['ratio']}** | {sh['sharpe']} | {sh['hit%']} |")

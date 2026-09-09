@@ -1356,3 +1356,95 @@ leaves the drawdown ratio untouched.
 3. **Re-test ex-2021 after 1 and 2.** If a decile-based, volatility-targeted
    version is positive ex-2021 on both baskets, this becomes a real second book
    rather than a Sharpe improvement.
+
+## Closing the cross-sectional thread — the three fixes, and the verdict
+
+Finding 55 left three items: scale legs with universe size, add a volatility
+target, then re-test excluding 2021 on both baskets. All three are done.
+
+Each cell below is `CAGR / maxDD / ratio` for the full period, then
+`ex-2021 CAGR / ratio`. `rs_vs_btc`, lookback 30, 14-day hold.
+
+| config | FIT | HOLDOUT | ALL |
+|---|---|---|---|
+| frac 6% | +2/93/**0.02** · −19/**−0.21** | +5/59/**0.09** · −9/**−0.14** | +27/58/**0.47** · −5/**−0.09** |
+| **frac 10%** | +34/73/**0.47** · +11/**0.15** | +19/45/**0.43** · −1/**−0.02** | **+35/40/0.88** · +7/**0.18** |
+| frac 15% | +31/63/**0.49** · +10/**0.17** | +12/66/**0.17** · +5/**0.12** | +25/36/**0.70** · +9/**0.26** |
+| frac 25% | +13/57/**0.22** · +2/**0.03** | +11/52/**0.20** · +2/**0.05** | +20/29/**0.68** · +6/**0.23** |
+| frac 35% | +3/52/**0.06** · −1/**−0.02** | +11/25/**0.44** · +1/**0.06** | +11/32/**0.35** · +4/**0.12** |
+| vol target 40%, win 8 | +28/66/**0.42** · +19/**0.29** | +10/66/**0.15** · −6/**−0.09** | +20/52/**0.38** · +2/**0.04** |
+| vol target 60%, win 4 | **−100/100/−1.0** | +18/73/**0.25** · −6/**−0.09** | +28/73/**0.38** · −0/**−0.00** |
+| vol target 80%, win 4 | **−100/100/−1.0** | +23/72/**0.32** · −7/**−0.09** | +36/72/**0.50** · +2/**0.03** |
+
+### Finding 56 — the decile fix is real and large
+
+Scaling leg count with universe size lifts the whole-universe ratio from
+**0.41 to 0.88** (frac 10%), and CAGR from +23% to +35%. Finding 55's suspicion
+was right: a fixed 5 legs was holding the top 6.6% of a 76-coin universe against
+the top 13% of a 38-coin one, and the more concentrated version was worse. The
+confound is removed and the fraction is the correct formulation.
+
+### Finding 57 — volatility targeting fails here, and twice causes ruin
+
+Every vol-target row is worse than the untargeted row at the same leg fraction.
+Two configurations reach **−100%**: a short window re-levers into the recovery
+after de-levering through the fall, and the leverage turns a bad period into a
+wipeout. The 8-period window is slower and merely unhelpful.
+
+The reason is that the estimate cannot lead the event. Volatility is measured
+from periods strictly before the one being sized — as it must be — and this
+book's bad periods arrive without a volatile run-up to warn of them. Targeting
+volatility only helps when volatility is persistent, and here it is not.
+
+**The 55% standalone drawdown is therefore not fixable by sizing.** It is the
+signal's, not the exposure's.
+
+### Finding 58 — excluding 2021, the two baskets disagree in sign
+
+This is what closes the thread. Best ex-2021 ratio anywhere in the table is
+**0.26**, against **0.91** for the trendline book. And at the best full-period
+config, frac 10%, the baskets split: FIT +11% and ratio 0.15, HOLDOUT **−1%**
+and ratio −0.02.
+
+Finding 55 reported FIT +11.6% and HOLDOUT +11.3% ex-2021, which looked like
+strong agreement. That was the fixed-5-leg configuration. With the confound
+removed, the agreement disappears. The earlier match was a property of one
+config, not of the mechanism.
+
+## Verdict
+
+**Cross-sectional relative strength is a genuine diversifier and not a return
+engine.** Both halves of that stand:
+
+* Correlation with the trendline book is **+0.105**, with 38 of 64 months
+  disagreeing. That result is unaffected by any of the above and remains the
+  first true decorrelation found in this project.
+* A 25% allocation still lifts Sharpe from 0.82 to 0.99.
+* But its own return is concentrated in 2020–2021, its drawdown is 25–93% and
+  is not reducible by sizing, and out of the alt season the two coin baskets do
+  not even agree on the sign.
+
+**The core book stays TrendlineBreakout at 17.4% CAGR / 19.2% drawdown, ratio
+0.91.** Nothing found on this thread beats it, and nothing found on this thread
+raises its ratio.
+
+### What is left, honestly
+
+The ratio has not moved in three attempts: stacking two breakout books (finding
+51), long+short (finding 50), and now cross-sectional RS. The pattern across all
+three is the same — the second book either shares the first's exposure, or has
+positive expectancy only in one regime.
+
+Remaining candidates that have not been tried and are not another price-momentum
+construction:
+
+1. **Funding-rate carry.** Paid by position imbalance rather than direction. The
+   only remaining mechanism in the list that is structurally unlike everything
+   tested. Needs futures funding history, which is not on disk.
+2. **A volatility-regime switch on the core book** rather than a second book —
+   trade TrendlineBreakout only when the market is not in the state that
+   produced its 2022 and 2025 losses. This attacks the ratio directly by
+   removing drawdown rather than by adding return.
+
+Option 2 is cheaper and attacks the metric that matters. Option 1 is the only
+genuinely new exposure left.

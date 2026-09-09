@@ -149,7 +149,8 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | 1h WT cross-up continuation | −0.12R over 1198 trades |
 | lower fees as the fix | tested; changes almost nothing on daily, insufficient on 1h |
 | stacking the two proven books | correlation +0.300, same losing years; ratio helped in 1 of 9 combinations and reversed on the slot limit |
-| cross-sectional RS as a return engine | correlation is genuinely low (+0.105) and Sharpe improves, but standalone drawdown is 55% and whole-universe CAGR ex-2021 is -1.5%. A diversifier, not an engine |
+| cross-sectional RS as a return engine | correlation is genuinely low (+0.105) and Sharpe improves, but ex-2021 the best ratio anywhere is 0.26 against 0.91 for the core book, and the two coin baskets disagree in sign. A diversifier, not an engine |
+| volatility targeting the cross-sectional book | every targeted config worse than untargeted; two reached -100% as a short window re-levered into the recovery. Its drawdown is the signal's, not the exposure's |
 
 **Long + short combined:** shorts have negative expectancy but win in exactly
 the years longs lose (2021, 2022, 2025). Combining gives **0 losing years out of
@@ -309,17 +310,29 @@ before believing the harness.
    lifts Sharpe 0.82 -> 0.99 and CAGR 17.4% -> 21.0%, but leaves the
    CAGR/maxDD ratio flat at 0.90 and needs a 23% drawdown. Standalone it draws
    down 55% and, on the whole universe, is **-1.5% CAGR excluding 2021**.
-   Unfinished and worth finishing: `n_legs` was held at 5 while the universe
-   size varied, so the whole-universe rows hold the top 6.6% while the
-   half-basket rows hold the top 13% -- switch to deciles, add a volatility
-   target, then re-test ex-2021 on both baskets.
-5. **Find a THIRD book that differs in exposure.** Same reasoning as
-   step 4, now that a market-neutral construction is shown to decorrelate
-   properly. **Funding-rate carry** is the untried candidate — paid by position
-   imbalance rather than price direction, so it should be uncorrelated with
-   both a breakout book and a momentum book.
-6. **Walk-forward the oversold dial** instead of fixing it at −30.
-7. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
+   **Now finished (findings 56-58).** The decile fix was real and large: leg
+   count scaled to universe size lifts the whole-universe ratio 0.41 -> 0.88.
+   Volatility targeting FAILED -- every targeted row is worse than untargeted,
+   and two configs reach -100% because a short window re-levers into the
+   recovery. The 55% drawdown is the signal's, not the exposure's, and is not
+   fixable by sizing. And ex-2021 the two baskets disagree in sign (FIT +11%,
+   HOLDOUT -1%), so finding 55's apparent agreement was a property of the
+   fixed-5-leg config rather than of the mechanism. **Verdict: a genuine
+   diversifier, not a return engine.** Keep at ~25% weight for the Sharpe;
+   do not expect return from it.
+5. **Attack the ratio by removing drawdown, not by adding return.** Three
+   attempts at a second book have now failed to move the ratio: stacking two
+   breakout books (51), long+short (50), and cross-sectional RS (56-58). Each
+   time the second book either shared the first's exposure or only worked in
+   one regime. The untried alternative is a **volatility- or regime-switch on
+   the core book itself** — trade TrendlineBreakout only outside the state that
+   produced its 2022 and 2025 losses. It attacks maxDD directly, which is the
+   denominator of the metric that governs everything, and it needs no new data.
+6. **Funding-rate carry** — the only structurally new exposure left on the list,
+   paid by position imbalance rather than price direction. Needs futures funding
+   history, which is not on disk.
+7. **Walk-forward the oversold dial** instead of fixing it at −30.
+8. **Paper trade DailyDivBreakout** in parallel with all of the above. 2023
    produced 69% of its profit and no amount of backtesting can settle whether
    that was luck — only forward evidence can.
 
