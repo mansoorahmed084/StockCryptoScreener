@@ -1,10 +1,13 @@
 # TrendlineBreakoutLTF — daily trendline break, 1h stop, 25% trail
 
-**Status (2026-09-14):** the strongest result in this repo, confirmed by two
-independent engines. **Not yet traded forward.** Paper trade before any real
-money, and read [Known weaknesses](#known-weaknesses) first — most of the profit
-comes from a small number of trades, and at its worst the account value fell
-**38%** while trades were open.
+**Status (2026-09-14):** strong on the 76 coins it was built on, and two
+engines confirm that. But on **203 coins it has never seen, it is much weaker:
+15.2% CAGR at a 44.1% real drawdown**, against 49% and 38% on the original 76.
+The original coin list was picked by hand with hindsight, and it holds far
+more of the huge winners this strategy lives on. **Expect something closer to
+the new-coin result.** Not yet traded forward. Read
+[Coins it has never seen](#coins-it-has-never-seen) and
+[Known weaknesses](#known-weaknesses) before any real money.
 
 Freqtrade class: [TrendlineBreakoutLTF](../user_data/strategies/TrendlineBreakoutLTF.py)
 (inherits the daily signal from [TrendlineBreakout](../user_data/strategies/TrendlineBreakout.py))
@@ -48,7 +51,11 @@ Parent strategy: [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md)
 The research engine, built separately, gets **48.3% CAGR**, a 21.1% drawdown on
 closed trades, and a **34.1%** drawdown with open trades marked daily.
 
-**Four warnings before anything else**
+**Five warnings before anything else**
+
+- **On coins it has never seen, it earns about a third as much.** 203 new
+  coins: 15.2% CAGR, 44.1% real drawdown, and 4 losing years out of 7. See
+  [Coins it has never seen](#coins-it-has-never-seen).
 
 - **The real worst drop is about 38%, not 21%.** The 21% counts closed trades
   only. With open trades valued every day, the account fell 38.4% in 2024.
@@ -373,6 +380,87 @@ date order):
 
 ---
 
+## Coins it has never seen
+
+**Why this test matters most.** Every rule here was chosen while looking at the
+same 76 coins. The hash split kept half of them out of each decision, but the
+76 themselves were picked by hand: majors, plus volatile names like those in the
+trader's charts. So 203 more Binance coins were downloaded and run with the
+rules unchanged ([new_coins.py](new_coins.py)).
+
+**Which coins.** Every active Binance USDT spot pair not already in the 76. Left
+out: stablecoins, wrapped coins, leveraged tokens and about 70 tokenized US
+stocks. A coin had to have its first daily candle before 2025-06-01, and a
+median daily volume since 2024 at least equal to BAND's, the least liquid
+original coin. Exits walk on 1h candles, and the original 76 were re-run the
+same way so the comparison is fair.
+
+| | original 76 | **203 new coins** | all 279 together |
+|---|---|---|---|
+| CAGR | 49.7% | **15.2%** | 49.5% |
+| real drawdown | 34.1% | **44.1%** | 48.8% |
+| CAGR / drawdown | 1.46 | **0.34** | 1.01 |
+| trades filled | 204 | 311 | 369 |
+| win rate | 32.4% | 23.8% | 26.8% |
+| avg R per trade | +1.96 | **+0.63** | +1.14 |
+| profit factor | 4.01 | 1.88 | 2.64 |
+| losing calendar years | 0 of 7 | **4 of 7** (worst -27.8%) | 2 of 7 |
+| coins with positive total R | 69% | **37%** | - |
+
+Random baskets drawn only from the new coins (300 per size):
+
+| coins per basket | median CAGR | baskets profitable | median real drawdown | same size from the original 76 |
+|---|---|---|---|---|
+| 20 | 3.9% | 82% | 17.4% | 17.5% median CAGR |
+| 38 | 7.4% | 94% | 22.2% | 31.2% median CAGR |
+| 76 | 11.6% | 99% | 30.6% | 41.8% (all 76) |
+
+### Why the gap
+
+The typical trade is the same in both groups: the median trade loses 1R. The
+whole difference is how often a trade runs huge:
+
+| | original 76 | new 203 |
+|---|---|---|
+| trades above +5R | 16.5% | 7.3% |
+| trades above +10R | 9.4% | 3.7% |
+| avg R without the +10R trades | +0.26 | **-0.11** |
+
+So this strategy hunts for rare, huge runners. The original list, picked with
+hindsight, holds about 2.5 times as many of them. On the new coins, every trade
+except those rare runners loses money on average.
+
+R per trade by entry year:
+
+| | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---|---|---|---|---|---|---|
+| original 76 | +4.72 | +2.72 | +0.45 | +4.41 | +2.93 | -0.03 | +0.60 |
+| new 203 | -0.05 | -1.02 | -0.55 | +1.16 | +1.92 | -0.28 | +0.92 |
+
+### Checked before believing it
+
+- **No broken data drives the losses.** No trade in either group lost more than
+  1.5R, so no price gap jumped a stop.
+- **Odd coins do not explain it.** Four new coins have a one-day close move
+  above 5x or below 0.2x: DEXE, LUNA, STRAX and SUN. Without them, average R
+  goes from +0.63 to +0.62.
+- **Listing age does not explain it.** The new coins listed before 2022 (75
+  coins, the ones most like the originals) do no better: +0.64 R per trade and
+  14.5% CAGR.
+- **More coins does not help.** Adding the new coins to the old 76 keeps CAGR
+  at 49.5%, but the real drawdown rises to 48.8%.
+
+### What it means
+
+- **The edge is real, but small.** On unseen coins it is still positive: profit
+  factor 1.88, and 94-99% of random 38- and 76-coin baskets make money.
+- **The 49% headline is not a fair forecast.** It depends on holding the coins
+  that later ran hardest, and nobody can pick those in advance.
+- **From a broad universe, plan on roughly 10-15% CAGR with a 40%+ drawdown**,
+  until forward trading shows otherwise.
+
+---
+
 ## Across coins and baskets
 
 **Question:** does it only work on this universe, or only thanks to a few coins?
@@ -579,12 +667,10 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
 
 ## Next steps
 
-1. **Test coins outside the 76.** Inside the 76 this is done; see
-   [Across coins and baskets](#across-coins-and-baskets). Every random 20-coin
-   basket made money, and the result survives losing its best coins. Coins
-   never seen at all are the stronger test. A bigger universe should also raise
-   the return, because more signals fill idle slots. This needs more coin data
-   downloaded.
+1. **Coins outside the 76 are tested.** The result is much weaker; see
+   [Coins it has never seen](#coins-it-has-never-seen). The next question is
+   whether any rule known in advance (not hindsight) separates the coins that
+   produce huge runners from those that do not.
 2. **Cut the 38% drawdown without killing the return** — test fewer slots,
    0.5% risk, and a tighter trail after a large gain. (Measuring it is done.)
 3. **Stress the costs** — rerun at 0.3% and 0.5% slippage per side.
@@ -606,6 +692,7 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
 | `research/rf_final.py` | lookahead replay, fill check, account simulation |
 | `research/scan_trendline.py` | live scan of current breaks and near-breaks |
 | `research/baskets.py` | the strategy on sectors, liquidity, listing age, random baskets and every coin |
+| `research/new_coins.py` | the unchanged strategy on 203 Binance coins never used in any decision |
 | `research/results/ft_ltf.txt` | freqtrade output for this strategy |
 | `research/results/ft_daily15m.txt` | freqtrade output for the parent, same settings |
 | `research/results/rf_final.md` | research validation output |

@@ -105,6 +105,14 @@ means more return, because slots otherwise sit idle. It is weak on majors,
 gaming/NFT coins and 2022+ listings, but those splits are hindsight, not
 filters.
 
+**Out of sample ([new_coins.py](new_coins.py)).** On 203 Binance coins never
+used in any decision, the unchanged strategy earns **15.2% CAGR at a 44.1% real
+drawdown**: avg R +0.63, 4 of 7 losing years. On the original 76, run the same
+way, it earns 49.7% at 34.1%. The median trade is -1R in both groups. The
+originals simply hold 2.5 times as many runners above +10R (9.4% of trades
+against 3.7%). The 76-coin list was hand-picked with hindsight, so treat about
+10-15% CAGR at a 40%+ drawdown as the realistic expectation.
+
 **TrendlineBreakout** (parent) — documented in
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
 
@@ -411,6 +419,7 @@ before believing the harness.
 [tl_final.py](tl_final.py) | the chosen config: slot cost, years, concentration |
 [scan_trendline.py](scan_trendline.py) | live: what broke, what is pressing the line |
 [baskets.py](baskets.py) | TrendlineBreakoutLTF on sectors, liquidity, listing age, random baskets, every coin |
+[new_coins.py](new_coins.py) | the unchanged strategy on 203 never-seen Binance coins |
 [refine.py](refine.py) | 1h entry timing and 1h stop placement for the daily signal |
 [rf_grid.py](rf_grid.py) | the 600-config entry/stop/exit grid |
 [rf_report.py](rf_report.py) | marginals with the control shown first |
