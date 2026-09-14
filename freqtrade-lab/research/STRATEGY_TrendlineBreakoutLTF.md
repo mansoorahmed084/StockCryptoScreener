@@ -407,6 +407,12 @@ same way so the comparison is fair.
 | losing calendar years | 0 of 7 | **4 of 7** (worst -27.8%) | 2 of 7 |
 | coins with positive total R | 69% | **37%** | - |
 
+**Freqtrade agrees, and is harsher.** On the same 203 coins (1h fills, after the
+late-fill stop fix below) it makes 314 trades with a 25.2% win rate and
+profit factor 1.29. It earns **10.6% CAGR at a 49.8% real drawdown** (the
+closed-trade drawdown is 45.9%). Its losing years are 2022 (-24.8%) and 2025
+(-16.8%).
+
 Random baskets drawn only from the new coins (300 per size):
 
 | coins per basket | median CAGR | baskets profitable | median real drawdown | same size from the original 76 |
@@ -677,6 +683,18 @@ way round. Every version changes only 6-17 trades, and none cuts the drawdown.
   capital cap now stops that; without it the result reads 62%, not 48%.
 - The old account simulator ([portfolio.py](portfolio.py)) counted profit on
   entry, not exit. [tl_account.py](tl_account.py) replaces it.
+- **Late fills ran with no stop in freqtrade.** When a slot frees up mid-day, a
+  trade fills hours after the daily open. The strategy then looked up its stop
+  on the wrong candle, got nothing, and freqtrade fell back to the static -99%
+  stop, with no trail either. Some of those fills also landed below the stop,
+  where the setup had already failed. In the 203-coin run 4 trades ran
+  unprotected, and one lost 54%. The fix is in
+  [TrendlineBreakout.py](../user_data/strategies/TrendlineBreakout.py): the stop
+  now comes from the signal candle itself, and `confirm_trade_entry` refuses a
+  fill at or below the stop. After the fix no trade runs without a stop, and
+  the worst trade is -17.9%. The 76-coin and held-out runs had no such trades,
+  and every trade in them filled above its stop, so the fix cannot change those
+  results. A live bot would have hit this the first time it filled late.
 
 ---
 

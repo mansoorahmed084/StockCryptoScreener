@@ -165,29 +165,67 @@ class TrendlineBreakout(IStrategy):
         return dataframe
 
     # -------------------------------------------------------------- per-trade
-    def _stop_and_risk(self, pair: str, trade: Trade) -> tuple[float, float] | None:
+    SIGNAL_MAX_AGE = pd.Timedelta(days=3)
+
+    def _signal_stop(self, pair: str, before: datetime) -> float | None:
+        """The stop from the latest SIGNAL candle that closed before `before`.
+
+        This used to read simply the last candle before the entry. That is the
+        signal candle only when the fill lands on the next candle open. When it
+        lands later -- a slot freeing up at 04:00 under --timeframe-detail, or a
+        live bot restarting -- the last candle is an ordinary one with no stop.
+        custom_stoploss then returned None, freqtrade fell back to the static
+        -99% stop, and the trade ran with no stop and no trail. Four of 311
+        trades did that in the 203-coin backtest, and one lost 54%. Searching
+        for the signal candle itself fixes both the stop and the position size.
+        """
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if df is None or df.empty:
             return None
-        prior = df.loc[df["date"] < trade.open_date_utc]
-        if prior.empty:
+        rows = df.loc[(df["date"] < before) & (df["tl_signal"] == 1)]
+        if rows.empty:
             return None
-        stop = prior["tl_stop"].iloc[-1]
-        if not np.isfinite(stop):
+        last = rows.iloc[-1]
+        if before - last["date"] > self.SIGNAL_MAX_AGE:
+            return None                  # an older setup, not this trade's signal
+        stop = float(last["tl_stop"])
+        return stop if np.isfinite(stop) else None
+
+    def _stop_and_risk(self, pair: str, trade: Trade) -> tuple[float, float] | None:
+        stop = self._signal_stop(pair, trade.open_date_utc)
+        if stop is None:
             return None
-        risk = trade.open_rate - float(stop)
-        return (float(stop), risk) if risk > 0 else None
+        # A fill at or below the stop means the setup had already failed when
+        # the order filled. confirm_trade_entry refuses those; this is the
+        # fallback for anything that gets through. Keep the stop, with a token
+        # risk, so the trade exits at once instead of running on the static
+        # -99% stop. Returning None here is what left three trades in the
+        # 203-coin backtest with no stop at all, one of them losing 54%.
+        risk = max(trade.open_rate - stop, trade.open_rate * 1e-6)
+        return stop, risk
+
+    def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
+                            rate: float, time_in_force: str, current_time: datetime,
+                            entry_tag: str | None, side: str, **kwargs) -> bool:
+        """Refuse a fill that is already at or below the setup's stop.
+
+        The research engine fills at the next daily open, where price is above
+        the stop. Freqtrade can fill later in the day -- when a slot frees up,
+        or live after a delay -- and by then price may have fallen through the
+        stop. That trade is a loss that has already happened, so it is not
+        taken. With no stop found at all, the trade is refused too: it would
+        otherwise run unprotected.
+        """
+        stop = self._signal_stop(pair, current_time)
+        return stop is not None and rate > stop
 
     def custom_stake_amount(self, pair: str, current_time: datetime,
                             current_rate: float, proposed_stake: float,
                             min_stake: float | None, max_stake: float,
                             leverage: float, entry_tag: str | None,
                             side: str, **kwargs) -> float:
-        df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        if df is None or df.empty:
-            return proposed_stake
-        stop = df["tl_stop"].iloc[-1]
-        if not np.isfinite(stop) or current_rate <= 0:
+        stop = self._signal_stop(pair, current_time)
+        if stop is None or current_rate <= 0:
             return proposed_stake
         stop_pct = (current_rate - float(stop)) / current_rate
         if stop_pct <= 0:

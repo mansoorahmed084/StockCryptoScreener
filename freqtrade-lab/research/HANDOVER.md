@@ -111,7 +111,9 @@ drawdown**: avg R +0.63, 4 of 7 losing years. On the original 76, run the same
 way, it earns 49.7% at 34.1%. The median trade is -1R in both groups. The
 originals simply hold 2.5 times as many runners above +10R (9.4% of trades
 against 3.7%). The 76-coin list was hand-picked with hindsight, so treat about
-10-15% CAGR at a 40%+ drawdown as the realistic expectation.
+10-15% CAGR at a 40%+ drawdown as the realistic expectation. Freqtrade on
+the same coins, after the late-fill stop fix, gives 10.6% CAGR at a 49.8% real
+drawdown.
 
 **TrendlineBreakout** (parent) — documented in
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
@@ -246,6 +248,12 @@ These were learned the hard way; each caught a result that looked real.
    closed and 38.4% with open trades valued daily. Freqtrade's wallet file
    (`*_wallet.feather` in the result zip, summed by date) measures it, but its
    final snapshot omits open coins and must be dropped.
+10. **Check every freqtrade run for trades on the static stop.** If
+   `stop_loss_abs / open_rate < 0.02` in the result zip, the custom stop never
+   applied. In TrendlineBreakoutLTF that happened on late fills: the stop was
+   looked up on the wrong candle, or the fill was already below the stop. Fixed
+   in TrendlineBreakout.py. DailyDivBreakout, VmcCapitulation and the Eth*
+   strategies still use the old lookup.
 
 ### Harness bugs found and fixed (all in `harness.py`)
 - **Drawdown measured the coin loop, not time.** `metrics()` walked the trade
