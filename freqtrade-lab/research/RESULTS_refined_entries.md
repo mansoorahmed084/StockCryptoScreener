@@ -9,6 +9,10 @@ place the stop closer, or both?
 *worse* than simply taking the next daily open. And the stop only pays off once
 the exit stops being measured in R.
 
+Freqtrade confirms the winner at **49.0% CAGR**. The full rules, how to run it,
+and every result are in
+[STRATEGY_TrendlineBreakoutLTF.md](STRATEGY_TrendlineBreakoutLTF.md).
+
 Code: [refine.py](refine.py) · [rf_grid.py](rf_grid.py) ·
 [rf_report.py](rf_report.py) · [rf_final.py](rf_final.py)
 Raw: [rf_grid_report.md](results/rf_grid_report.md) ·
@@ -35,7 +39,10 @@ the refinement.
 hashing the coin name. `next_open` + `daily` is the control and sits inside the
 grid, so it is measured by the same engine as everything else.
 
-**600 of 600 cells are positive on held-out coins.**
+**599 of 600 cells are positive on held-out coins.** The grid was re-run on
+2026-09-14 after the lookahead fix described below; the first run is kept in
+`results/stale_pre_lookahead_fix/`. The fix changed only the waiting entry modes
+and the `line` stop, by 0.01–0.08 of a ratio point.
 
 ---
 
@@ -46,7 +53,7 @@ lucky corner. Numbers are the holdout ratio (annual_R / maxDD_R).
 
 | entry timing → | `next_open` | `ltf_break` | `retest` | `pullback_ema` |
 |---|---|---|---|---|
-| **marginal ratio** | **1.97** | 1.77 | 1.01 | 1.00 |
+| **marginal ratio** | **1.97** | 1.77 | 0.99 | 0.98 |
 
 Taking the next daily open beats every mode that waits. `retest` and
 `pullback_ema` are barely half as good, and they also lose a third of the
@@ -61,19 +68,19 @@ everything else.
 
 | stop → | `daily` | `ltf_swing` | `line` | `tighter` |
 |---|---|---|---|---|
-| **marginal ratio** | 1.13 | **1.53** | 1.00 | **1.53** |
+| **marginal ratio** | 1.13 | **1.53** | 0.95 | **1.53** |
 
 Median stop distance falls from about **21% to 6%**. `tighter` scores
 identically to `ltf_swing` because the 1h swing low is almost always the nearer
 of the two, so `max()` picks it every time — they are the same rule in practice.
 
-The broken line itself (`line`) is no better than the daily stop.
+The broken line itself (`line`) is worse than the daily stop.
 
 ## 3. The exit has to be decoupled from the stop
 
 | exit → | 3R | 6R | 9R | 15% | 25% | 35% |
 |---|---|---|---|---|---|---|
-| **marginal ratio** | 0.89 | 1.54 | **1.68** | 0.90 | **1.65** | 1.34 |
+| **marginal ratio** | 0.88 | 1.53 | **1.66** | 0.88 | **1.63** | 1.33 |
 
 An R-based trail **scales with the entry stop**. Tighten the stop and the trail
 tightens with it in price terms, so the tighter stop buys nothing. That is why
@@ -104,8 +111,28 @@ exit is freed does average R jump — from **+1.08 to +1.96**.
 
 `next_open` entry · `ltf_swing` stop, 1.0 x ATR(1h) · **25% trailing exit**
 
-Chosen on FIT ratio (2.37, the highest in the family), with the marginals
-agreeing on every dial independently.
+Chosen from the marginals, which agree on every dial: `next_open` beats every
+waiting mode, `ltf_swing` beats every other stop, and a wide trail beats a tight
+one. Inside that family the ATR buffer and the trail width form a plateau, so the
+exact pick matters little:
+
+| ATR buffer · exit | FIT ratio | held-out ratio | held-out avg R |
+|---|---|---|---|
+| 0.5 · 25% | 2.68 | 2.46 | +2.03 |
+| **1.0 · 25% (chosen)** | 2.37 | **2.54** | +1.96 |
+| 2.0 · 25% | 2.07 | 2.35 | +1.61 |
+| 1.0 · 35% | 1.26 | 2.90 | +2.37 |
+| 1.0 · 9R | 1.62 | 3.39 | +2.64 |
+
+The 0.5 buffer scores higher on fit coins. The chosen 1.0 is not the fit
+maximum, but its held-out score sits inside the same band. The 35% and 9R exits
+look better on held-out coins, but they are worse on fit coins, and choosing on
+held-out coins would defeat the point of holding them out.
+
+The top of the raw FIT ranking is a warning, not a guide. It is filled with
+`retest` and `pullback_ema` cells that score 3.1–3.3 on fit coins and only
+1.05–1.49 on held-out coins. Picking from that ranking would have chosen a worse
+strategy.
 
 ### Pooled R, held-out coins, 15m fills
 
@@ -142,6 +169,11 @@ positions are small, peaking at 62%). The refined one is not.
 
 Uncapped the refined figure is 62.4% at 23.1% drawdown; the cap costs 14 CAGR
 points and is not optional.
+
+**These drawdowns count closed trades only.** With open trades valued every
+day, the refined account's worst drop is **34.1%** in this engine and **38.4%**
+in freqtrade. See
+[STRATEGY_TrendlineBreakoutLTF.md](STRATEGY_TrendlineBreakoutLTF.md#drawdown-measured-two-ways).
 
 ---
 
@@ -203,8 +235,8 @@ covering two cycles. See
 | idea | result |
 |---|---|
 | waiting for a 1h break of the daily bar's high | marginal 1.77 vs 1.97 for not waiting |
-| waiting for a retest of the broken line | 1.01; also loses a third of the trades |
-| waiting for a 1h EMA pullback | 1.00 |
-| the broken trendline as the stop | 1.00, no better than the daily stop |
+| waiting for a retest of the broken line | 0.99; also loses a third of the trades |
+| waiting for a 1h EMA pullback | 0.98 |
+| the broken trendline as the stop | 0.95, worse than the daily stop |
 | an R-based trail on a tightened stop | it scales with the stop and cancels the gain |
-| a tight trail of any kind (3R or 15%) | 0.89 / 0.90; the move needs room |
+| a tight trail of any kind (3R or 15%) | 0.88 / 0.88; the move needs room |

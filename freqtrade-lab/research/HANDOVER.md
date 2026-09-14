@@ -29,7 +29,8 @@ three times. The fix and the evidence are in section 4.
 
 | book (HOLDOUT coins) | annual_R | maxDD_R | **ratio** | was printed as | CAGR at 30% DD | at 50% DD |
 |---|---|---|---|---|---|---|
-| **long-term trendline break (best)** | 26.11 | 26.5 | **0.99** | 3.26 | — see note | — |
+| **trendline break, 1h stop, 25% trail (best)** | 39.0 | 18.6 | **2.10** | — | — see note | — |
+| long-term trendline break, daily stop | 26.11 | 26.5 | **0.99** | 3.26 | — see note | — |
 | **2xATR stop + 4R target** (grid, section 5) | 11.80 | 22.9 | **0.52** | 2.33 | 16% | 26% |
 | daily long + structure break | 3.74 | 10.3 | 0.36 | 0.56 | 11% | 18% |
 | long + short combined | 2.72 | 10.6 | 0.26 | 0.21 | 8% | 13% |
@@ -54,6 +55,12 @@ flaw below is fixed), against **10.7% at 18.5%** for the strategy beneath it on
 the identical freqtrade run. Better, not double. See
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
 
+*Note on the 1h-stop row:* held-out coins, 15m fills. As an account (freqtrade,
+10 slots, 1% risk) it earns **49.0% CAGR**. Its drawdown is **20.8% on closed
+trades but 38.4% with open trades valued daily** — the research engine,
+measured separately, finds 34.1%. Plan for the larger number. See
+[STRATEGY_TrendlineBreakoutLTF.md](STRATEGY_TrendlineBreakoutLTF.md).
+
 **To beat ~17% CAGR at a tolerable drawdown, the ratio must rise.** Only two
 things move it, and neither is a parameter tweak:
 
@@ -68,7 +75,28 @@ which measures whether an edge exists but not how much money it makes.
 
 ## 2. What is PROVEN (survived held-out coins + two engines)
 
-**TrendlineBreakout** (best) — documented in
+**TrendlineBreakoutLTF** (best) — documented in
+[STRATEGY_TrendlineBreakoutLTF.md](STRATEGY_TrendlineBreakoutLTF.md).
+
+The same daily trendline signal with two changes, both picked by a 600-cell
+grid: the stop sits under the signal day's low minus 1×ATR(1h), about 7% away
+instead of 21%; and the exit is a trail 25% below the high instead of a 3R
+trail. Entry is still the next daily open — every 1h entry trigger tested did
+worse.
+
+| | value |
+|---|---|
+| CAGR, freqtrade, 10 slots, 1% risk | 49.0% (44.2% counting closed trades only) |
+| CAGR, research engine, 100% capital cap | 48.3% (held-out coins alone: 34.6%) |
+| max drawdown, closed trades | 20.8% (research 21.1%) |
+| **max drawdown, open trades valued daily** | **38.4%** (research 34.1%) |
+| profit factor / win rate | 2.80 / 30.8% |
+| trades | 208, about 31 a year; median position 12.6% of the account |
+
+Weaknesses: the best 5 trades made 68% of the profit; 2022 and 2025 were flat;
+positions are big enough that the account is often fully invested.
+
+**TrendlineBreakout** (parent) — documented in
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
 
 Daily candles, long only. A descending line anchored at the highest high of the
@@ -140,8 +168,8 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | shallow-breach re-entry | −0.196R, no better than deep breaches |
 | exit re-engineering (divergence family) | 3R already optimal; all shorter targets and 4 scale-out shapes worse |
 | a fixed target on the TRENDLINE family | opposite result: 3R gives ratio 0.14 vs 0.78 trailing. Do not carry the divergence family's exit across |
-| lower-timeframe entry TIMING (1h break, retest, EMA pullback) | all worse than taking the next daily open (marginals 1.77 / 1.01 / 1.00 vs 1.97). These breaks go immediately; waiting filters out the runners. 600-cell grid, [RESULTS_refined_entries.md](RESULTS_refined_entries.md) |
-| the broken trendline as the stop | 1.00, no better than the daily stop |
+| lower-timeframe entry TIMING (1h break, retest, EMA pullback) | all worse than taking the next daily open (marginals 1.77 / 0.99 / 0.98 vs 1.97). These breaks go immediately; waiting filters out the runners. 600-cell grid, [RESULTS_refined_entries.md](RESULTS_refined_entries.md) |
+| the broken trendline as the stop | 0.95, worse than the daily stop |
 | an R-based trail behind a tightened stop | the trail scales with the stop, so it cancels the gain exactly |
 | ETH-only optimisation (~5,300 configs) | every result lost money on other coins |
 | blow-off fade on one coin | −0.42R; needed the basket |
@@ -193,6 +221,12 @@ These were learned the hard way; each caught a result that looked real.
    entry this caught a risk filter reading the next bar's open -- the price the
    fill lands on, which is not knowable at the decision. Truncate at the
    DECISION bar, not the entry bar.
+9. **Closed-trade drawdown is not account drawdown.** Both engines report
+   drawdown from closed trades. A long-hold book gives back open profit before
+   it exits, so the account falls further: TrendlineBreakoutLTF reads 20.8%
+   closed and 38.4% with open trades valued daily. Freqtrade's wallet file
+   (`*_wallet.feather` in the result zip, summed by date) measures it, but its
+   final snapshot omits open coins and must be dropped.
 
 ### Harness bugs found and fixed (all in `harness.py`)
 - **Drawdown measured the coin loop, not time.** `metrics()` walked the trade
@@ -378,7 +412,8 @@ before believing the harness.
 [breach_test.py](breach_test.py) | shallow vs deep breach test |
 [ETH_RESEARCH_LOG.md](ETH_RESEARCH_LOG.md) | full derivation, 50 numbered findings |
 [STRATEGY_DailyDivBreakout.md](STRATEGY_DailyDivBreakout.md) | the strategy spec |
-[STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md) | the best strategy's spec |
+[STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md) | the parent strategy's spec |
+[STRATEGY_TrendlineBreakoutLTF.md](STRATEGY_TrendlineBreakoutLTF.md) | the best strategy's spec: rules, how to run, full results |
 [RESULTS_refined_entries.md](RESULTS_refined_entries.md) | the 600-permutation lower-timeframe study |
 
 Freqtrade strategies live in `../user_data/strategies/`. `TrendlineBreakout.py`
