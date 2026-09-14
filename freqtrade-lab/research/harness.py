@@ -92,6 +92,13 @@ class ExitPlan:
     # to pair a tight entry stop with an exit wide enough to let a 100% move run.
     # trail_r wins if both are set.
     trail_pct: float | None = None
+    # Tighten the percent trail once a trade has run. Both off by default, so
+    # every earlier result is unchanged. When the running extreme is at least
+    # `tighten_at` beyond entry (0.5 = +50% for a long), the trail switches
+    # from trail_pct to trail_pct_tight. Aimed at the give-back measured in
+    # research/dd_levers.py: open profit handed back before a wide trail exits.
+    tighten_at: float | None = None
+    trail_pct_tight: float | None = None
 
     def target_price(self, entry: float, risk: float, direction: int,
                      value: float) -> float:
@@ -196,7 +203,11 @@ def _walk(detail: pd.DataFrame, start: int, direction: int, entry: float,
                 cand = (peak - direction * plan.trail_r * risk
                         if move >= plan.trail_start_r else None)
             else:
-                cand = peak * (1 - direction * plan.trail_pct)
+                pct = plan.trail_pct
+                if (plan.tighten_at is not None and plan.trail_pct_tight is not None
+                        and direction * (peak / entry - 1) >= plan.tighten_at):
+                    pct = plan.trail_pct_tight
+                cand = peak * (1 - direction * pct)
             if cand is not None and (
                     (cand > live_stop) if direction > 0 else (cand < live_stop)):
                 live_stop = cand

@@ -578,6 +578,82 @@ positive total R and 27 a negative one. The full per-coin table is in
 
 ---
 
+## Trying to cut the drawdown
+
+**Question:** can the 35-45% real drawdown be cut without killing the return?
+This was done in three steps: [dd_levers.py](dd_levers.py),
+[dd_levers2.py](dd_levers2.py) and [dd_levers3.py](dd_levers3.py). A lever
+only counts if it improves CAGR / real drawdown on **both** hash halves, and on
+most of 100 random baskets paired with the baseline. On all 76 coins together,
+several levers look good. None of them survive the halves.
+
+### Where the drawdown comes from
+
+Research engine, all 76 coins, every drop over 15%:
+
+| drop | high to low | given back by trades open at the high | lost on trades opened during the fall | trades opened in the fall (stopped out) | BTC | median coin |
+|---|---|---|---|---|---|---|
+| 34.1% | 2025-10-09 to 2026-04-13 | 54% | 46% | 28 (22) | -43% | -69% |
+| 27.5% | 2023-02-12 to 2023-10-13 | 32% | 68% | 24 (22) | +22% | -41% |
+| 21.3% | 2026-05-09 to 2026-08-19 | 78% | 22% | 11 (7) | -19% | -38% |
+| 19.2% | 2024-03-05 to 2024-09-17 | 36% | 64% | 15 (14) | -15% | -57% |
+| 16.5% | 2022-11-05 to 2023-01-06 | 87% | 13% | 5 (3) | -20% | -39% |
+| 16.2% | 2022-04-04 to 2022-10-13 | 64% | 36% | 11 (9) | -59% | -74% |
+
+There are two causes, about evenly split. Open profit gets handed back, and
+long runs of stop-outs happen while alt coins fall. In 2023 the median coin
+fell 41% while BTC rose 22%, so no BTC trend filter could see that fall.
+
+### Levers that need no new price walk
+
+CAGR / real drawdown, research engine, 15m fills:
+
+| lever | all 76 coins | fit half | held-out half | verdict |
+|---|---|---|---|---|
+| baseline (10 slots, 1% risk, cap 100%) | 1.22 | 1.32 | 1.07 | - |
+| risk 0.75% per trade | 1.45 | 1.26 | 1.08 | fails the fit half |
+| risk 0.5% per trade | 1.47 | 1.17 | 1.05 | fails both halves |
+| 5 / 8 / 15 slots | 1.20 / 1.21 / 1.22 | 1.26 / 1.33 / 1.32 | 0.90 / 1.06 / 1.07 | no better |
+| positions capped at 75% / 50% of the account | 1.32 / 1.31 | 1.36 / 1.15 | 0.97 / 0.83 | fails the held-out half |
+| enter only when BTC is above its 200 / 100 / 50-day average | 1.21 / 1.11 / 1.53 | 0.98 / 0.84 / 1.16 | 0.88 / 0.77 / 1.32 | fails |
+| halve risk after 3 / 5 losses in a row | 1.53 / 1.50 | 1.25 / 1.28 | 0.90 / 0.92 | fails both halves |
+| halve risk while 10% / 20% below the high | 0.98 / 1.18 | 1.31 / 1.32 | 1.00 / 1.07 | fails |
+
+The streak throttle is the most tempting row. On all coins it cuts the drawdown
+from 34.1% to 24.8%, but it loses on both halves, and on 71% of random baskets.
+
+### Tighten the trail after a big gain
+
+This one needs a new price walk. `harness.ExitPlan` gained `tighten_at` and
+`trail_pct_tight`, both off by default, and the baseline trades were checked
+identical after the change. The real drawdown did not move in any variant.
+
+| tighten the 25% trail | passes on the old 76? | passes on the 203 new coins? | trades changed (old / new) |
+|---|---|---|---|
+| to 5% after +150% | no | no | 17 / 10 |
+| to 10% after +150% | no | **yes** | 17 / 10 |
+| to 15% after +150% | no | **yes** | 17 / 10 |
+| to 5% after +200% | no | no | 10 / 6 |
+| to 10% after +200% | **yes** | no | 10 / 6 |
+| to 15% after +200% | **yes** | no | 10 / 6 |
+| to 5%, 10% or 15% after +300% | no | no | 2 / 2 |
+
+The threshold that wins on the old coins fails on the new ones, and the other
+way round. Every version changes only 6-17 trades, and none cuts the drawdown.
+**It is not adopted.**
+
+### Verdict
+
+- **Nothing tested cuts the drawdown reliably.** The losses come from the whole
+  alt market falling while the strategy is invested, and the rules cannot see
+  that coming.
+- **Only a smaller bet works, and it costs return about one for one.** At 0.5%
+  risk per trade, the 76-coin drawdown falls from 34.1% to 19.6%, and CAGR falls
+  from 41.8% to 28.9%. That is choosing a smaller position, not fixing the
+  strategy.
+
+---
+
 ## Evidence it is real
 
 | check | result |
@@ -671,8 +747,9 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
    [Coins it has never seen](#coins-it-has-never-seen). The next question is
    whether any rule known in advance (not hindsight) separates the coins that
    produce huge runners from those that do not.
-2. **Cut the 38% drawdown without killing the return** — test fewer slots,
-   0.5% risk, and a tighter trail after a large gain. (Measuring it is done.)
+2. **Cutting the drawdown is tried and failed**; see
+   [Trying to cut the drawdown](#trying-to-cut-the-drawdown). To lower it, lower
+   the risk per trade and accept a lower return.
 3. **Stress the costs** — rerun at 0.3% and 0.5% slippage per side.
 4. **Paper trade** for at least a few months before real money.
 
@@ -693,6 +770,9 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
 | `research/scan_trendline.py` | live scan of current breaks and near-breaks |
 | `research/baskets.py` | the strategy on sectors, liquidity, listing age, random baskets and every coin |
 | `research/new_coins.py` | the unchanged strategy on 203 Binance coins never used in any decision |
+| `research/dd_levers.py` | drawdown anatomy, and slots / risk / cap / BTC-gate levers |
+| `research/dd_levers2.py` | tighten-after-gain trails and risk throttles, paired random baskets |
+| `research/dd_levers3.py` | tighten-after-gain neighbours, on the old 76 and the 203 new coins |
 | `research/results/ft_ltf.txt` | freqtrade output for this strategy |
 | `research/results/ft_daily15m.txt` | freqtrade output for the parent, same settings |
 | `research/results/rf_final.md` | research validation output |

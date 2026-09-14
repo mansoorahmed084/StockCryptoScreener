@@ -188,6 +188,8 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | lower-timeframe entry TIMING (1h break, retest, EMA pullback) | all worse than taking the next daily open (marginals 1.77 / 0.99 / 0.98 vs 1.97). These breaks go immediately; waiting filters out the runners. 600-cell grid, [RESULTS_refined_entries.md](RESULTS_refined_entries.md) |
 | the broken trendline as the stop | 0.95, worse than the daily stop |
 | an R-based trail behind a tightened stop | the trail scales with the stop, so it cancels the gain exactly |
+| cutting the LTF drawdown with slots, risk throttles, a capital cap or a BTC trend gate | none improves CAGR / real drawdown on both hash halves. The drawdown splits evenly between open profit handed back and stop-out runs while alts fall; in 2023 alts fell 41% while BTC rose 22%. [dd_levers.py](dd_levers.py), [dd_levers2.py](dd_levers2.py) |
+| tightening the LTF trail after a big gain | the passing threshold flips between the old 76 (+200%) and the 203 new coins (+150%); it touches 6-17 trades; the drawdown is unchanged. [dd_levers3.py](dd_levers3.py) |
 | ETH-only optimisation (~5,300 configs) | every result lost money on other coins |
 | blow-off fade on one coin | −0.42R; needed the basket |
 | ATR volatility floor | harmful at every threshold |
@@ -420,6 +422,9 @@ before believing the harness.
 [scan_trendline.py](scan_trendline.py) | live: what broke, what is pressing the line |
 [baskets.py](baskets.py) | TrendlineBreakoutLTF on sectors, liquidity, listing age, random baskets, every coin |
 [new_coins.py](new_coins.py) | the unchanged strategy on 203 never-seen Binance coins |
+[dd_levers.py](dd_levers.py) | LTF drawdown anatomy; slots, risk, cap and BTC-gate levers |
+[dd_levers2.py](dd_levers2.py) | tighten-after-gain trails and risk throttles (harness.ExitPlan.tighten_at, default off) |
+[dd_levers3.py](dd_levers3.py) | tighten-after-gain neighbours on the old 76 and the 203 new coins |
 [refine.py](refine.py) | 1h entry timing and 1h stop placement for the daily signal |
 [rf_grid.py](rf_grid.py) | the 600-config entry/stop/exit grid |
 [rf_report.py](rf_report.py) | marginals with the control shown first |
