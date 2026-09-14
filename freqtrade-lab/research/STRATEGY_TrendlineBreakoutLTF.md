@@ -219,6 +219,13 @@ use the signal day's low minus one 1h ATR.
 
 Set `max_open_trades` to 10 in the config first.
 
+**6. Re-run the basket tests** (sectors, liquidity, listing age, random baskets,
+every coin; about 5 minutes once the trades are cached):
+
+```bash
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/baskets.py 300
+```
+
 ---
 
 ## Measured performance — full detail
@@ -402,6 +409,14 @@ day.
 The two halves never share a coin, and they earn almost the same: 29.0% and
 29.8%.
 
+**Freqtrade on the held-out half alone** (36 coins, 1h fills, otherwise the
+same settings as the main run): 132 trades, 33.3% win rate, PF 3.24,
+**31.6% CAGR**, and a 17.0% drawdown on closed trades. That is close to this
+engine's 29.8% and 17.3%. But freqtrade's **real drawdown is 41.8%**
+(2024-03-26 to 2024-11-06), against 27.9% here. On all 76 coins the two engines
+were closer (38.4% and 34.1%). Freqtrade is the more cautious of the two, so
+**plan for a drop of about 40% on any basket.**
+
 ### Random baskets (300 per size, seed 7)
 
 | coins per basket | CAGR 5th pct | median | 95th pct | real drawdown, median | baskets profitable | baskets with CAGR > drawdown |
@@ -485,7 +500,7 @@ positive total R and 27 a negative one. The full per-coin table is in
 | **the daily detector matches** | 331 signals, 0 mismatches (parent strategy) |
 | **held-out coins** | the held-out basket earns 34.6% alone |
 | **fill resolution** | same trades walked on 1h / 15m / 5m: avg R +0.437 / +0.475 / +0.425 |
-| **not a lucky basket** | all 600 random 20- and 38-coin baskets profitable; the fit and held-out halves earn 29.0% and 29.8%; without its top 5 coins it still earns 30.9% |
+| **not a lucky basket** | all 600 random 20- and 38-coin baskets profitable; the fit and held-out halves earn 29.0% and 29.8%; without its top 5 coins it still earns 30.9%; freqtrade on the held-out half alone earns 31.6% |
 | **not a lucky setting** | 599 of 600 grid cells positive on held-out coins; the chosen cell scores 2.54 held out and its ATR neighbours 2.46 and 2.35 ([RESULTS_refined_entries.md](RESULTS_refined_entries.md)) |
 
 **Bugs caught on the way, all fixed before the numbers above:**
@@ -522,7 +537,8 @@ negative there (−0.01 R per trade). The held-out basket is +0.48 R per trade (
 only. A trade can rise 100% and give back 25% of its high before it exits, and
 ten trades can do that at the same time. Valuing open trades every day, the
 account fell **38.4%** from 2024-03-10 to 2024-09-18 and did not recover until
-2024-11-23. The research engine, measured separately, finds 34.1%. See
+2024-11-23. The research engine, measured separately, finds 34.1%. On the held-out half
+of the coins alone, freqtrade measures 41.8%. See
 [Drawdown, measured two ways](#drawdown-measured-two-ways). **Plan for a 40%
 drop, not 21%.**
 

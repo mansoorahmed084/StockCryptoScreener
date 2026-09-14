@@ -98,7 +98,9 @@ positions are big enough that the account is often fully invested.
 
 Across baskets ([baskets.py](baskets.py)): all 600 random 20- and 38-coin
 baskets made money (median CAGR 17.5% and 31.2%). The fit and held-out halves
-earn 29.0% and 29.8%. Without its top 5 coins it still earns 30.9%. More coins
+earn 29.0% and 29.8%, and freqtrade on the held-out half alone earns 31.6%
+(but measures a 41.8% real drawdown there). Without its top 5 coins it still
+earns 30.9%. More coins
 means more return, because slots otherwise sit idle. It is weak on majors,
 gaming/NFT coins and 2022+ listings, but those splits are hindsight, not
 filters.
