@@ -96,6 +96,13 @@ worse.
 Weaknesses: the best 5 trades made 68% of the profit; 2022 and 2025 were flat;
 positions are big enough that the account is often fully invested.
 
+Across baskets ([baskets.py](baskets.py)): all 600 random 20- and 38-coin
+baskets made money (median CAGR 17.5% and 31.2%). The fit and held-out halves
+earn 29.0% and 29.8%. Without its top 5 coins it still earns 30.9%. More coins
+means more return, because slots otherwise sit idle. It is weak on majors,
+gaming/NFT coins and 2022+ listings, but those splits are hindsight, not
+filters.
+
 **TrendlineBreakout** (parent) — documented in
 [STRATEGY_TrendlineBreakout.md](STRATEGY_TrendlineBreakout.md).
 
@@ -401,6 +408,7 @@ before believing the harness.
 [tl_portfolio.py](tl_portfolio.py) | account sim for the trendline book |
 [tl_final.py](tl_final.py) | the chosen config: slot cost, years, concentration |
 [scan_trendline.py](scan_trendline.py) | live: what broke, what is pressing the line |
+[baskets.py](baskets.py) | TrendlineBreakoutLTF on sectors, liquidity, listing age, random baskets, every coin |
 [refine.py](refine.py) | 1h entry timing and 1h stop placement for the daily signal |
 [rf_grid.py](rf_grid.py) | the 600-config entry/stop/exit grid |
 [rf_report.py](rf_report.py) | marginals with the control shown first |

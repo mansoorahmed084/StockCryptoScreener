@@ -366,6 +366,115 @@ date order):
 
 ---
 
+## Across coins and baskets
+
+**Question:** does it only work on this universe, or only thanks to a few coins?
+[baskets.py](baskets.py) runs the same strategy on many baskets, in the same
+engine as the research numbers above: 15m fills, 10 slots, 1% risk, positions
+capped at 100% of the account. Every basket uses the same 6.68-year span, with
+open trades valued at the end, so baskets are comparable. On that basis the
+whole universe reads **41.8% CAGR** (rf_final.py's 48.3% measures only from the
+first entry to the last exit). "Real drawdown" below values open trades every
+day.
+
+### The short answer
+
+- **Any big enough basket makes money.** 300 random 20-coin baskets: all 300
+  profitable, median 17.5% CAGR. 300 random 38-coin baskets: all 300
+  profitable, median 31.2%.
+- **More coins means more return.** Ten slots sit idle unless enough coins
+  signal. Median CAGR: 10 coins 8.4%, 20 coins 17.5%, 38 coins 31.2%, all 76
+  coins 41.8%.
+- **It survives losing its best coins.** Without the top 5 coins: 30.9% CAGR.
+  Without the top 10: 22.1%. Without the top 15: 13.9%. None of them has a
+  losing calendar year.
+- **Weak spots:** majors (13.5% CAGR), gaming / NFT / social (0.9%), and coins
+  listed on Binance in 2022 or later (3.6%).
+
+### Reference
+
+| basket | coins | trades filled | win% | avg R | PF | **CAGR** | drawdown, closed | **drawdown, real** | losing years |
+|---|---|---|---|---|---|---|---|---|---|
+| all coins | 76 | 174 | 29.9 | +1.95 | 3.96 | **41.8%** | 21.0% | **34.1%** | 0 of 7 |
+| fit half (hash split) | 40 | 107 | 32.7 | +1.82 | 3.62 | 29.0% | 15.8% | 21.9% | 1 of 7 |
+| held-out half (hash split) | 36 | 108 | 33.3 | +2.07 | 4.35 | 29.8% | 17.3% | 27.9% | 1 of 7 |
+
+The two halves never share a coin, and they earn almost the same: 29.0% and
+29.8%.
+
+### Random baskets (300 per size, seed 7)
+
+| coins per basket | CAGR 5th pct | median | 95th pct | real drawdown, median | baskets profitable | baskets with CAGR > drawdown |
+|---|---|---|---|---|---|---|
+| 10 | 2.4% | 8.4% | 17.7% | 15.1% | 99% | 14% |
+| 20 | 8.5% | 17.5% | 27.1% | 18.9% | **100%** | 40% |
+| 38 | 20.0% | 31.2% | 39.4% | 23.9% | **100%** | 81% |
+
+### Take away the coins that carried it
+
+Ranked by total R in this engine. This uses hindsight on purpose, to see what is
+left.
+
+| basket | trades filled | avg R | PF | **CAGR** | **real drawdown** | losing years |
+|---|---|---|---|---|---|---|
+| all coins | 174 | +1.95 | 3.96 | 41.8% | 34.1% | 0 of 7 |
+| without top 3 (XLM ALGO ROSE) | 167 | +1.53 | 3.30 | 30.2% | 34.0% | 0 of 7 |
+| without top 5 (+ MINA SKL) | 167 | +1.36 | 3.03 | 30.9% | 33.0% | 0 of 7 |
+| without top 10 (+ STX ETH FET TRX BAND) | 159 | +0.98 | 2.41 | 22.1% | 30.2% | 0 of 7 |
+| without top 15 (+ DOGE DYDX OP NEO BTC) | 146 | +0.69 | 1.99 | 13.9% | 30.0% | 0 of 7 |
+
+Removing the winners lowers the return steadily, but it never turns it
+negative. The drawdown barely moves, because the losing trades are spread
+across every coin.
+
+### Sectors
+
+Small baskets have fewer signals than slots, so idle cash holds their CAGR
+down. Compare avg R and PF across sizes. Compare CAGR only between baskets of
+similar size.
+
+| sector | coins | trades filled | win% | avg R | PF | CAGR | real drawdown |
+|---|---|---|---|---|---|---|---|
+| majors | 13 | 66 | 27.3 | +1.43 | 2.98 | 13.5% | 27.7% |
+| other layer-1s | 25 | 75 | 36.0 | +2.24 | 4.36 | 25.4% | 16.3% |
+| layer-2 / scaling | 5 | 11 | 54.5 | +6.50 | 15.05 | 9.8% | 10.9% |
+| DeFi | 13 | 27 | 59.3 | +2.54 | 7.12 | 10.1% | 16.8% |
+| AI / data / infra | 12 | 29 | 31.0 | +1.68 | 3.53 | 6.5% | 16.5% |
+| gaming / NFT / social | 8 | 29 | 24.1 | +0.27 | 1.35 | 0.9% | 19.4% |
+| everything except majors | 63 | 136 | 30.9 | +2.14 | 4.38 | 38.0% | 27.1% |
+
+### Liquidity and listing age
+
+| basket | coins | trades filled | avg R | PF | CAGR | real drawdown |
+|---|---|---|---|---|---|---|
+| most liquid third (by volume since 2024) | 25 | 82 | +1.48 | 3.16 | 18.5% | 30.6% |
+| middle third | 25 | 53 | +3.42 | 7.54 | 26.4% | 17.0% |
+| least liquid third | 26 | 93 | +1.48 | 3.05 | 16.8% | 29.5% |
+| listed before 2020 | 28 | 116 | +2.14 | 4.04 | 34.9% | 28.0% |
+| listed 2020-2021 | 31 | 90 | +1.89 | 4.08 | 22.8% | 19.0% |
+| listed 2022 or later | 17 | 23 | +1.20 | 2.96 | 3.6% | 18.7% |
+
+New listings rarely have 200 days of falling history, so they rarely signal.
+
+### Every coin
+
+72 of 76 coins traded; TAO, INJ, TIA and LDO never did. 45 coins have a
+positive total R and 27 a negative one. The full per-coin table is in
+`results/baskets.md`.
+
+### Read these with care
+
+- **The sector, liquidity and listing-age splits were made after seeing the
+  data.** The liquidity ranking even uses volume from 2024 onward to sort
+  trades from 2020. These tables show where the profit came from. They are not
+  a filter to trade. Picking "layer-1s only" from them would repeat the
+  single-coin overfitting this repo has already been burned by.
+- **Trust the random baskets and the fit and held-out halves.** They choose
+  coins without looking at the results, and they agree: the strategy works on
+  any large basket, and a bigger basket does better.
+
+---
+
 ## Evidence it is real
 
 | check | result |
@@ -376,6 +485,7 @@ date order):
 | **the daily detector matches** | 331 signals, 0 mismatches (parent strategy) |
 | **held-out coins** | the held-out basket earns 34.6% alone |
 | **fill resolution** | same trades walked on 1h / 15m / 5m: avg R +0.437 / +0.475 / +0.425 |
+| **not a lucky basket** | all 600 random 20- and 38-coin baskets profitable; the fit and held-out halves earn 29.0% and 29.8%; without its top 5 coins it still earns 30.9% |
 | **not a lucky setting** | 599 of 600 grid cells positive on held-out coins; the chosen cell scores 2.54 held out and its ATR neighbours 2.46 and 2.35 ([RESULTS_refined_entries.md](RESULTS_refined_entries.md)) |
 
 **Bugs caught on the way, all fixed before the numbers above:**
@@ -453,9 +563,12 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
 
 ## Next steps
 
-1. **Backtest on other coins and baskets** — majors, mid-caps, sectors, new and
-   old listings, and coins outside the 76. Main question: does the profit
-   survive without the handful of coins that carried it?
+1. **Test coins outside the 76.** Inside the 76 this is done; see
+   [Across coins and baskets](#across-coins-and-baskets). Every random 20-coin
+   basket made money, and the result survives losing its best coins. Coins
+   never seen at all are the stronger test. A bigger universe should also raise
+   the return, because more signals fill idle slots. This needs more coin data
+   downloaded.
 2. **Cut the 38% drawdown without killing the return** — test fewer slots,
    0.5% risk, and a tighter trail after a large gain. (Measuring it is done.)
 3. **Stress the costs** — rerun at 0.3% and 0.5% slippage per side.
@@ -476,10 +589,12 @@ together). The coin list is survivors: coins delisted since 2020 are missing.
 | `research/rf_grid.py`, `rf_report.py` | the 600-permutation study |
 | `research/rf_final.py` | lookahead replay, fill check, account simulation |
 | `research/scan_trendline.py` | live scan of current breaks and near-breaks |
+| `research/baskets.py` | the strategy on sectors, liquidity, listing age, random baskets and every coin |
 | `research/results/ft_ltf.txt` | freqtrade output for this strategy |
 | `research/results/ft_daily15m.txt` | freqtrade output for the parent, same settings |
 | `research/results/rf_final.md` | research validation output |
 | `research/results/rf_grid_report.md` | grid ranking and marginals |
+| `research/results/baskets.md` | full basket output, including the per-coin table |
 
 `research/results/` and `user_data/backtest_results/` are gitignored, so those
 raw files exist only on the machine that ran them. Every number quoted in this
