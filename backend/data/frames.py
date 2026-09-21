@@ -34,6 +34,8 @@ _RESAMPLE_RULE = {
     # their Monday — matching exchange/TradingView weekly candles. Plain "1W" is
     # W-SUN and shifts every weekly candle by a day.
     "1w": "W-MON",
+    # Calendar months, labeled by their first day (exchange monthly candles).
+    "1M": "MS",
 }
 
 _AGG = {

@@ -34,6 +34,12 @@ Run the dashboard (Phase 2):
 streamlit run frontend/streamlit_app.py
 ```
 
+The sidebar also has a **BTC Strength** page. It shows which coins are stronger
+or weaker than BTC on 1h / 4h / 1d / 1w / 1M, and the short / medium / long
+trend (daily EMA 20 / 50 / 200) of each coin, BTC and BTC.D. Coins are measured
+on COIN/BTC; BTC itself is measured on BTC.D (Binance `BTCDOMUSDT` candles,
+live % from CoinGecko). Settings are under `btc_strength` in `config.yaml`.
+
 Run the API (Phase 4):
 
 ```bash

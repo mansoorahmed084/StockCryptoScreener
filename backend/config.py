@@ -28,6 +28,9 @@ TIMEFRAME_SECONDS: dict[str, int] = {
     "1d": 24 * 60 * 60,
     "3d": 3 * 24 * 60 * 60,
     "1w": 7 * 24 * 60 * 60,
+    # Calendar months vary; 30 days is the nominal length. It divides evenly
+    # into 1d so OHLCVService resamples months from daily candles.
+    "1M": 30 * 24 * 60 * 60,
 }
 
 # Timeframes the CoinDCX public candles endpoint actually serves (verified live,
@@ -114,6 +117,11 @@ class Config:
     @property
     def stale_multiplier(self) -> float:
         return float(self.raw.get("data", {}).get("stale_multiplier", 3))
+
+    @property
+    def btc_strength(self) -> dict[str, Any]:
+        """Settings for the coins-vs-BTC board (empty -> module defaults)."""
+        return dict(self.raw.get("btc_strength", {}))
 
     def classifier_params(self, timeframe: str) -> ClassifierParams:
         """Merge the ``default`` block with any per-timeframe override."""

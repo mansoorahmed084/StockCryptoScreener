@@ -34,6 +34,9 @@ classifier:
     4h:  { vol_lookback: 90,  neutral_band: 0.8, persistence: 2 }
     1d:  { vol_lookback: 60,  neutral_band: 0.8, persistence: 1 }
     1w:  { vol_lookback: 52,  neutral_band: 0.7, persistence: 1 }
+    # CoinDCX serves at most 1000 daily candles, so a coin has ~32 closed
+    # months at best: a shorter EMA and lookback fit that history.
+    1M:  { ema_len: 10, vol_lookback: 24, neutral_band: 0.7, persistence: 1 }
 
 # Sector / narrative tags (coin -> sectors). Used for sector RS aggregation.
 sectors:
@@ -55,6 +58,13 @@ data:
   candle_limit: 500        # candles per (symbol, tf) request
   cache_dir: data_cache
   stale_multiplier: 3      # cell is 'unknown' if last candle older than this * tf
+
+# Coins-vs-BTC board (frontend/pages/1_BTC_Strength.py).
+btc_strength:
+  timeframes: [1h, 4h, 1d, 1w, 1M]
+  # Trend = last closed candle of trend_timeframe against these EMAs.
+  trend_timeframe: 1d
+  trend_emas: { short: 20, medium: 50, long: 200 }
 
 # Index base construction.
 index:

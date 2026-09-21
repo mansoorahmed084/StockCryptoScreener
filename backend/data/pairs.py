@@ -69,7 +69,11 @@ class RatioBuilder:
         self._index_cache: dict[str, tuple[float, pd.Series]] = {}
 
     # -- public ---------------------------------------------------------------
-    def ratio(self, coin: str, base: str, timeframe: str) -> RatioResult:
+    def ratio(self, coin: str, base: str, timeframe: str, *,
+              prefer_direct: bool = True) -> RatioResult:
+        """``prefer_direct=False`` builds coin/base from the two USDT legs even
+        when a native market exists. CoinDCX prices BTC-quoted books to ~6
+        decimals, so a cheap coin's native X/BTC candles can be flat steps."""
         coin, base = coin.upper(), base.upper()
         if coin == base:
             return RatioResult(empty_ohlcv(), "identity",
@@ -77,7 +81,8 @@ class RatioBuilder:
 
         if base == INDEX_BASE:
             frame, method, synthetic = self._index_ratio(coin, timeframe)
-        elif self.service.adapter.has_market(coin, base):
+        elif self.service.adapter.has_market(coin, base) and (
+                prefer_direct or base == USD_QUOTE):
             frame, method, synthetic = (
                 self.service.get(coin, base, timeframe), "direct", False)
         elif base == "INR":

@@ -14,8 +14,10 @@ import pandas as pd
 
 from backend.config import Config, load_config
 from backend.data.adapters import build_adapter
+from backend.data.dominance import BtcDominance
 from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
+from backend.screener import btc_strength as btc_strength_mod
 from backend.screener import confluence as confluence_mod
 from backend.screener import matrix as matrix_mod
 from backend.screener import regime as regime_mod
@@ -32,6 +34,7 @@ class ScreenerService:
             self.adapter.refresh_markets()
         self.ohlcv = OHLCVService(self.adapter, self.config)
         self._builder: RatioBuilder | None = None
+        self._dominance: BtcDominance | None = None
 
     def universe(self) -> list[str]:
         return universe_mod.select_universe(self.adapter, self.config)
@@ -87,3 +90,18 @@ class ScreenerService:
             require_all_bull=require_all_bull,
         )
         return confluence_mod.build_report(self.builder(), self.config, coins, params)
+
+    def dominance(self) -> BtcDominance:
+        """BTC.D source (lazy, shared so its short cache is reused)."""
+        if self._dominance is None:
+            self._dominance = BtcDominance()
+        return self._dominance
+
+    def btc_board(self, coins: list[str] | None = None,
+                  timeframes: list[str] | None = None, *,
+                  liquidity_gate: bool = True) -> btc_strength_mod.Board:
+        """Coins-vs-BTC strength per timeframe plus short/medium/long trends."""
+        coins = [c.upper() for c in (coins or self.universe())]
+        return btc_strength_mod.build_board(
+            self.builder(), self.config, coins, self.dominance(), timeframes,
+            liquidity_gate=liquidity_gate)
