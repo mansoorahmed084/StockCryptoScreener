@@ -102,7 +102,13 @@ class CoinDcxAdapter(ExchangeAdapter):
         return markets
 
     def _fetch_quote_volumes(self) -> dict[str, tuple[float, float]]:
-        """market symbol -> (approx 24h quote volume, last price)."""
+        """market symbol -> (24h quote volume, last price).
+
+        The ticker's ``volume`` is already in QUOTE units: BTCUSDT matched
+        Binance's quoteVolume to the cent, and BTCINR matched the INR value of
+        the day's BTC candle volume. Multiplying it by the price again made
+        expensive coins look huge and cheap ones (PEPE: $522/day) illiquid.
+        """
         out: dict[str, tuple[float, float]] = {}
         try:
             ticker = self._get(f"{API_BASE}/exchange/ticker")
@@ -118,7 +124,7 @@ class CoinDcxAdapter(ExchangeAdapter):
                 price = float(t.get("last_price", 0) or 0)
             except (TypeError, ValueError):
                 continue
-            out[sym] = (vol * price, price)
+            out[sym] = (vol, price)
         return out
 
     def markets(self) -> dict[tuple[str, str], Market]:
