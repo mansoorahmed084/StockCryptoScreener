@@ -119,6 +119,11 @@ class Config:
         return float(self.raw.get("data", {}).get("stale_multiplier", 3))
 
     @property
+    def watchlists_file(self) -> str:
+        return str(self.raw.get("data", {}).get("watchlists_file",
+                                                "data_cache/watchlists.json"))
+
+    @property
     def btc_strength(self) -> dict[str, Any]:
         """Settings for the coins-vs-BTC board (empty -> module defaults)."""
         return dict(self.raw.get("btc_strength", {}))

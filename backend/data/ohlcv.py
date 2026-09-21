@@ -32,6 +32,8 @@ class OHLCVService:
         self.fetchable = fetchable or set(COINDCX_FETCHABLE_TIMEFRAMES)
         self.max_candles = max_candles
         self._cache: dict[tuple[str, str, str], tuple[float, pd.DataFrame]] = {}
+        # (coin, quote, source tf) -> (time, candles asked for, raw frame)
+        self._raw: dict[tuple[str, str, str], tuple[float, int, pd.DataFrame]] = {}
 
     def source_for(self, timeframe: str) -> tuple[str, int]:
         """Return (source_timeframe, factor) used to build ``timeframe``.
@@ -75,10 +77,27 @@ class OHLCVService:
         limit = limit or self.config.candle_limit
         source, factor = self.source_for(timeframe)
         source_limit = min(self.max_candles, max(limit, limit * factor))
-        raw = self.adapter.fetch_ohlcv(coin, quote, source, limit=source_limit)
+        raw = self._source(coin, quote, source, source_limit)
         if factor == 1:
             return raw
         return resample_ohlcv(raw, timeframe)
 
+    def _source(self, coin: str, quote: str, source: str, limit: int) -> pd.DataFrame:
+        """Raw candles of a fetchable timeframe.
+
+        A fresh fetch of at least ``limit`` candles is reused (its newest
+        ``limit`` rows), so 1h and 4h (built from 1h), or 1d, 1w and 1M (built
+        from 1d), share one request when the bigger one is asked for first.
+        """
+        key = (coin.upper(), quote.upper(), source)
+        now = time.monotonic()
+        hit = self._raw.get(key)
+        if hit and now - hit[0] < self.cache_ttl and hit[1] >= limit:
+            return hit[2].tail(limit)
+        raw = self.adapter.fetch_ohlcv(coin, quote, source, limit=limit)
+        self._raw[key] = (now, limit, raw)
+        return raw
+
     def clear_cache(self) -> None:
         self._cache.clear()
+        self._raw.clear()

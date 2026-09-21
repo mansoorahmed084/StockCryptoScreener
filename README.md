@@ -35,10 +35,19 @@ streamlit run frontend/streamlit_app.py
 ```
 
 The sidebar also has a **BTC Strength** page. It shows which coins are stronger
-or weaker than BTC on 1h / 4h / 1d / 1w / 1M, and the short / medium / long
-trend (daily EMA 20 / 50 / 200) of each coin, BTC and BTC.D. Coins are measured
-on COIN/BTC; BTC itself is measured on BTC.D (Binance `BTCDOMUSDT` candles,
-live % from CoinGecko). Settings are under `btc_strength` in `config.yaml`.
+or weaker than BTC or BTC.D on 1h / 4h / 1d / 1w / 1M, which coins those are,
+and the short / medium / long trend (daily EMA 20 / 50 / 200) of each coin, of
+BTC (BTC/USDT) and of BTC.D.
+
+- **vs BTC:** each coin on COIN/USDT ÷ BTC/USDT. BTC's own row uses BTC.D.
+- **vs BTC.D:** each coin, BTC included, on its USDT price ÷ BTC.D (Binance
+  `BTCDOMUSDT`; the live % comes from CoinGecko).
+- **Coins:** the top 25-500 by CoinGecko market cap that CoinDCX lists (500
+  coins take about a minute), your own saved watchlists, or the config list.
+  Watchlists are saved to `data_cache/watchlists.json`; you can paste
+  TradingView tickers such as `BINANCE:SOLUSDT`.
+
+Settings are under `btc_strength` in `config.yaml`.
 
 Run the API (Phase 4):
 

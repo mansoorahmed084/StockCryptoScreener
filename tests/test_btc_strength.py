@@ -1,6 +1,7 @@
 import math
 
 import pandas as pd
+import pytest
 
 from backend.config import load_config
 from backend.data.frames import empty_ohlcv, resample_ohlcv
@@ -92,7 +93,7 @@ def test_board_ranks_coins_against_btc_and_uses_btc_d_for_btc():
     assert s.loc[("BTC.D", "1h"), "direction"] == rs.BEAR
     assert s.loc[("SOL", "1h"), "direction"] == rs.BULL
     assert s.loc[("ADA", "1h"), "direction"] == rs.BEAR
-    assert s.loc[("SOL", "1d"), "pct_vs_btc"] > 0 > s.loc[("ADA", "1d"), "pct_vs_btc"]
+    assert s.loc[("SOL", "1d"), "pct_vs"] > 0 > s.loc[("ADA", "1d"), "pct_vs"]
 
     assert board.order[:2] == ["BTC.D", "BTC"]
     assert board.order[2:] == ["SOL", "ADA"]          # strongest first
@@ -123,3 +124,56 @@ def test_board_marks_illiquid_coins_unknown():
     # No BTCDOM data -> BTC.D unknown, not a crash
     btcd = board.strength[board.strength["asset"] == "BTC.D"].iloc[0]
     assert btcd["direction"] == rs.UNKNOWN
+
+
+def _three_coin_setup():
+    frames = {}
+    for coin, drift, seed in (("BTC", 0.0005, 1), ("SOL", 0.004, 2),
+                              ("ADA", -0.004, 3)):
+        frames[(coin, "USDT", "15m")] = _series("15m", 200, drift, seed)
+        frames[(coin, "USDT", "1h")] = _series("1h", 200, drift, seed)
+        frames[(coin, "USDT", "1d")] = _series("1d", 260, drift * 4, seed)
+    config = load_config()
+    service = OHLCVService(FakeAdapter(frames), config, cache_ttl=0)
+    builder = RatioBuilder(service, config, universe_coins=["BTC", "SOL", "ADA"])
+    dominance = FakeDominance({
+        "15m": _series("15m", 200, -0.001, 4),
+        "1h": _series("1h", 200, -0.001, 4),
+        "1d": _series("1d", 260, -0.004, 4),
+    })
+    return builder, config, dominance
+
+
+def test_btc_d_mode_measures_every_coin_and_btc_against_btc_d():
+    builder, config, dominance = _three_coin_setup()
+    board = bs.build_board(builder, config, ["SOL", "ADA"], dominance,
+                           ["1h", "1d"], benchmark=bs.BTC_D)
+    s = board.strength.set_index(["asset", "timeframe"])
+    assert board.benchmark == bs.BTC_D
+    # BTC now has its own row: BTC/USDT ÷ BTC.D, rising while BTC.D falls
+    assert s.loc[("BTC", "1h"), "direction"] == rs.BULL
+    assert s.loc[("SOL", "1h"), "direction"] == rs.BULL
+    assert s.loc[("ADA", "1h"), "direction"] == rs.BEAR     # falls faster than BTC.D
+    assert s.loc[("SOL", "1d"), "pct_vs"] > 0 > s.loc[("ADA", "1d"), "pct_vs"]
+    assert board.order == ["BTC.D", "BTC", "SOL", "ADA"]
+    # Breadth counts coins only, not the pinned BTC row
+    assert board.breadth().set_index("timeframe").loc["1h", "known"] == 2
+    with pytest.raises(ValueError):
+        bs.build_board(builder, config, ["SOL"], dominance, ["1h"], benchmark="ETH")
+
+
+def test_rank_coins_by_timeframe_and_weakest_first():
+    rows = [
+        {"asset": "BTC.D", "timeframe": "1h", "direction": rs.BULL, "strength": 3.0},
+        {"asset": "AAA", "timeframe": "1h", "direction": rs.BULL, "strength": 0.5},
+        {"asset": "BBB", "timeframe": "1h", "direction": rs.BULL, "strength": 2.0},
+        {"asset": "CCC", "timeframe": "1h", "direction": rs.BEAR, "strength": -1.0},
+        {"asset": "DDD", "timeframe": "1h", "direction": rs.UNKNOWN,
+         "strength": float("nan")},
+    ]
+    strength = pd.DataFrame([{**r, "pct_vs": 0.0, "reason": ""} for r in rows],
+                            columns=bs.STRENGTH_COLUMNS)
+    assert bs.rank_coins(strength, "1h") == ["BBB", "AAA", "CCC", "DDD"]
+    # Weakest first still leaves the coin with no data last
+    assert bs.rank_coins(strength, "1h", weakest_first=True) == ["CCC", "AAA", "BBB", "DDD"]
+    assert bs.rank_coins(strength) == ["BBB", "AAA", "CCC", "DDD"]

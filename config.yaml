@@ -58,6 +58,7 @@ data:
   candle_limit: 500        # candles per (symbol, tf) request
   cache_dir: data_cache
   stale_multiplier: 3      # cell is 'unknown' if last candle older than this * tf
+  watchlists_file: data_cache/watchlists.json   # custom watchlists (BTC Strength page)
 
 # Coins-vs-BTC board (frontend/pages/1_BTC_Strength.py).
 btc_strength:
@@ -65,6 +66,11 @@ btc_strength:
   # Trend = last closed candle of trend_timeframe against these EMAs.
   trend_timeframe: 1d
   trend_emas: { short: 20, medium: 50, long: 200 }
+  workers: 8               # coins fetched in parallel
+  # Left out of "top N" lists: they only mirror another asset. Any symbol that
+  # starts or ends with USD is dropped as a stablecoin too.
+  exclude: [DAI, EURI, EURC, FRAX, XAUT, PAXG, WBTC, WETH, WBETH, STETH, WSTETH,
+            CBBTC, BTCB, TBTC, SOLVBTC, BNSOL, JITOSOL, MSOL, WEETH, EZETH, RETH]
 
 # Index base construction.
 index:

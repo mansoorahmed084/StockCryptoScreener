@@ -14,6 +14,7 @@ import pandas as pd
 
 from backend.config import Config, load_config
 from backend.data.adapters import build_adapter
+from backend.data import marketcap
 from backend.data.dominance import BtcDominance
 from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
@@ -99,9 +100,36 @@ class ScreenerService:
 
     def btc_board(self, coins: list[str] | None = None,
                   timeframes: list[str] | None = None, *,
-                  liquidity_gate: bool = True) -> btc_strength_mod.Board:
-        """Coins-vs-BTC strength per timeframe plus short/medium/long trends."""
+                  benchmark: str = btc_strength_mod.BTC,
+                  liquidity_gate: bool = True,
+                  progress=None) -> btc_strength_mod.Board:
+        """Coins vs BTC or BTC.D per timeframe, plus short/medium/long trends."""
         coins = [c.upper() for c in (coins or self.universe())]
         return btc_strength_mod.build_board(
             self.builder(), self.config, coins, self.dominance(), timeframes,
-            liquidity_gate=liquidity_gate)
+            benchmark=benchmark, liquidity_gate=liquidity_gate, progress=progress)
+
+    def usdt_coins(self) -> list[str]:
+        """Every coin with a CoinDCX USDT market, busiest first."""
+        return universe_mod.usdt_coins(self.adapter)
+
+    def top_coins(self, n: int) -> tuple[list[str], str]:
+        """The ``n`` biggest coins by CoinGecko market cap that CoinDCX lists
+        against USDT, without stablecoins and wrapped tokens. Falls back to
+        CoinDCX 24h volume when CoinGecko is down.
+
+        Returns (coins, how they were ranked)."""
+        extra = self.config.btc_strength.get("exclude", [])
+        listed = [c for c in self.usdt_coins()
+                  if not universe_mod.is_pegged(c, extra)]
+        ranked = marketcap.top_symbols(n, among=set(listed))
+        if not ranked:
+            return listed[:n], "24h volume on CoinDCX (CoinGecko did not answer)"
+        if len(ranked) < n:
+            # CoinGecko stopped early (rate limit): top up with the busiest rest.
+            have = set(ranked)
+            extra_coins = [c for c in listed if c not in have][:n - len(ranked)]
+            return (ranked + extra_coins,
+                    f"market cap (CoinGecko) for {len(ranked)}, "
+                    f"24h volume on CoinDCX for the other {len(extra_coins)}")
+        return ranked, "market cap (CoinGecko)"

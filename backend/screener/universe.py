@@ -79,6 +79,27 @@ def liquidity_ok(adapter: ExchangeAdapter, coin: str, base: str,
     return all(v is not None and v >= min_quote_volume for v in legs)
 
 
+def usdt_coins(adapter: ExchangeAdapter, min_quote_volume: float = 0.0) -> list[str]:
+    """Every coin with a USDT market at or above the volume floor, busiest first."""
+    usdt_markets = [
+        m for (coin, quote), m in adapter.markets().items()
+        if quote == USD_QUOTE and m.quote_volume_24h >= min_quote_volume
+    ]
+    usdt_markets.sort(key=lambda m: m.quote_volume_24h, reverse=True)
+    return [m.coin for m in usdt_markets]
+
+
+def is_pegged(coin: str, extra: list[str] | tuple[str, ...] = ()) -> bool:
+    """True for stablecoins and wrapped tokens, which only mirror another asset.
+
+    Any symbol that starts or ends with USD is treated as a stablecoin
+    (USDC, FDUSD, PYUSD, RLUSD ...); ``extra`` names the rest (WBTC, DAI ...).
+    """
+    coin = coin.upper()
+    return (coin.startswith("USD") or coin.endswith("USD")
+            or coin in {c.upper() for c in extra})
+
+
 def select_universe(adapter: ExchangeAdapter, config: Config) -> list[str]:
     """Return the list of coins to scan, honouring the configured mode."""
     mode = config.universe.get("mode", "watchlist")
@@ -87,12 +108,6 @@ def select_universe(adapter: ExchangeAdapter, config: Config) -> list[str]:
 
     if mode == "top_volume":
         top_n = int(config.universe.get("top_n", 40))
-        min_qv = config.min_quote_volume_24h
-        usdt_markets = [
-            m for (coin, quote), m in adapter.markets().items()
-            if quote == USD_QUOTE and m.quote_volume_24h >= min_qv
-        ]
-        usdt_markets.sort(key=lambda m: m.quote_volume_24h, reverse=True)
-        return [m.coin for m in usdt_markets[:top_n]]
+        return usdt_coins(adapter, config.min_quote_volume_24h)[:top_n]
 
     raise ValueError(f"Unknown universe mode: {mode!r}")

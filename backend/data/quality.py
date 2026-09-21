@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from backend.config import timeframe_to_seconds
@@ -46,10 +47,10 @@ def count_gaps(df: pd.DataFrame, timeframe: str) -> int:
     """Number of missing candles between first and last timestamp."""
     if len(df) < 2:
         return 0
-    step = pd.Timedelta(seconds=timeframe_to_seconds(timeframe))
-    deltas = df.index.to_series().diff().dropna()
-    # a delta of N*step means (N-1) missing candles
-    missing = ((deltas / step).round() - 1).clip(lower=0)
+    step = pd.Timedelta(seconds=timeframe_to_seconds(timeframe)).value
+    # a delta of N*step means (N-1) missing candles (NumPy: this runs per cell)
+    deltas = np.diff(df.index.as_unit("ns").asi8)
+    missing = np.clip(np.round(deltas / step) - 1, 0, None)
     return int(missing.sum())
 
 
