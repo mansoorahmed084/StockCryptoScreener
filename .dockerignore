@@ -1,0 +1,13 @@
+# Keep the image to what the dashboard needs.
+.git
+.venv
+.claude
+**/__pycache__
+.pytest_cache
+data_cache
+freqtrade-lab
+reports
+research
+tests
+*.md
+.env

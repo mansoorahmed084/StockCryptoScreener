@@ -1,0 +1,13 @@
+# The dashboard on the Oracle VM. It listens on 127.0.0.1 only: the one way in
+# is the Cloudflare Tunnel, with Cloudflare Access in front. No public port.
+services:
+  dashboard:
+    build: ..
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - screener-data:/app/data_cache   # watchlists + signal journal
+    restart: unless-stopped
+
+volumes:
+  screener-data:
