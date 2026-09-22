@@ -49,6 +49,14 @@ BTC (BTC/USDT) and of BTC.D.
 
 Settings are under `btc_strength` in `config.yaml`.
 
+A **Liquidation Heatmap** page estimates where leveraged traders would be
+liquidated, the way CoinGlass does, from free Binance futures data: every rise
+in open interest adds positions at 10x / 25x / 50x / 100x liquidation prices,
+falling open interest shrinks them, and price crossing a level wipes it. Bright
+bands are the big liquidity zones. It covers BTC and the top 10 coins by market
+cap (or any Binance USDT perpetual) over 12h, 1d, 3d, 7d or 30d. The leverage
+mix is under `liquidation` in `config.yaml`. Sizes are model estimates.
+
 Run the API (Phase 4):
 
 ```bash

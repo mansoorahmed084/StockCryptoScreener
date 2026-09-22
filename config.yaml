@@ -72,6 +72,15 @@ btc_strength:
   exclude: [DAI, EURI, EURC, FRAX, XAUT, PAXG, WBTC, WETH, WBETH, STETH, WSTETH,
             CBBTC, BTCB, TBTC, SOLVBTC, BNSOL, JITOSOL, MSOL, WEETH, EZETH, RETH]
 
+# Liquidation heatmap (frontend/pages/2_Liquidation_Heatmap.py): estimated
+# liquidation levels from Binance futures open interest. leverages = share of
+# new positions opened at each leverage; the maintenance margin makes a
+# position liquidate slightly before its full margin is gone.
+liquidation:
+  leverages: { 10: 0.30, 25: 0.30, 50: 0.25, 100: 0.15 }
+  maintenance_margin: 0.005
+  bins: 400
+
 # Index base construction.
 index:
   exclude: [BTC]           # equal-weight alt index excludes these

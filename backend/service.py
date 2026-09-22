@@ -15,11 +15,13 @@ import pandas as pd
 from backend.config import Config, load_config
 from backend.data.adapters import build_adapter
 from backend.data import marketcap
+from backend.data.binance_futures import BinanceFutures
 from backend.data.dominance import BtcDominance
 from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
 from backend.screener import btc_strength as btc_strength_mod
 from backend.screener import confluence as confluence_mod
+from backend.screener import liquidation as liquidation_mod
 from backend.screener import matrix as matrix_mod
 from backend.screener import regime as regime_mod
 from backend.screener import rs as rs_mod
@@ -36,6 +38,7 @@ class ScreenerService:
         self.ohlcv = OHLCVService(self.adapter, self.config)
         self._builder: RatioBuilder | None = None
         self._dominance: BtcDominance | None = None
+        self._futures: BinanceFutures | None = None
 
     def universe(self) -> list[str]:
         return universe_mod.select_universe(self.adapter, self.config)
@@ -133,3 +136,33 @@ class ScreenerService:
                     f"market cap (CoinGecko) for {len(ranked)}, "
                     f"24h volume on CoinDCX for the other {len(extra_coins)}")
         return ranked, "market cap (CoinGecko)"
+
+    # -- liquidation heatmap -------------------------------------------------
+    def futures(self) -> BinanceFutures:
+        """Binance USDT-M futures data (lazy, shared for its short cache)."""
+        if self._futures is None:
+            self._futures = BinanceFutures()
+        return self._futures
+
+    def liquidation_coins(self, n: int = 10) -> dict[str, str]:
+        """Coin -> Binance perpetual for the ``n`` biggest coins by market cap
+        (BTC first), without stablecoins and wrapped tokens."""
+        perps = self.futures().perpetuals()
+        extra = self.config.btc_strength.get("exclude", [])
+        pool = {c for c in perps if not universe_mod.is_pegged(c, extra)}
+        ranked = marketcap.top_symbols(n, among=pool) or [
+            c for c in ("BTC", "ETH", "BNB", "XRP", "SOL", "DOGE", "ADA", "TRX",
+                        "LINK", "AVAX") if c in pool][:n]
+        return {c: perps[c] for c in ranked}
+
+    def liquidation_map(self, symbol: str,
+                        range_key: str = "1d") -> liquidation_mod.LiqMap:
+        """Estimated liquidation levels for a Binance perpetual over a range
+        in :data:`liquidation.RANGES` (12h .. 30d)."""
+        period, n = liquidation_mod.RANGES[range_key]
+        fut = self.futures()
+        params = liquidation_mod.LiqParams.from_config(
+            self.config.raw.get("liquidation", {}))
+        return liquidation_mod.build(fut.klines(symbol, period, n),
+                                     fut.open_interest(symbol, period, n + 1),
+                                     params)
