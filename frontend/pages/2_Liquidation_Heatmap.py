@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from backend.config import load_config  # noqa: E402
 from backend.screener import liquidation as liq  # noqa: E402
+from backend.screener import market_read as mr  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
 
 st.set_page_config(page_title="Liquidation heatmap", layout="wide")
@@ -92,6 +93,12 @@ def overview(coins: tuple[tuple[str, str], ...], range_key: str) -> pd.DataFrame
             "zone_above_pct", "zone_above_usd", "zone_below", "zone_below_pct",
             "zone_below_usd"]
     return pd.DataFrame(rows).reindex(columns=cols)
+
+
+@st.cache_data(ttl=300, show_spinner="Reading the 1h charts and liquidity…")
+def market_read() -> tuple[list[mr.CoinRead], str]:
+    reads = get_service().market_read(10)
+    return reads, pd.Timestamp.now(tz="UTC").strftime("%b %d, %H:%M UTC")
 
 
 # -- formatting ------------------------------------------------------------------
@@ -179,6 +186,59 @@ def zones_table(z: pd.DataFrame, side: str) -> pd.DataFrame:
     })
 
 
+def market_read_panel() -> None:
+    """The rules-based lean for BTC and the top 10 (see market_read.py)."""
+    reads, when = market_read()
+    with st.expander(f"📋 Market read · BTC and the top 10 · {when}", expanded=True):
+        st.caption("A rules-based read of the 1h charts and the 1d / 7d liquidation "
+                   "maps. It updates every 5 minutes. Not financial advice: "
+                   "liquidity “magnets” are a tendency, not a rule.")
+        if not reads:
+            st.warning("No data from Binance right now.")
+            return
+        st.info(mr.market_summary(reads))
+
+        def cluster(c: mr.Cluster | None) -> str:
+            if c is None:
+                return "—"
+            return f"{price_fmt(c.price)} ({c.dist_pct:+.1f}%) · {money(c.size_usd)}"
+
+        table = pd.DataFrame({
+            "Coin": [r.coin for r in reads],
+            "Price": [price_fmt(r.price) for r in reads],
+            "Last 48h (1h)": [r.closes_48h for r in reads],
+            "24h": [f"{r.chg_24h:+.1f}%" for r in reads],
+            "Lean": [mr.LEAN_TEXT[r.lean] for r in reads],
+            "Confidence": [r.confidence for r in reads],
+            "Pull below": [cluster(r.below) for r in reads],
+            "Pull above": [cluster(r.above) for r in reads],
+            "Why": ["; ".join(r.reasons) for r in reads],
+        })
+        st.dataframe(table, hide_index=True, width="stretch", column_config={
+            "Last 48h (1h)": st.column_config.LineChartColumn(width="small"),
+            "Lean": st.column_config.TextColumn(width="medium"),
+            "Why": st.column_config.TextColumn(width="large"),
+        })
+        with st.popover("How the lean is scored"):
+            st.markdown(
+                "Each rule adds to a score:\n"
+                "- **1h trend:** close above a rising 20 EMA, above the 50 EMA: "
+                "+1. The mirror: −1.\n"
+                "- **Nearest pull:** the side whose nearest big liquidation "
+                "cluster is bigger per % of distance, by 1.5× or more: +1 above, "
+                "−1 below.\n"
+                "- **7d balance:** under half as much liquidity above as below: "
+                "−0.5. Over twice as much: +0.5.\n"
+                "- **Stretched:** 1h RSI over 70: −0.5. Under 30: +0.5.\n"
+                "- **Crowded:** open interest +15% in 24h after a 5% move: −0.5 "
+                "after a pump, +0.5 after a dump.\n"
+                "- **Funding:** over 0.03%: −0.5. Under −0.01%: +0.5.\n\n"
+                "Score ≥ 1: up. ≤ −1: down. When the 1h trend and the nearest "
+                "pull disagree and the rest is small: *dip first, then up* (or "
+                "*bounce first, then down*). Confidence never goes above medium, "
+                "and small clusters near the price (under $5M together) are always low.")
+
+
 # -- page --------------------------------------------------------------------------
 def main():
     p = palette()
@@ -210,6 +270,8 @@ def main():
                "bands are big clusters: price is often drawn to them. Model "
                "estimate, Binance only, so sizes are smaller than CoinGlass's "
                "all-exchange totals.")
+
+    market_read_panel()
 
     m = liq_map(symbol, range_key)
     z = liq.zones(m, k=3)

@@ -22,6 +22,7 @@ from backend.data.pairs import RatioBuilder
 from backend.screener import btc_strength as btc_strength_mod
 from backend.screener import confluence as confluence_mod
 from backend.screener import liquidation as liquidation_mod
+from backend.screener import market_read as market_read_mod
 from backend.screener import matrix as matrix_mod
 from backend.screener import regime as regime_mod
 from backend.screener import rs as rs_mod
@@ -166,3 +167,27 @@ class ScreenerService:
         return liquidation_mod.build(fut.klines(symbol, period, n),
                                      fut.open_interest(symbol, period, n + 1),
                                      params)
+
+    def market_read(self, n: int = 10) -> list[market_read_mod.CoinRead]:
+        """Rules-based short-term lean for BTC and the top ``n`` coins, from
+        1h candles, open interest, funding and the 1d / 7d liquidation maps."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        fut = self.futures()
+        funding = fut.funding_rates()
+
+        def one(item: tuple[str, str]) -> market_read_mod.CoinRead | None:
+            coin, symbol = item
+            try:
+                return market_read_mod.read_coin(
+                    coin, symbol, fut.klines(symbol, "1h", 200),
+                    fut.open_interest(symbol, "1h", 30),
+                    funding.get(symbol, 0.0),
+                    self.liquidation_map(symbol, "1d"),
+                    self.liquidation_map(symbol, "7d"))
+            except Exception:                  # one bad coin must not sink the list
+                return None
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            reads = list(pool.map(one, self.liquidation_coins(n).items()))
+        return [r for r in reads if r is not None]

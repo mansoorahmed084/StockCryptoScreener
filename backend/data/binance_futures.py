@@ -60,6 +60,14 @@ class BinanceFutures:
             return out
         return self._cached(("perpetuals",), fetch, ttl=3600)
 
+    def funding_rates(self) -> dict[str, float]:
+        """Symbol -> last funding rate (a fraction per 8h) for every perpetual."""
+        def fetch() -> dict[str, float]:
+            return {r["symbol"]: float(r["lastFundingRate"])
+                    for r in self._get("/fapi/v1/premiumIndex")
+                    if r.get("lastFundingRate") not in (None, "")}
+        return self._cached(("funding",), fetch)
+
     def klines(self, symbol: str, interval: str, limit: int) -> pd.DataFrame:
         """Candles with quote volume and taker-buy quote volume, oldest first."""
         def fetch() -> pd.DataFrame:
