@@ -8,7 +8,9 @@ indicators (VuManChu Cipher B), alerts, and a backtest harness.
 
 Primary data source: **CoinDCX** (public candles, no API key required).
 
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design.
+See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the full design, and
+[PRODUCT.md](PRODUCT.md) for what every dashboard page does, how it works, its
+data sources and limits.
 
 ## Quick start
 
