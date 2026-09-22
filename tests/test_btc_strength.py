@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from backend.config import load_config
+from backend.config import load_config, timeframe_to_seconds
 from backend.data.frames import empty_ohlcv, resample_ohlcv
 from backend.data.ohlcv import OHLCVService
 from backend.data.pairs import RatioBuilder
@@ -26,8 +26,15 @@ class FakeDominance:
         return self.pct
 
 
+# One end time for every series: make_ohlcv's default end is "now" to the
+# minute, so frames built either side of a minute boundary would not line up.
+END = pd.Timestamp.now(tz="UTC").floor("min")
+
+
 def _series(tf, n, drift, seed):
-    return make_ohlcv(trend(n, 100, drift, noise=0.002, seed=seed), timeframe=tf)
+    step = pd.Timedelta(seconds=timeframe_to_seconds(tf))
+    return make_ohlcv(trend(n, 100, drift, noise=0.002, seed=seed), timeframe=tf,
+                      start=END - (n - 1) * step)
 
 
 def test_change_since_reads_the_last_finished_candle():
