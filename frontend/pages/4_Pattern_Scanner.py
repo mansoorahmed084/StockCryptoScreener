@@ -2,7 +2,8 @@
 daily order blocks above and below each one.
 
 The scan is in backend/screener/pattern_scan.py; this file only draws it.
-A click on a row opens that coin and timeframe on the Chart Patterns page.
+Tick a row to see its chart below the table; the Coin and Chart columns
+link to the full Chart Patterns page.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from backend.config import load_config  # noqa: E402
 from backend.screener import pattern_scan as ps  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
 from backend.watchlists import WatchlistStore  # noqa: E402
+from frontend import pattern_view as pv  # noqa: E402
 
 st.set_page_config(page_title="Pattern scanner", layout="wide")
 
@@ -133,32 +135,46 @@ def main():
         st.info("Nothing matches right now. Turn off “Only fresh breakouts and "
                 "near-breakouts” to see every pattern.")
         return
+    # Coin and Chart are links: they open the full chart page in a new tab.
+    links = [f"Chart_Patterns?coin={c}&tf={t}"
+             for c, t in zip(view["coin"], view["timeframe"])]
     table = pd.DataFrame({
-        "Coin": view["coin"], "TF": view["timeframe"], "Pattern": view["pattern"],
-        "Setup": view["setup"], "Price": [fmt(v) for v in view["price"]],
+        "Coin": links, "TF": view["timeframe"].tolist(),
+        "Chart": links, "Pattern": view["pattern"].tolist(),
+        "Setup": view["setup"].tolist(), "Price": [fmt(v) for v in view["price"]],
         "Upper line": [line(l, p) for l, p in zip(view["up_level"], view["up_pct"])],
         "Lower line": [line(l, p) for l, p in zip(view["down_level"], view["down_pct"])],
         "Target ↑": [fmt(v) for v in view["target_up"]],
         "Target ↓": [fmt(v) for v in view["target_down"]],
-        "Touches": view["touches"],
+        "Touches": view["touches"].tolist(),
         "Daily supply above": [z if pd.isna(p) else f"{z} · {p:+.1f}%"
                                for z, p in zip(view["zone_above"], view["zone_above_pct"])],
         "Daily demand below": [z if pd.isna(p) else f"{z} · {p:+.1f}%"
                                for z, p in zip(view["zone_below"], view["zone_below_pct"])],
-    }).reset_index(drop=True)
-    event = st.dataframe(table, hide_index=True, width="stretch",
-                         on_select="rerun", selection_mode="single-row",
-                         key="scan_table",
-                         column_config={"Setup": st.column_config.TextColumn(width="large")})
-    st.caption("Click a row to open its chart with the lines and order blocks drawn. "
-               "Touches: upper / lower line. Targets: one pattern height past the "
-               "breakout line.")
+    })
+    event = st.dataframe(
+        table, hide_index=True, width="stretch", on_select="rerun",
+        selection_mode="single-row", key="scan_table",
+        column_config={
+            "Coin": st.column_config.LinkColumn(
+                "Coin", display_text=r"coin=([^&]+)",
+                help="Opens the full chart in a new tab."),
+            "Chart": st.column_config.LinkColumn(
+                "Chart", display_text="📈 Open", width="small",
+                help="Opens the full chart in a new tab."),
+            "Setup": st.column_config.TextColumn(width="large"),
+        })
+    st.caption("Tick a row (the box on the left) to see its chart right here. Click a "
+               "coin or 📈 Open for the full chart page in a new tab. Touches: upper / "
+               "lower line. Targets: one pattern height past the breakout line.")
+
     sel = event.selection.rows if event else []
     if sel:
-        row = table.iloc[sel[0]]
-        st.session_state["cp_coin"] = row["Coin"]
-        st.session_state["cp_tf"] = row["TF"]
-        st.switch_page("pages/3_Chart_Patterns.py")
-
+        row = view.iloc[sel[0]]
+        st.divider()
+        st.subheader(f"{row['coin']} · {row['timeframe']} · {row['pattern']}")
+        st.caption(row["setup"])
+        pv.render_chart(row["symbol"], row["timeframe"], 300,
+                        key=f"scan_chart_{row['coin']}_{row['timeframe']}")
 
 main()

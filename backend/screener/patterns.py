@@ -457,3 +457,105 @@ def order_blocks(df: pd.DataFrame, *, impulse_atr: float = 2.0, lookahead: int =
                 break
         out += kept
     return out
+
+
+# -- price action ----------------------------------------------------------------
+@dataclass
+class PriceAction:
+    structure: str                      # uptrend | downtrend | squeeze | expanding | unclear
+    notes: list[str]                    # plain sentences, most important first
+    labels: list[tuple[int, float, str]]   # (bar, price, HH / LH / HL / LL)
+
+
+def swing_labels(df: pd.DataFrame, pivot: int, last: int = 6) -> list[tuple[int, float, str]]:
+    """The last ``last`` swing highs and lows, each marked against the one
+    before it: HH / LH for highs, HL / LL for lows."""
+    out: list[tuple[int, float, str]] = []
+    for high in (True, False):
+        s = df["high"] if high else df["low"]
+        idx = swing_points(s, pivot, high=high)[-(last + 1):]
+        for a, b in zip(idx[:-1], idx[1:]):
+            up = s.iloc[b] > s.iloc[a]
+            out.append((int(b), float(s.iloc[b]),
+                        ("HH" if up else "LH") if high else ("HL" if up else "LL")))
+    return sorted(out)
+
+
+def price_action(df: pd.DataFrame, pivot: int | None = None) -> PriceAction:
+    """Market structure, breaks of structure, the last closed candle, volume and
+    momentum, in plain sentences."""
+    n = len(df)
+    pivot = pivot or max(3, min(10, n // 60))
+    notes: list[str] = []
+    his = swing_points(df["high"], pivot, high=True)
+    los = swing_points(df["low"], pivot, high=False)
+    close = float(df["close"].iloc[-1])
+
+    structure = "unclear"
+    if len(his) >= 2 and len(los) >= 2:
+        h1, h2 = df["high"].iloc[his[-2]], df["high"].iloc[his[-1]]
+        l1, l2 = df["low"].iloc[los[-2]], df["low"].iloc[los[-1]]
+        hh, hl = h2 > h1, l2 > l1
+        structure, text = {
+            (True, True): ("uptrend", "Uptrend: higher highs and higher lows."),
+            (False, False): ("downtrend", "Downtrend: lower highs and lower lows."),
+            (False, True): ("squeeze", "Squeeze: lower highs but higher lows — "
+                                       "price is coiling, a breakout is building."),
+            (True, False): ("expanding", "Expanding: higher highs but lower lows — "
+                                         "swings are getting wider."),
+        }[(bool(hh), bool(hl))]
+        notes.append(text)
+
+    # Break of structure: a close past the last confirmed swing.
+    if len(his):
+        sh = float(df["high"].iloc[his[-1]])
+        if close > sh:
+            notes.append(f"Closed above the last swing high {sh:.6g}: bullish break "
+                         "of structure.")
+    if len(los):
+        sl = float(df["low"].iloc[los[-1]])
+        if close < sl:
+            notes.append(f"Closed below the last swing low {sl:.6g}: bearish break "
+                         "of structure.")
+    if len(his) and len(los):
+        sh = float(df["high"].iloc[his[-1]])
+        sl = float(df["low"].iloc[los[-1]])
+        if sl <= close <= sh:
+            notes.append(f"Between the last swing low {sl:.6g} "
+                         f"({(sl / close - 1) * 100:+.1f}%) and swing high {sh:.6g} "
+                         f"({(sh / close - 1) * 100:+.1f}%).")
+
+    # The last CLOSED candle: the forming one still changes.
+    if n >= 2:
+        c = df.iloc[-2]
+        rng = float(c["high"] - c["low"])
+        if rng > 0:
+            body = float(abs(c["close"] - c["open"]))
+            upper = float(c["high"] - max(c["open"], c["close"]))
+            lower = float(min(c["open"], c["close"]) - c["low"])
+            bull = c["close"] >= c["open"]
+            if body >= 0.7 * rng:
+                notes.append(f"Last candle: strong {'bullish' if bull else 'bearish'} "
+                             "body, closed near its " + ("high." if bull else "low."))
+            elif upper >= 2 * body and upper >= 0.5 * rng:
+                notes.append("Last candle: long upper wick — sellers pushed price "
+                             "back down.")
+            elif lower >= 2 * body and lower >= 0.5 * rng:
+                notes.append("Last candle: long lower wick — buyers stepped in.")
+            elif body <= 0.2 * rng:
+                notes.append("Last candle: small body — indecision.")
+
+    if n >= 22 and "volume" in df:
+        v = float(df["volume"].iloc[-2])
+        avg = float(df["volume"].iloc[-22:-2].mean())
+        if avg > 0 and v >= 1.5 * avg:
+            notes.append(f"Volume on the last candle was {v / avg:.1f}x its 20-candle "
+                         "average.")
+        elif avg > 0 and v <= 0.6 * avg:
+            notes.append("Volume is light: the last candle traded under 60% of the "
+                         "20-candle average.")
+    if n >= 11:
+        chg = (close / float(df["close"].iloc[-11]) - 1) * 100
+        notes.append(f"{chg:+.1f}% over the last 10 candles.")
+
+    return PriceAction(structure, notes, swing_labels(df, pivot))

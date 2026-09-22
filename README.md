@@ -75,8 +75,10 @@ TradingView's.
 A **Pattern Scanner** page runs that detection across the top 10-200 coins (or
 a saved watchlist) on 15m, 1h, 4h and 1d, and lists ascending / descending
 triangles, falling / rising wedges and more, with fresh breakouts and
-near-breakouts first and the nearest daily supply and demand beside each. A
-click on a row opens its chart.
+near-breakouts first and the nearest daily supply and demand beside each.
+Tick a row to see its chart below the table, or click the coin / 📈 Open for
+the full chart page. Every chart also labels price action: HH / HL / LH / LL
+swings, plus notes on structure, breaks, the last candle and volume.
 
 Run the API (Phase 4):
 

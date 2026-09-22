@@ -126,3 +126,24 @@ def test_scan_lists_the_triangle_with_the_daily_supply_above_it():
     # Patterns not asked for are left out
     assert ps.scan(fetch, {"AAA": "AAAUSDT"}, ["1h"], patterns=("Rising wedge",),
                    workers=1).empty
+
+
+def test_price_action_reads_structure_and_labels_swings():
+    t = np.arange(200)
+    up = pt.price_action(_frame(_between(80 + 0.1 * t, 90 + 0.1 * t)), pivot=4)
+    assert up.structure == "uptrend"
+    assert {lab for _, _, lab in up.labels} <= {"HH", "HL"}
+    down = pt.price_action(_frame(_between(100 - 0.1 * t, 110 - 0.1 * t)), pivot=4)
+    assert down.structure == "downtrend"
+    squeeze = pt.price_action(_frame(_between(80 + 0.08 * t, 120 - 0.08 * t)), pivot=4)
+    assert squeeze.structure == "squeeze"
+
+
+def test_price_action_sees_a_break_and_the_last_candle():
+    t = np.arange(120)
+    mid = list(_between(np.full(120, 90.0), np.full(120, 100.0)))
+    df = _frame(mid + [101.0, 106.0, 106.2])       # a big up candle, then one forming
+    pa = pt.price_action(df, pivot=4)
+    text = " ".join(pa.notes)
+    assert "bullish break of structure" in text
+    assert "strong bullish body" in text

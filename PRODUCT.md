@@ -149,8 +149,17 @@ nearest cluster each side and the reasons. It refreshes every 5 minutes.
 **Question it answers:** what would a trader draw on this chart?
 
 Any Binance USDT perpetual, on 15m, 1h, 4h or 1d, 100–1000 candles. Each
-layer can be switched off.
+layer can be switched off. A link like `Chart_Patterns?coin=XRP&tf=15m` opens
+a chart directly, and the address follows the sidebar, so a chart can be
+bookmarked.
 
+- **Price action.** Recent swings are labelled on the candles: HH / LH for
+  highs, HL / LL for lows. Under the chart, in plain words: the structure
+  (uptrend = higher highs and higher lows, downtrend, squeeze = lower highs
+  but higher lows, expanding), a close past the last swing high or low
+  (break of structure), where price sits between the last swings, the last
+  closed candle (strong body, long upper or lower wick, indecision), volume
+  against its 20-candle average, and the change over the last 10 candles.
 - **Trendlines.** Every pair of swing lows (support) or swing highs
   (resistance) is a candidate. A line survives if no candle closes through
   it; wicks may poke through, as on a hand-drawn chart. Lines are ranked by
@@ -198,7 +207,11 @@ right now?
   distances, targets, touches, and the **nearest daily supply above and
   demand below**.
 - Fresh breakouts and near-breakouts come first; a switch hides the rest.
-- A click on a row opens that coin and timeframe on the Chart Patterns page.
+- **Tick a row** and its chart — candles, price-action labels, the pattern,
+  lines, Fibonacci and daily order blocks — appears right below the table,
+  with the price-action and pattern notes.
+- **Click the coin name or 📈 Open** for the full Chart Patterns page of that
+  coin and timeframe in a new tab.
 - The top 50 coins × 4 timeframes take about 11 seconds; results are kept for
   5 minutes.
 
@@ -285,5 +298,7 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `9e707a3` | Fix a flaky test (minute boundary) |
 | `95fdfe9` | Chart Patterns page: trendlines, flat levels, Fibonacci, patterns, TradingView-style VuManChu |
 | `4ac3cac` | Daily order blocks (purple zones) and the Pattern Scanner page |
+| `393b1b4` | This product description |
+| next | Scanner: chart below the table on a ticked row, coin / 📈 links to the full chart; price action (HH / HL / LH / LL labels and notes) on every chart |
 
-Tests: 89 at the start of the day, 114 at the end, all passing.
+Tests: 89 at the start of the day, 116 at the end, all passing.
