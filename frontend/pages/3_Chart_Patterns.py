@@ -29,12 +29,14 @@ PROJECT = 0.15          # lines run this share of the window past the last candl
 # Categorical slots from the dataviz reference palette, one set per theme.
 # Candles keep the dashboard's polarity: blue up, red down.
 _DARK = dict(up="#3987e5", down="#e66767", support="#199e70", resistance="#d95926",
-             fib="#9085e9", level="#898781", ink="#ffffff", ink2="#c3c2b7",
+             fib="#c98500", ob="#9085e9", ob_fill="rgba(144,133,233,0.16)",
+             level="#898781", ink="#ffffff", ink2="#c3c2b7",
              muted="#898781", grid="#2c2c2a", label_bg="rgba(26,26,25,0.85)",
              fill_bull="rgba(25,158,112,0.12)", fill_bear="rgba(217,89,38,0.12)",
              fill_neutral="rgba(137,135,129,0.12)")
 _LIGHT = dict(up="#2a78d6", down="#e34948", support="#1baf7a", resistance="#eb6834",
-              fib="#4a3aa7", level="#898781", ink="#0b0b0b", ink2="#52514e",
+              fib="#c98500", ob="#4a3aa7", ob_fill="rgba(74,58,167,0.12)",
+              level="#898781", ink="#0b0b0b", ink2="#52514e",
               muted="#898781", grid="#e1e0d9", label_bg="rgba(252,252,251,0.85)",
               fill_bull="rgba(27,175,122,0.12)", fill_bear="rgba(235,104,52,0.12)",
               fill_neutral="rgba(137,135,129,0.12)")
@@ -76,6 +78,11 @@ def candles(symbol: str, tf: str, n: int) -> pd.DataFrame:
     return get_service().futures().klines(symbol, tf, n)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def daily_order_blocks(symbol: str) -> list[pt.OrderBlock]:
+    return pt.order_blocks(get_service().futures().klines(symbol, "1d", 500))
+
+
 def fmt(v: float) -> str:
     if v is None or not np.isfinite(v):
         return "—"
@@ -88,7 +95,8 @@ def pct(v: float, ref: float) -> str:
 
 # -- chart ---------------------------------------------------------------------------
 def build_figure(df: pd.DataFrame, a: pt.ChartAnalysis, tf: str, show: dict,
-                 p: dict, title: str) -> go.Figure:
+                 p: dict, title: str,
+                 obs: list[pt.OrderBlock] | None = None) -> go.Figure:
     n = len(df)
     step = pd.Timedelta(seconds=timeframe_to_seconds(tf))
     proj = max(5, int(n * PROJECT))
@@ -110,6 +118,21 @@ def build_figure(df: pd.DataFrame, a: pt.ChartAnalysis, tf: str, show: dict,
         fig.add_annotation(x=1.0, xref="paper", xanchor="left", y=y, yref="y",
                            text=text, showarrow=False, bgcolor=p["label_bg"],
                            font=dict(size=11, color=color))
+
+    # Daily order blocks: purple zones from their candle to the right edge,
+    # drawn on every timeframe (from the chart's left edge if older).
+    lo_view, hi_view = float(df["low"].min()), float(df["high"].max())
+    pad_view = (hi_view - lo_view) * 0.08
+    if show.get("obs") and obs:
+        for ob in obs:
+            if ob.top < lo_view - pad_view or ob.bottom > hi_view + pad_view:
+                continue                              # off the visible range
+            x0 = max(ob.ts, df.index[0])
+            fig.add_shape(type="rect", x0=x0, x1=x_of(end_i), y0=ob.bottom, y1=ob.top,
+                          fillcolor=p["ob_fill"], line=dict(color=p["ob"], width=1),
+                          layer="below", row=1, col=1)
+            label((ob.bottom + ob.top) / 2, f"{ob.label}<br>{fmt(ob.bottom)}–{fmt(ob.top)}",
+                  p["ob"])
 
     # Pattern area first, so lines draw on top of it.
     if show["patterns"]:
@@ -269,16 +292,23 @@ def main():
 
     with st.sidebar:
         st.header("Controls")
-        coin = st.selectbox("Coin", options, index=options.index("BTC") if "BTC" in options else 0,
+        # The scanner opens a chart by setting these keys, then switching here.
+        if st.session_state.get("cp_coin") not in options:
+            st.session_state["cp_coin"] = "BTC" if "BTC" in options else options[0]
+        st.session_state.setdefault("cp_tf", "1h")
+        coin = st.selectbox("Coin", options, key="cp_coin",
                             format_func=lambda c: f"{c}  ({perps[c]})",
                             help="Type to search every Binance USDT perpetual.")
-        tf = st.radio("Timeframe", TIMEFRAMES, index=1, horizontal=True)
+        tf = st.radio("Timeframe", TIMEFRAMES, key="cp_tf", horizontal=True)
         n = st.slider("Candles", 100, 1000, 300, step=50)
         swing = st.select_slider("Swing size", ["auto", 3, 4, 5, 6, 8, 10], value="auto",
                                  help="How many candles each side a swing high / low must "
                                       "beat. Bigger = fewer, more important lines.")
         st.subheader("Draw")
         show = {
+            "obs": st.checkbox("Daily order blocks", True,
+                               help="Purple zones: the last candle before a sharp "
+                                    "daily move. Supply above price, demand below."),
             "trendlines": st.checkbox("Trendlines", True),
             "levels": st.checkbox("Flat support / resistance", True),
             "fib": st.checkbox("Fibonacci", True),
@@ -299,15 +329,17 @@ def main():
     st.caption("Trendlines, flat levels, Fibonacci and patterns found automatically "
                "from swing highs and lows. Like hand-drawn lines, they describe the "
                "chart shown; they do not predict it. Not financial advice.")
+    obs = daily_order_blocks(symbol) if show["obs"] else []
     st.plotly_chart(build_figure(df, a, tf, show, p,
-                                 f"{symbol} · {tf} · {n} candles · last {fmt(last)}"),
+                                 f"{symbol} · {tf} · {n} candles · last {fmt(last)}",
+                                 obs),
                     width="stretch", theme=None,
                     config={"displayModeBar": True, "scrollZoom": True,
                             "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
     st.caption("Green lines: support. Orange: resistance. The thick line is the "
-               "strongest; a dotted one was broken in the last few candles. Violet "
-               "dotted: Fibonacci, with the 0.5–0.618 band shaded. Drag to pan, "
-               "scroll to zoom.")
+               "strongest; a dotted one was broken in the last few candles. Purple "
+               "zones: daily order blocks. Yellow dotted: Fibonacci, with the "
+               "0.5–0.618 band shaded. Drag to pan, scroll to zoom.")
 
     # -- what the chart shows -------------------------------------------------------------
     st.subheader("What the chart shows")
@@ -350,6 +382,19 @@ def main():
             rows = [{"Ratio": f"{r:g}", "Price": fmt(v), "Distance": pct(v, last)}
                     for r, v in sorted(a.fib.levels.items(), key=lambda kv: -kv[1])]
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+    if obs:
+        st.markdown("**Daily order blocks** (nearest first on each side)")
+        rows = [{"Zone": f"{fmt(ob.bottom)}–{fmt(ob.top)}", "Acts as": ob.role,
+                 "Kind": ob.label.replace("Daily ", ""),
+                 "Formed": f"{ob.ts:%Y-%m-%d}", "Move after": f"{ob.move_pct:+.0f}%",
+                 "Distance": "inside" if ob.bottom <= last <= ob.top else
+                 pct(ob.bottom if ob.bottom > last else ob.top, last)}
+                for ob in sorted(obs, key=lambda o: -o.top)]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("An order block is the last candle before a sharp daily move that "
+                   "broke the recent low (supply) or high (demand). \"Flipped\" means "
+                   "price later closed through it, so it now works the other way.")
 
 
 main()

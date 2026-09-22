@@ -358,3 +358,102 @@ def analyse(df: pd.DataFrame, *, pivot: int | None = None,
     return ChartAnalysis(atr=a, tol=tol, pivot=pivot, supports=sup,
                          resistances=res, levels=levels(df, pivot=pivot, tol=tol),
                          fib=fibonacci(df), patterns=pats)
+
+
+# -- order blocks ----------------------------------------------------------------
+SUPPLY, DEMAND = "supply", "demand"
+
+
+@dataclass
+class OrderBlock:
+    """The last opposite candle before an impulsive move: price often reacts
+    when it comes back. Supply sits where a sharp drop started (resistance),
+    demand where a sharp rally started (support)."""
+    kind: str                 # supply | demand
+    bottom: float
+    top: float
+    i: int                    # the order-block candle
+    ts: pd.Timestamp
+    move_pct: float           # size of the impulse away from it
+    tests: int                # candles that traded back into it before any break
+    broken: bool              # a later close went through it (it "flipped")
+    role: str = ""            # resistance | support, relative to the last close
+
+    @property
+    def label(self) -> str:
+        state = ("flipped" if self.broken else
+                 "fresh" if self.tests == 0 else f"tested ×{self.tests}")
+        return f"Daily {self.kind} · {state}"
+
+
+def order_blocks(df: pd.DataFrame, *, impulse_atr: float = 2.0, lookahead: int = 3,
+                 structure: int = 10, max_each: int = 3,
+                 max_dist: float = 0.35) -> list[OrderBlock]:
+    """Order blocks near the price, nearest first on each side.
+
+    Supply: an up candle, the next candle down, and within ``lookahead``
+    candles price falls ``impulse_atr`` ATR below its low AND closes under the
+    lowest low of the ``structure`` candles before it (a break of structure).
+    The zone is that candle's low..high. Demand is the mirror image.
+
+    Zones more than ``max_dist`` (a fraction) from the last close are left
+    out; a broken zone is kept and flagged, since price often retests it from
+    the other side.
+    """
+    n = len(df)
+    if n < structure + lookahead + 2:
+        return []
+    o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
+    a = atr(df).to_numpy()
+    last = float(c[-1])
+    found: list[OrderBlock] = []
+    for i in range(structure, n - lookahead - 1):
+        nxt = slice(i + 1, i + 1 + lookahead)
+        prior_low = l[i - structure:i].min()
+        prior_high = h[i - structure:i].max()
+        if (c[i] >= o[i] and c[i + 1] < o[i + 1]
+                and l[nxt].min() <= l[i] - impulse_atr * a[i]
+                and c[nxt].min() < prior_low):
+            kind, bottom, top = SUPPLY, float(l[i]), float(h[i])
+            move = (l[nxt].min() / h[i] - 1) * 100
+        elif (c[i] <= o[i] and c[i + 1] > o[i + 1]
+                and h[nxt].max() >= h[i] + impulse_atr * a[i]
+                and c[nxt].max() > prior_high):
+            kind, bottom, top = DEMAND, float(l[i]), float(h[i])
+            move = (h[nxt].max() / l[i] - 1) * 100
+        else:
+            continue
+        start = i + 1 + lookahead
+        through = (c[start:] > top) if kind == SUPPLY else (c[start:] < bottom)
+        broken = bool(through.any())
+        stop = start + (int(np.argmax(through)) if broken else n - start)
+        touched = (h[start:stop] >= bottom) if kind == SUPPLY else (l[start:stop] <= top)
+        found.append(OrderBlock(kind, bottom, top, i, df.index[i], float(move),
+                                int(touched.sum()), broken))
+
+    def dist(ob: OrderBlock) -> float:
+        if ob.bottom <= last <= ob.top:
+            return 0.0
+        return min(abs(ob.bottom - last), abs(ob.top - last)) / last
+
+    out: list[OrderBlock] = []
+    for side in ("above", "below"):
+        pool = [ob for ob in found if dist(ob) <= max_dist and (
+            (ob.bottom > last or ob.bottom <= last <= ob.top) if side == "above"
+            else ob.top < last)]
+        # Nearest first; of overlapping zones keep the more recent one.
+        pool.sort(key=lambda ob: (dist(ob), -ob.i))
+        kept: list[OrderBlock] = []
+        for ob in pool:
+            if all(ob.top < k.bottom or ob.bottom > k.top for k in kept):
+                # Above the price a zone resists, below it supports. Inside
+                # it, an intact supply (or a broken demand) resists.
+                inside = ob.bottom <= last <= ob.top
+                resists = side == "above" and not inside or inside and (
+                    (ob.kind == SUPPLY) != ob.broken)
+                ob.role = RESISTANCE if resists else SUPPORT
+                kept.append(ob)
+            if len(kept) == max_each:
+                break
+        out += kept
+    return out

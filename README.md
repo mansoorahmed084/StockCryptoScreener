@@ -64,8 +64,17 @@ extensions of the biggest leg in view, and patterns between the best two lines
 (ascending / descending / symmetrical triangles, rising / falling wedges,
 channels, ranges, double tops and bottoms) with breakout levels and targets. A
 line broken in the last few candles stays on the chart, dotted, so fresh
-breakouts show. The VuManChu Cipher B pane underneath is styled like
+breakouts show. Daily order blocks are drawn as purple zones on every
+timeframe: supply is the last up candle before a sharp daily drop that broke
+the recent low, demand the mirror image; a zone price has since closed through
+is marked "flipped". The VuManChu Cipher B pane underneath is styled like
 TradingView's.
+
+A **Pattern Scanner** page runs that detection across the top 10-200 coins (or
+a saved watchlist) on 15m, 1h, 4h and 1d, and lists ascending / descending
+triangles, falling / rising wedges and more, with fresh breakouts and
+near-breakouts first and the nearest daily supply and demand beside each. A
+click on a row opens its chart.
 
 Run the API (Phase 4):
 

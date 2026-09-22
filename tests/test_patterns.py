@@ -75,3 +75,54 @@ def test_a_fresh_breakout_keeps_the_line_and_reports_it():
     assert top.broken and abs(top.slope) < 0.01
     p = a.patterns[0]
     assert p.name == "Ascending triangle" and p.status == "broke up"
+
+
+def _ohlc(rows, freq="1D"):
+    idx = pd.date_range("2026-01-01", periods=len(rows), freq=freq, tz="UTC")
+    return pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=idx) \
+        .assign(volume=1.0)
+
+
+def _supply_then_crash(recover_to):
+    rows = [(100, 101, 99, 100)] * 20                   # a flat base
+    rows += [(100, 104, 99.5, 103)]                     # last up candle = supply
+    rows += [(103, 103, 95, 96), (96, 96.5, 88, 89), (89, 90, 85, 86)]  # crash
+    rows += [(86, 87, 85, 86.5)] * 10
+    rows += [(86.5, recover_to + 0.5, 86, recover_to)]  # rally back
+    return _ohlc(rows)
+
+
+def test_order_block_marks_the_last_up_candle_before_a_crash():
+    obs = pt.order_blocks(_supply_then_crash(98))
+    sup = [ob for ob in obs if ob.kind == pt.SUPPLY]
+    assert len(sup) == 1
+    z = sup[0]
+    assert (z.bottom, z.top) == (99.5, 104) and z.role == pt.RESISTANCE
+    assert not z.broken and z.move_pct < -15 and "fresh" in z.label
+
+
+def test_order_block_broken_by_a_close_flips_to_support():
+    obs = pt.order_blocks(_supply_then_crash(106))
+    z = [ob for ob in obs if ob.kind == pt.SUPPLY][0]
+    assert z.broken and z.role == pt.SUPPORT and "flipped" in z.label
+
+
+def test_scan_lists_the_triangle_with_the_daily_supply_above_it():
+    from backend.screener import pattern_scan as ps
+    t = np.arange(200)
+    tri = _frame(_between(80 + 0.08 * t, np.full(200, 100.0)))
+    daily = _supply_then_crash(98)
+    daily[["open", "high", "low", "close"]] *= 1.0      # supply 99.5-104
+
+    def fetch(symbol, tf, limit):
+        return daily if tf == "1d" else tri
+
+    out = ps.scan(fetch, {"AAA": "AAAUSDT"}, ["1h"], workers=1)
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["pattern"] == "Ascending triangle" and row["timeframe"] == "1h"
+    assert "99.5–104" in row["zone_above"]
+    assert row["setup"].startswith(("Near breakout", "Forming"))
+    # Patterns not asked for are left out
+    assert ps.scan(fetch, {"AAA": "AAAUSDT"}, ["1h"], patterns=("Rising wedge",),
+                   workers=1).empty
