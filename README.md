@@ -57,6 +57,16 @@ bands are the big liquidity zones. It covers BTC and the top 10 coins by market
 cap (or any Binance USDT perpetual) over 12h, 1d, 3d, 7d or 30d. The leverage
 mix is under `liquidation` in `config.yaml`. Sizes are model estimates.
 
+A **Chart Patterns** page draws what a trader would draw by hand, on any
+Binance USDT perpetual (15m, 1h, 4h or 1d): support and resistance trendlines
+through swing lows and highs, flat levels, Fibonacci retracements and
+extensions of the biggest leg in view, and patterns between the best two lines
+(ascending / descending / symmetrical triangles, rising / falling wedges,
+channels, ranges, double tops and bottoms) with breakout levels and targets. A
+line broken in the last few candles stays on the chart, dotted, so fresh
+breakouts show. The VuManChu Cipher B pane underneath is styled like
+TradingView's.
+
 Run the API (Phase 4):
 
 ```bash
