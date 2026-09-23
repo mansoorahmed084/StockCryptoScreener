@@ -344,6 +344,6 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `4ac3cac` | Daily order blocks (purple zones) and the Pattern Scanner page |
 | `393b1b4` | This product description |
 | `6c79d30` | Scanner: chart below the table on a ticked row, coin / 📈 links to the full chart; price action (HH / HL / LH / LL labels and notes) on every chart |
-| next | Price, trendline and zone alerts: Alerts page, 🔔 box under every chart, checks on every page, Windows / Telegram / terminal watcher |
+| `e18a854` | Price, trendline and zone alerts: Alerts page, 🔔 box under every chart, checks on every page, Windows / Telegram / terminal watcher |
 
 Tests: 89 at the start of the day, 121 at the end, all passing.
