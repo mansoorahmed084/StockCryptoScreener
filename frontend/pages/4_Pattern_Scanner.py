@@ -20,6 +20,7 @@ from backend.config import load_config  # noqa: E402
 from backend.screener import pattern_scan as ps  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
 from backend.watchlists import WatchlistStore  # noqa: E402
+from frontend import alerts_view  # noqa: E402
 from frontend import pattern_view as pv  # noqa: E402
 
 st.set_page_config(page_title="Pattern scanner", layout="wide")
@@ -121,6 +122,7 @@ def main():
         st.warning("Pick coins, at least one timeframe and at least one pattern.")
         return
 
+    alerts_view.sidebar_watch()
     df, when = run_scan(coins, tuple(tfs), tuple(patterns))
     live = df["setup"].str.contains("fresh|Near breakout", regex=True)
     view = df[live] if only_live else df

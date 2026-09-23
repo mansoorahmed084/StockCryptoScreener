@@ -124,6 +124,11 @@ class Config:
                                                 "data_cache/watchlists.json"))
 
     @property
+    def alerts(self) -> dict[str, Any]:
+        """Price / trendline / zone alert settings (empty -> defaults)."""
+        return dict(self.raw.get("alerts", {}))
+
+    @property
     def btc_strength(self) -> dict[str, Any]:
         """Settings for the coins-vs-BTC board (empty -> module defaults)."""
         return dict(self.raw.get("btc_strength", {}))

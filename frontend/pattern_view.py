@@ -386,4 +386,7 @@ def render_chart(symbol: str, tf: str, n: int = 300, *, swing="auto",
                     config={"displayModeBar": True, "scrollZoom": True,
                             "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
     st.caption(LEGEND)
+    from frontend import alerts_view                # one place for alert widgets
+    coin = {s_: c for c, s_ in perpetuals().items()}.get(symbol, "")
+    alerts_view.alert_box(coin, symbol, df, a, obs, key)
     render_details(df, a, obs, pa)

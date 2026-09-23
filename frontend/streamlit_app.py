@@ -24,6 +24,7 @@ from backend.screener import sectors as sectors_mod  # noqa: E402
 from backend.signals.backtest import backtest_signal  # noqa: E402
 from backend.signals.journal import SignalJournal  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
+from frontend import alerts_view  # noqa: E402
 
 st.set_page_config(page_title="Crypto RS Screener", layout="wide")
 
@@ -171,6 +172,7 @@ def main():
         liquidity_gate = st.checkbox("Liquidity gate", value=True)
         if st.button("🔄 Refresh data"):
             st.cache_data.clear()
+    alerts_view.sidebar_watch()
 
     if not (coins and bases and timeframes):
         st.warning("Pick at least one coin, base and timeframe.")

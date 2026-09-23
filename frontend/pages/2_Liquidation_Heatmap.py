@@ -21,6 +21,7 @@ from backend.config import load_config  # noqa: E402
 from backend.screener import liquidation as liq  # noqa: E402
 from backend.screener import market_read as mr  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
+from frontend import alerts_view  # noqa: E402
 
 st.set_page_config(page_title="Liquidation heatmap", layout="wide")
 
@@ -262,6 +263,7 @@ def main():
         if st.button("🔄 Refresh data"):
             st.cache_data.clear()
             get_service().futures()._cache.clear()
+    alerts_view.sidebar_watch()
 
     symbol = perps[coin]
     st.title("Liquidation heatmap")

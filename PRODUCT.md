@@ -1,6 +1,7 @@
 # Crypto Screener — Product Description
 
-A self-hosted crypto dashboard (Streamlit). It answers four questions:
+A self-hosted crypto dashboard (Streamlit). It answers four questions, and
+tells you when price reaches a level, trendline or zone you set:
 
 1. **Which coins are stronger or weaker than BTC** (or BTC dominance), on every
    timeframe from 1 hour to 1 month?
@@ -28,6 +29,7 @@ Then open http://localhost:8501 and pick a page in the sidebar.
 | Liquidation Heatmap | `/Liquidation_Heatmap` | Estimated liquidation zones, plus a short-term market read |
 | Chart Patterns | `/Chart_Patterns` | Auto-drawn lines, Fibonacci, patterns and daily order blocks on one chart |
 | Pattern Scanner | `/Pattern_Scanner` | Triangles and wedges across many coins and timeframes |
+| Alerts | `/Alerts` | Price, trendline and zone alerts you set, checked every minute |
 
 ---
 
@@ -217,6 +219,47 @@ right now?
 
 ---
 
+## 5. Alerts page
+
+**Question it answers:** tell me when price reaches my level, line or zone.
+
+### Alert types
+| Type | Conditions | Fires when |
+|---|---|---|
+| Price | goes above / goes below / touches | a 1-minute candle's high / low reaches the level |
+| Trendline | touches / closes above / closes below | a candle trades through the line, or a closed candle closes past it |
+| Zone | enters | a candle trades inside the zone (e.g. a purple order block) |
+
+A trendline is a straight line through two (time, price) points, extended in
+time, so its level moves with the clock. Wicks count for touches, so a quick
+spike through a level between checks is not missed. Each alert fires once,
+then waits under **Fired** to be re-armed or deleted. An alert that is
+already met when you set it is refused with a warning.
+
+### Setting alerts
+- **Alerts page:** pick a coin (any Binance USDT perpetual), a type, a
+  condition and an optional note. Trendlines take two points in UTC.
+- **🔔 Set an alert on this chart** — a box under every chart (Chart Patterns
+  and the scanner's chart): one click sets an alert on a detected trendline
+  (resistance defaults to "closes above", support to "closes below"), a flat
+  level, a daily order block, a Fibonacci level or a typed price.
+- The page lists active alerts with the level they wait for, the price now
+  and the distance; fired alerts with the hit price and time.
+
+### How you get told
+- **Dashboard pop-up** on every page, which checks all alerts every 60 s
+  while it is open (`alerts.check_seconds`), plus the last hits in the
+  sidebar.
+- **Windows notification** (`alerts.desktop`, on by default).
+- **Telegram** when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are in `.env`.
+- **With the dashboard closed:** `.venv/Scripts/python.exe -m backend.cli
+  alerts` checks every 60 s (`--every`, `--once`).
+
+Alerts are stored in `data_cache/alerts.db` (SQLite). Firing an alert is one
+atomic update, so two open tabs or a tab plus the watcher never send it twice.
+
+---
+
 ## Data sources
 
 | Source | Used for | Key |
@@ -238,6 +281,7 @@ and futures data.
 | `classifier.per_timeframe.1M` | Classifier settings for the new 1-month timeframe |
 | `liquidation.leverages`, `maintenance_margin`, `bins` | Liquidation model |
 | `data.watchlists_file` | Where custom watchlists are saved |
+| `alerts.db`, `check_seconds`, `desktop` | Alert store, how often open pages check, Windows pop-ups |
 
 ## Hosting (planned, not done)
 
@@ -299,6 +343,7 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `95fdfe9` | Chart Patterns page: trendlines, flat levels, Fibonacci, patterns, TradingView-style VuManChu |
 | `4ac3cac` | Daily order blocks (purple zones) and the Pattern Scanner page |
 | `393b1b4` | This product description |
-| next | Scanner: chart below the table on a ticked row, coin / 📈 links to the full chart; price action (HH / HL / LH / LL labels and notes) on every chart |
+| `6c79d30` | Scanner: chart below the table on a ticked row, coin / 📈 links to the full chart; price action (HH / HL / LH / LL labels and notes) on every chart |
+| next | Price, trendline and zone alerts: Alerts page, 🔔 box under every chart, checks on every page, Windows / Telegram / terminal watcher |
 
-Tests: 89 at the start of the day, 116 at the end, all passing.
+Tests: 89 at the start of the day, 121 at the end, all passing.

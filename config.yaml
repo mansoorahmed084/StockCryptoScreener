@@ -81,6 +81,14 @@ liquidation:
   maintenance_margin: 0.005
   bins: 400
 
+# Price / trendline / zone alerts (Alerts page, and the bell box under charts).
+# They are checked on 1-minute Binance futures candles while any dashboard page
+# is open, or all the time with: python -m backend.cli alerts
+alerts:
+  db: data_cache/alerts.db
+  check_seconds: 60        # how often an open dashboard page checks them
+  desktop: true            # Windows pop-up when one fires; Telegram too if .env has it
+
 # Index base construction.
 index:
   exclude: [BTC]           # equal-weight alt index excludes these

@@ -139,6 +139,27 @@ def cmd_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_alerts(args: argparse.Namespace) -> int:
+    """Check price / trendline / zone alerts on a loop, dashboard or not."""
+    import time as _time
+
+    from backend.alerts.price_alerts import ACTIVE, message
+    from backend.service import ScreenerService
+
+    svc = ScreenerService(load_config(args.config), refresh=False)
+    print(f"checking {len(svc.alerts().list(ACTIVE))} active alert(s) every "
+          f"{args.every}s — Ctrl+C to stop", flush=True)
+    while True:
+        try:
+            for a in svc.check_alerts():
+                print(message(a), flush=True)
+        except Exception as exc:              # keep watching through a bad round
+            print(f"check failed: {exc}", flush=True)
+        if args.once:
+            return 0
+        _time.sleep(args.every)
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     from backend.service import ScreenerService
     from backend.signals.backtest import backtest_signal
@@ -198,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--presets", default=None, help="comma list, default = all")
     w.add_argument("--cooldown", type=float, default=3600.0)
     w.set_defaults(func=cmd_watch)
+
+    a = sub.add_parser("alerts", help="check price / trendline / zone alerts on a loop")
+    a.add_argument("--every", type=int, default=60, help="seconds between checks")
+    a.add_argument("--once", action="store_true", help="check once and exit")
+    a.set_defaults(func=cmd_alerts)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)

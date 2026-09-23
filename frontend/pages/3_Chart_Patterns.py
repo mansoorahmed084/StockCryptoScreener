@@ -14,6 +14,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from frontend import alerts_view  # noqa: E402
 from frontend import pattern_view as pv  # noqa: E402
 
 st.set_page_config(page_title="Chart patterns", layout="wide")
@@ -75,6 +76,7 @@ def main():
                "order blocks found automatically from swing highs and lows. Like "
                "hand-drawn lines, they describe the chart shown; they do not predict "
                "it. Not financial advice.")
+    alerts_view.sidebar_watch()
     pv.render_chart(perps[coin], tf, n, swing=swing, show=show)
 
 

@@ -23,6 +23,7 @@ from backend.screener import btc_strength as bs  # noqa: E402
 from backend.screener import rs as rs_mod  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
 from backend.watchlists import WatchlistStore, parse_symbols  # noqa: E402
+from frontend import alerts_view  # noqa: E402
 
 st.set_page_config(page_title="Coins vs BTC", layout="wide")
 
@@ -436,6 +437,7 @@ def main():
 
         with st.expander("✏️ Edit my watchlists"):
             watchlist_editor(store)
+    alerts_view.sidebar_watch()
 
     st.title(f"Coins vs {bench}")
     if bench == bs.BTC:

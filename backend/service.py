@@ -40,6 +40,8 @@ class ScreenerService:
         self._builder: RatioBuilder | None = None
         self._dominance: BtcDominance | None = None
         self._futures: BinanceFutures | None = None
+        self._alerts = None
+        self._alert_notifier = None
 
     def universe(self) -> list[str]:
         return universe_mod.select_universe(self.adapter, self.config)
@@ -191,3 +193,28 @@ class ScreenerService:
         with ThreadPoolExecutor(max_workers=6) as pool:
             reads = list(pool.map(one, self.liquidation_coins(n).items()))
         return [r for r in reads if r is not None]
+
+    # -- price / trendline / zone alerts ---------------------------------------------
+    def alerts(self):
+        """The shared alert store (SQLite, path from config)."""
+        from backend.alerts.price_alerts import DEFAULT_DB, AlertStore
+        if self._alerts is None:
+            self._alerts = AlertStore(self.config.alerts.get("db", DEFAULT_DB))
+        return self._alerts
+
+    def alert_notifier(self):
+        """Telegram when .env has it, plus a Windows pop-up unless turned off."""
+        from backend.alerts.telegram import DesktopNotifier, MultiNotifier, notifier_from_env
+        if self._alert_notifier is None:
+            parts = [notifier_from_env()]
+            if self.config.alerts.get("desktop", True):
+                parts.append(DesktopNotifier())
+            self._alert_notifier = MultiNotifier(*parts)
+        return self._alert_notifier
+
+    def check_alerts(self) -> list:
+        """Check every active alert once; send and return the ones that fired."""
+        from backend.alerts.price_alerts import check_all, message
+        notifier = self.alert_notifier()
+        return check_all(self.alerts(), self.futures().klines,
+                         notify=lambda a: notifier.send(message(a)))

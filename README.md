@@ -80,6 +80,16 @@ Tick a row to see its chart below the table, or click the coin / 📈 Open for
 the full chart page. Every chart also labels price action: HH / HL / LH / LL
 swings, plus notes on structure, breaks, the last candle and volume.
 
+An **Alerts** page lets you set price, trendline and zone alerts (or set them
+in one click from the 🔔 box under any chart). They are checked on 1-minute
+candles every minute while any page is open, and pop up in the dashboard, as
+a Windows notification, and on Telegram if `.env` has a bot token. To watch
+them with the dashboard closed:
+
+```bash
+.venv/Scripts/python.exe -m backend.cli alerts
+```
+
 Run the API (Phase 4):
 
 ```bash
