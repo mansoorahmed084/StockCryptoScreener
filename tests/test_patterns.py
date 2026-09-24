@@ -147,3 +147,71 @@ def test_price_action_sees_a_break_and_the_last_candle():
     text = " ".join(pa.notes)
     assert "bullish break of structure" in text
     assert "strong bullish body" in text
+
+
+def test_equal_lows_inside_an_uptrend_are_not_a_double_bottom():
+    # Rally, pull back to 90, rally, pull back to 90 again: a higher low
+    # retested, with lower lows before it. That is continuation (the LTC case).
+    rise = list(np.linspace(70, 95, 60))
+    leg = list(np.linspace(95, 88, 10)) + list(np.linspace(88, 100, 15))
+    test = list(np.linspace(100, 90, 12)) + list(np.linspace(90, 99, 12)) \
+        + list(np.linspace(99, 90.1, 12)) + list(np.linspace(90.1, 96, 8))
+    df = _frame(rise + leg + test, wick=0.05)
+    assert not [p for p in pt.double_top_bottom(df, pivot=4, tol=0.5)
+                if p.name == "Double bottom"]
+
+
+def test_a_real_double_bottom_follows_a_fall():
+    fall = list(np.linspace(120, 90, 40))
+    w = list(np.linspace(90, 100, 20)) + list(np.linspace(100, 90.1, 20)) \
+        + list(np.linspace(90.1, 96, 15))
+    df = _frame(fall + w, wick=0.05)
+    bottoms = [p for p in pt.double_top_bottom(df, pivot=4, tol=0.5)
+               if p.name == "Double bottom"]
+    assert bottoms and bottoms[0].status == "forming"
+    assert abs(bottoms[0].breakout_up - 100.05) < 0.2
+
+
+def test_a_retested_low_in_an_uptrend_still_reads_as_uptrend():
+    rise = list(np.linspace(70, 95, 60))
+    leg = list(np.linspace(95, 88, 10)) + list(np.linspace(88, 100, 15))
+    test = list(np.linspace(100, 90, 12)) + list(np.linspace(90, 103, 14)) \
+        + list(np.linspace(103, 89.95, 14)) + list(np.linspace(89.95, 98, 8))
+    pa = pt.price_action(_frame(rise + leg + test, wick=0.05), pivot=4)
+    assert pa.structure == "uptrend" and "held" in pa.notes[0]
+
+
+def _pole_and_flag(n_flag=40, breakout=()):
+    pole = list(np.linspace(80, 100, 40))
+    t = np.arange(n_flag)
+    upper = 100 - 0.12 * t
+    wave = 0.5 + 0.5 * np.cos(2 * np.pi * t / 10)   # starts at the top, lower highs
+    flag = list(upper - 3 + 3 * wave)
+    return pole + flag + list(breakout)
+
+
+def test_bull_flag_inside_then_broken():
+    inside = [p for p in pt.analyse(_frame(_pole_and_flag(), wick=0.1), pivot=3).patterns
+              if p.name == "Bull flag"]
+    assert inside and inside[0].status == "inside"
+    f = inside[0]
+    assert f.upper.slope < 0 and f.upper.touches >= 2          # the falling line
+    assert f.target_up > f.breakout_up > f.breakout_down        # target above, fail below
+    broke = [p for p in pt.analyse(_frame(_pole_and_flag(breakout=(97, 98.5, 99)),
+                                          wick=0.1), pivot=3).patterns
+             if p.name == "Bull flag"]
+    assert broke and broke[0].status == "broke up"
+
+
+def test_bear_flag_is_the_mirror():
+    df = _frame([200 - v for v in _pole_and_flag()], wick=0.1)
+    bear = [p for p in pt.analyse(df, pivot=3).patterns if p.name == "Bear flag"]
+    assert bear and bear[0].status == "inside" and bear[0].lower.slope > 0
+    assert bear[0].target_down < bear[0].breakout_down < bear[0].breakout_up
+
+
+def test_no_flag_without_a_pole():
+    t = np.arange(80)
+    flat = list(95 + 0.5 * np.sin(t / 3)) + list(95 - 0.05 * np.arange(40))
+    assert not [p for p in pt.analyse(_frame(flat, wick=0.1), pivot=3).patterns
+                if p.name == "Bull flag"]

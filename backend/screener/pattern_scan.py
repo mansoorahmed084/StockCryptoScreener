@@ -15,13 +15,13 @@ import pandas as pd
 
 from . import patterns as pt
 
-BULLISH = ("Ascending triangle", "Falling wedge", "Double bottom")
-BEARISH = ("Descending triangle", "Rising wedge", "Double top")
+BULLISH = ("Ascending triangle", "Falling wedge", "Bull flag", "Double bottom")
+BEARISH = ("Descending triangle", "Rising wedge", "Bear flag", "Double top")
 NEUTRAL = ("Symmetrical triangle", "Rising channel", "Falling channel", "Range",
            "Broadening pattern")
 ALL_PATTERNS = BULLISH + BEARISH + NEUTRAL
-DEFAULT_PATTERNS = ("Ascending triangle", "Falling wedge", "Descending triangle",
-                    "Rising wedge")
+DEFAULT_PATTERNS = ("Ascending triangle", "Falling wedge", "Bull flag",
+                    "Descending triangle", "Rising wedge", "Bear flag")
 
 COLUMNS = ["coin", "symbol", "timeframe", "pattern", "bias", "status", "price",
            "up_level", "up_pct", "down_level", "down_pct", "target_up",

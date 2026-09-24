@@ -111,21 +111,20 @@ def swing_points(series: pd.Series, k: int, *, high: bool) -> np.ndarray:
     points. (indicators.common.pivot_* require a unique extreme and would
     skip it.)
     """
-    v = series.to_numpy()
-    out = []
-    for i in range(k, len(v) - k):
-        w = v[i - k:i + k + 1]
-        ext = w.max() if high else w.min()
-        if v[i] == ext and int(np.argmax(w == ext)) == k:
-            out.append(i)
-    return np.asarray(out, dtype=int)
+    v = np.asarray(series, dtype=float)
+    if len(v) < 2 * k + 1:
+        return np.zeros(0, dtype=int)
+    w = np.lib.stride_tricks.sliding_window_view(v, 2 * k + 1)   # one row per bar
+    ext = w.max(axis=1) if high else w.min(axis=1)
+    first = np.argmax(w == ext[:, None], axis=1)                 # first extreme in row
+    return (np.flatnonzero((w[:, k] == ext) & (first == k)) + k).astype(int)
 
 
 def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
-    prev = df["close"].shift(1)
-    tr = pd.concat([df["high"] - df["low"], (df["high"] - prev).abs(),
-                    (df["low"] - prev).abs()], axis=1).max(axis=1)
-    return tr.rolling(n, min_periods=1).mean()
+    h, l, c = (df[k].to_numpy(dtype=float) for k in ("high", "low", "close"))
+    prev = np.concatenate([[np.nan], c[:-1]])
+    tr = np.fmax(h - l, np.fmax(np.abs(h - prev), np.abs(l - prev)))
+    return pd.Series(tr, index=df.index).rolling(n, min_periods=1).mean()
 
 
 # -- trendlines ----------------------------------------------------------------
@@ -200,8 +199,9 @@ def levels(df: pd.DataFrame, *, pivot: int, tol: float, max_each: int = 2) -> li
     k = max(2, pivot // 2)                 # finer swings: every test of a level
     hi = swing_points(df["high"], k, high=True)
     lo = swing_points(df["low"], k, high=False)
-    pts = sorted([(float(df["high"].iloc[i]), int(i)) for i in hi]
-                 + [(float(df["low"].iloc[i]), int(i)) for i in lo])
+    highs, lows = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    pts = sorted([(float(highs[i]), int(i)) for i in hi]
+                 + [(float(lows[i]), int(i)) for i in lo])
     clusters: list[list[tuple[float, int]]] = []
     for p, i in pts:
         if clusters and p - np.mean([q for q, _ in clusters[-1]]) <= tol:
@@ -302,7 +302,15 @@ def line_pattern(df: pd.DataFrame, upper: Line, lower: Line, tol: float) -> Patt
 def double_top_bottom(df: pd.DataFrame, *, pivot: int, tol: float,
                       recent: float = 0.3) -> list[Pattern]:
     """Two swing highs (lows) at one price with a real dip (rally) between them,
-    the second one recent. Confirmed once price closes past the neckline."""
+    the second one recent. Confirmed once price closes past the neckline.
+
+    Both are REVERSAL patterns, so the move before them matters as much as the
+    shape. A double bottom must be the low of a fall: price came down into the
+    first bottom by at least most of the pattern's height, and nothing in the
+    stretch before it (as long as the pattern itself) traded lower. Two equal
+    lows inside an uptrend — a higher low retested — are trend continuation,
+    not a double bottom. Double tops are the mirror image.
+    """
     n = len(df)
     close = float(df["close"].iloc[-1])
     out: list[Pattern] = []
@@ -320,6 +328,19 @@ def double_top_bottom(df: pd.DataFrame, *, pivot: int, tol: float,
         depth = (min(p1, p2) - neck) if top else (neck - max(p1, p2))
         if depth < 3 * tol:
             continue
+        before = df.iloc[max(0, i1 - (i2 - i1)):i1]
+        if len(before) < pivot:
+            continue                              # no history to judge the move in
+        if top:
+            # The tops are the high of a rise: nothing higher just before, and
+            # price climbed into the first top.
+            if before["high"].max() > max(p1, p2) + tol \
+                    or p1 - before["low"].min() < 0.8 * depth:
+                continue
+        else:
+            if before["low"].min() < min(p1, p2) - tol \
+                    or before["high"].max() - p1 < 0.8 * depth:
+                continue
         if top:
             if close > max(p1, p2) + tol:
                 continue                          # broken above: not a top
@@ -339,6 +360,178 @@ def double_top_bottom(df: pd.DataFrame, *, pivot: int, tol: float,
     return out
 
 
+def _flag(hi: np.ndarray, lo: np.ndarray, cl: np.ndarray, trend: np.ndarray, *,
+          pivot: int, tol: float, atr_: float, min_pole_atr: float,
+          max_retrace: float) -> dict | None:
+    """Bull flag on (high, low, close) arrays; the bear flag calls this on the
+    negated chart.
+
+    The falling line is walked forward: at each candle it is drawn from the
+    flag top through the highest lower high seen BEFORE that candle, and the
+    first close above it is the breakout. The line is then locked there, so a
+    breakout stays a breakout as price runs on. Of the tops that qualify, the
+    highest one — the real start of the flag — wins.
+    """
+    n = len(hi)
+    k_touch = max(2, pivot // 2)
+    tops = swing_points(pd.Series(hi), pivot, high=True)
+    touch_pts = swing_points(pd.Series(hi), k_touch, high=True)
+    found: list[dict] = []
+    for top in (int(t) for t in tops if n * 0.3 <= t <= n - 2 * pivot - 1):
+        # A flag continues a trend: the top sits above a rising 50-candle EMA.
+        if hi[top] <= trend[top] or trend[top] <= trend[max(0, top - 2 * pivot)]:
+            continue
+        lookback = max(3 * pivot, 2 * (n - top))
+        j0 = max(0, top - lookback)
+        pole_i = j0 + int(np.argmin(lo[j0:top]))
+        pole = hi[top] - lo[pole_i]
+        if pole < min_pole_atr * atr_:
+            continue                      # no real rise before it
+        first = top + k_touch + 1         # candles right after the top belong to it
+        if n - first < 2 * pivot:
+            continue
+        # The line a trader would draw at candle i: from the top through a
+        # lower swing high already confirmed then (well inside the pullback,
+        # not the first dip), still respected — no close above it yet — and
+        # touching the most lower highs. A close above it counts as the
+        # breakout only once it has the top plus two lower highs on it.
+        def best_line(i_end: int) -> tuple[int, float, int] | None:
+            known = touch_pts[(touch_pts >= top + 2 * pivot)
+                              & (touch_pts <= i_end - k_touch - 1)]
+            seg = np.arange(top + 1, i_end)
+            best = None
+            for a_ in known:
+                s_ = (hi[a_] - hi[top]) / (a_ - top)
+                if s_ >= 0 or (cl[seg] > hi[top] + s_ * (seg - top) + tol).any():
+                    continue
+                t_ = 1 + int((np.abs(hi[known] - (hi[top] + s_ * (known - top)))
+                              <= tol).sum())
+                if best is None or (t_, s_) > (best[0], best[1]):
+                    best = (t_, float(s_), int(a_))
+            return best
+
+        broke_i, slope, anchor, touches, failed = None, None, None, 0, False
+        run_max = np.maximum.accumulate(hi[first:])      # highest high since `first`
+        b, seen = None, -1
+        for i in range(first + 2 * pivot, n):
+            if run_max[i - 1 - first] > hi[top] + tol:
+                failed = True             # a new high before any break: no flag
+                break
+            # Redraw only when a new swing high is confirmed or a close pokes
+            # above the current line (which then stops being "respected").
+            confirmed = int(np.searchsorted(touch_pts, i - k_touch - 1, side="right"))
+            above = b is not None and cl[i] > hi[top] + b[1] * (i - top) + tol
+            if confirmed != seen or b is None or above:
+                if not (above and b[0] >= 3):
+                    b, seen = best_line(i), confirmed
+                if b and b[0] >= 3 and cl[i] > hi[top] + b[1] * (i - top) + tol:
+                    # A break must hold until price clears the flag's top: a
+                    # close back under the line before that makes it a false
+                    # breakout. The line is then redrawn above that poke
+                    # (best_line drops lines a close has crossed) and the walk
+                    # goes on, the way a trader redraws it by eye.
+                    j = np.arange(i + 1, n)
+                    cleared = np.flatnonzero(cl[j] > hi[top] + tol)
+                    j = j[:cleared[0]] if len(cleared) else j
+                    if (cl[j] < hi[top] + b[1] * (j - top) - tol).any():
+                        b, seen = None, -1
+                        continue
+                    touches, slope, anchor = b
+                    broke_i = i
+                    break
+        if failed:
+            continue
+        stop = broke_i if broke_i is not None else n
+        if broke_i is None:
+            b = best_line(n)
+            if b is None:
+                continue
+            touches, slope, anchor = b
+        flag_i = top + 1 + int(np.argmin(lo[top + 1:stop]))
+        retrace = (hi[top] - lo[flag_i]) / pole
+        if not 0.1 <= retrace <= max_retrace:
+            continue                      # too shallow to be a pullback, or too deep
+        if cl[-1] < lo[flag_i] - tol:
+            continue                      # price is back under the flag's low: failed
+        if broke_i is not None and n - 1 - broke_i > 6 * pivot:
+            continue                      # an old breakout: the pattern is done
+        found.append({"top": top, "anchor": anchor, "slope": slope, "touches": touches,
+                      "pole": pole, "pole_i": pole_i, "flag_i": flag_i,
+                      "retrace": retrace, "broke": broke_i is not None,
+                      "broke_i": broke_i})
+    if not found:
+        return None
+    return max(found, key=lambda f: (hi[f["top"]], f["top"]))
+
+
+def flags(df: pd.DataFrame, *, pivot: int, tol: float,
+          supports: list[Line] | None = None, min_pole_atr: float = 6.0,
+          max_retrace: float = 0.618) -> list[Pattern]:
+    """Bull and bear flags: a trend, a pullback under a falling line (bull) or
+    above a rising one (bear), and the break of that line.
+
+    Bull: in an uptrend (the top above a rising 50-candle EMA), a rise of at
+    least ``min_pole_atr`` ATR to a swing high (the pole),
+    then a pullback that keeps more than 1 - ``max_retrace`` of that rise and
+    makes no new high, with a falling line from the top across its lower highs
+    (2+ touches, no close above it until the last ``3 * pivot`` candles). A
+    close above it is the breakout; the target is the pole's height added to
+    the breakout level, and the flag's low is where the setup fails. A flag
+    whose breakout is more than ``6 * pivot`` candles old, or whose price is
+    back under the flag's low, is dropped.
+    """
+    n = len(df)
+    if n < 6 * pivot:
+        return []
+    a = float(atr(df).median())
+    out: list[Pattern] = []
+    poles: list[float] = []                       # pole size / price, per flag
+    for bull in (True, False):
+        sign = 1.0 if bull else -1.0
+        hi = (df["high"] if bull else -df["low"]).to_numpy(dtype=float)
+        lo = (df["low"] if bull else -df["high"]).to_numpy(dtype=float)
+        cl = (sign * df["close"]).to_numpy(dtype=float)
+        ema = (sign * df["close"]).ewm(span=50, adjust=False).mean().to_numpy()
+        f = _flag(hi, lo, cl, ema, pivot=pivot, tol=tol, atr_=a,
+                  min_pole_atr=min_pole_atr, max_retrace=max_retrace)
+        if f is None:
+            continue
+        top, anchor, slope = f["top"], f["anchor"], f["slope"]
+        p_top, p_anchor = sign * hi[top], sign * hi[anchor]
+        edge = sign * lo[f["flag_i"]]              # the flag's far side (fail level)
+        line = Line(RESISTANCE if bull else SUPPORT, top, anchor, p_top, p_anchor,
+                    f["touches"], anchor, 0.0, f["broke"])
+        flat = Line(SUPPORT if bull else RESISTANCE, f["flag_i"], f["flag_i"] + 1,
+                    edge, edge, 1, f["flag_i"], 0.0)
+        level_now = line.at(n - 1)
+        pole = f["pole"]
+        held = ""
+        for sl in supports or []:
+            if bull and sl.slope > 0 and abs(sl.at(f["flag_i"]) - edge) <= 2 * tol:
+                held = "; the pullback held the rising trendline"
+        note = (f"{'rise' if bull else 'fall'} of {pole / abs(sign * lo[f['pole_i']]) * 100:.1f}% "
+                f"before it, pullback gave back {f['retrace']:.0%}{held}")
+        poles.append(pole / abs(p_top))
+        if bull:
+            out.append(Pattern("Bull flag", "bullish",
+                               "broke up" if f["broke"] else "inside",
+                               upper=line, lower=flat, start=top,
+                               breakout_up=level_now, target_up=level_now + pole,
+                               breakout_down=edge, note=note))
+        else:
+            out.append(Pattern("Bear flag", "bearish",
+                               "broke down" if f["broke"] else "inside",
+                               upper=flat, lower=line, start=top,
+                               breakout_down=level_now, target_down=level_now - pole,
+                               breakout_up=edge, note=note))
+    # The same candles can read both ways: the bull flag's pullback is a
+    # "pole" for a bear flag. When the two overlap, the bigger move — the
+    # trend a trader would read — wins.
+    if len(out) == 2 and out[1].start >= out[0].start - 2 * pivot:
+        out = [out[int(np.argmax(poles))]]
+    return out
+
+
 def analyse(df: pd.DataFrame, *, pivot: int | None = None,
             tol_atr: float = 0.3) -> ChartAnalysis:
     """Trendlines, levels, Fibonacci and patterns for the candles in ``df``."""
@@ -355,6 +548,7 @@ def analyse(df: pd.DataFrame, *, pivot: int | None = None,
         if p:
             pats.append(p)
     pats += double_top_bottom(df, pivot=pivot, tol=tol * 1.5)
+    pats += flags(df, pivot=pivot, tol=tol, supports=sup)
     return ChartAnalysis(atr=a, tol=tol, pivot=pivot, supports=sup,
                          resistances=res, levels=levels(df, pivot=pivot, tol=tol),
                          fib=fibonacci(df), patterns=pats)
@@ -495,15 +689,30 @@ def price_action(df: pd.DataFrame, pivot: int | None = None) -> PriceAction:
     if len(his) >= 2 and len(los) >= 2:
         h1, h2 = df["high"].iloc[his[-2]], df["high"].iloc[his[-1]]
         l1, l2 = df["low"].iloc[los[-2]], df["low"].iloc[los[-1]]
-        hh, hl = h2 > h1, l2 > l1
+        # Within 0.3 ATR counts as equal: a low 0.2% under the last one is a
+        # retest that held, not a lower low.
+        tol = 0.3 * float(atr(df).median())
+
+        def step(new: float, old: float) -> int:
+            return 1 if new > old + tol else -1 if new < old - tol else 0
+
         structure, text = {
-            (True, True): ("uptrend", "Uptrend: higher highs and higher lows."),
-            (False, False): ("downtrend", "Downtrend: lower highs and lower lows."),
-            (False, True): ("squeeze", "Squeeze: lower highs but higher lows — "
-                                       "price is coiling, a breakout is building."),
-            (True, False): ("expanding", "Expanding: higher highs but lower lows — "
-                                         "swings are getting wider."),
-        }[(bool(hh), bool(hl))]
+            (1, 1): ("uptrend", "Uptrend: higher highs and higher lows."),
+            (1, 0): ("uptrend", "Uptrend: higher highs, and the last low held at the "
+                                "one before (a retest)."),
+            (0, 1): ("squeeze", "Rising lows under a flat top — pressure building "
+                                "under resistance."),
+            (-1, -1): ("downtrend", "Downtrend: lower highs and lower lows."),
+            (0, -1): ("downtrend", "Downtrend: lower lows, and the last high stalled "
+                                   "at the one before (a retest)."),
+            (-1, 0): ("squeeze", "Falling highs over a flat floor — pressure building "
+                                 "on support."),
+            (-1, 1): ("squeeze", "Squeeze: lower highs but higher lows — price is "
+                                 "coiling, a breakout is building."),
+            (1, -1): ("expanding", "Expanding: higher highs but lower lows — swings "
+                                   "are getting wider."),
+            (0, 0): ("range", "Range: highs and lows repeating at the same levels."),
+        }[(step(h2, h1), step(l2, l1))]
         notes.append(text)
 
     # Break of structure: a close past the last confirmed swing.

@@ -28,7 +28,7 @@ Then open http://localhost:8501 and pick a page in the sidebar.
 | BTC Strength | `/BTC_Strength` | Coins vs BTC or BTC.D on 1h–1M, plus each coin's trend |
 | Liquidation Heatmap | `/Liquidation_Heatmap` | Estimated liquidation zones, plus a short-term market read |
 | Chart Patterns | `/Chart_Patterns` | Auto-drawn lines, Fibonacci, patterns and daily order blocks on one chart |
-| Pattern Scanner | `/Pattern_Scanner` | Triangles and wedges across many coins and timeframes |
+| Pattern Scanner | `/Pattern_Scanner` | Triangles, wedges and flags across many coins and timeframes |
 | Alerts | `/Alerts` | Price, trendline and zone alerts you set, checked every minute |
 
 ---
@@ -158,7 +158,9 @@ bookmarked.
 - **Price action.** Recent swings are labelled on the candles: HH / LH for
   highs, HL / LL for lows. Under the chart, in plain words: the structure
   (uptrend = higher highs and higher lows, downtrend, squeeze = lower highs
-  but higher lows, expanding), a close past the last swing high or low
+  but higher lows, expanding, range; a swing within 0.3 ATR of the one before
+  counts as equal, so a retested low in an uptrend still reads as uptrend),
+  a close past the last swing high or low
   (break of structure), where price sits between the last swings, the last
   closed candle (strong body, long upper or lower wick, indecision), volume
   against its 20-candle average, and the change over the last 10 candles.
@@ -174,7 +176,22 @@ bookmarked.
 - **Patterns** between the best support and resistance lines: ascending,
   descending and symmetrical triangles, rising and falling wedges, channels,
   ranges and broadening shapes — plus double tops and bottoms with their
-  necklines. Each shows its status (inside / broke up / broke down) and
+  necklines. A double bottom must be the low of a fall: price came down into
+  the first bottom, and nothing just before it traded lower. Two equal lows
+  inside an uptrend are a retest (continuation), not a double bottom; double
+  tops are the mirror image.
+- **Bull and bear flags** — trend continuation. Bull: in an uptrend (the top
+  above a rising 50-candle EMA), a rise of at least 6 ATR (the pole), then a
+  pullback that gives back under 61.8% of it under a falling line through
+  its lower highs. The line is drawn the way a trader draws it as the chart
+  unfolds: from the top through lower swing highs well inside the pullback,
+  respected (no close above it yet), touching the most highs. A close above
+  it with the top plus two lower highs on the line is the breakout — but it
+  only counts once price clears the flag's top without closing back under
+  the line; a poke that falls back is a false breakout and the line is
+  redrawn above it. Target: the pole's height added to the breakout; the
+  flag's low is where it fails. Bear flags are the mirror image. On LTC 15m
+  (19–22 Sep) it finds both flags a trader drew, and their breakouts. Each shows its status (inside / broke up / broke down) and
   targets one pattern-height past the breakout.
 - **Daily order blocks** (purple zones, on every timeframe). Supply: the last
   up candle before a sharp daily drop that broke the recent low. Demand: the
@@ -200,9 +217,9 @@ right now?
 
 - Coins: the top 10–200 by market cap, or a saved watchlist.
 - Timeframes: 15m, 1h, 4h, 1d.
-- Patterns: by default ascending and descending triangles and falling and
-  rising wedges; double tops / bottoms, symmetrical triangles, channels and
-  ranges can be added.
+- Patterns: by default ascending and descending triangles, falling and
+  rising wedges, and bull and bear flags; double tops / bottoms, symmetrical
+  triangles, channels and ranges can be added.
 - Each row: coin, timeframe, pattern, a plain **setup line** ("Broke up,
   fresh; daily supply here", "Near breakout: 0.1% to the upper line",
   "Broke down, 3.7% past the line (late)"), price, the two lines with

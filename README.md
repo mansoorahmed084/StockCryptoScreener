@@ -64,7 +64,9 @@ Binance USDT perpetual (15m, 1h, 4h or 1d): support and resistance trendlines
 through swing lows and highs, flat levels, Fibonacci retracements and
 extensions of the biggest leg in view, and patterns between the best two lines
 (ascending / descending / symmetrical triangles, rising / falling wedges,
-channels, ranges, double tops and bottoms) with breakout levels and targets. A
+channels, ranges, double tops and bottoms) with breakout levels and targets,
+plus bull and bear flags — a trend, a pullback under a falling line, and the
+break of that line. A
 line broken in the last few candles stays on the chart, dotted, so fresh
 breakouts show. Daily order blocks are drawn as purple zones on every
 timeframe: supply is the last up candle before a sharp daily drop that broke
