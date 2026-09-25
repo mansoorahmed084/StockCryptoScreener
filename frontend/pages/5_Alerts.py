@@ -75,11 +75,12 @@ def new_alert_form(perps: dict[str, str], options: list[str]) -> None:
     conds = pa.CONDITIONS[kind]
     cond = c2.radio("Condition", conds, horizontal=True, key="na_cond",
                     format_func=lambda c: pa.CONDITION_TEXT[c])
+    tf = av.close_timeframe(c2, cond, key="na_tf")
     note = c2.text_input("Note (optional)", key="na_note")
     if c2.button("Add alert", type="primary"):
         try:
             alert = pa.Alert(coin=coin, symbol=symbol, kind=kind, condition=cond,
-                             note=note, **spec)
+                             timeframe=tf, note=note, **spec)
         except ValueError as exc:
             c2.error(str(exc))
         else:
@@ -164,8 +165,10 @@ def main():
 
     st.title("Alerts")
     st.caption("Get told when price reaches a level, a trendline or a zone. Each alert "
-               "fires once, on a 1-minute candle (wicks count; line breaks need a "
-               "close), then waits in Fired where you can re-arm it.")
+               "fires once, then waits in Fired where you can re-arm it. \"Goes "
+               "above / below\" and touches fire on any 1-minute wick; \"closes "
+               "above / below\" waits for a candle of the size you pick (1m to 1d) "
+               "to close there.")
     c1, c2 = st.columns([1, 5])
     if c1.button("Check now"):
         fired = pv.get_service().check_alerts()

@@ -60,6 +60,57 @@ def test_candles_before_the_alert_was_set_are_ignored():
     assert pa.already_met(_alert(kind="price", condition="above", level=105), 106)
 
 
+def test_close_above_waits_for_a_closed_candle_of_its_timeframe():
+    q = 15 * MIN
+    idx = pd.to_datetime([T0, T0 + q], unit="ms", utc=True)
+    c = pd.DataFrame({"open": [100, 101], "high": [106, 107], "low": [99, 100],
+                      "close": [101, 105.5], "volume": [1, 1]}, index=idx)
+    a = _alert(kind="price", condition="close_above", level=105, timeframe="15m",
+               created_ms=T0 + 5 * MIN)
+    assert a.describe() == "BTC closes above price 105.00 on a 15m close"
+    # The wick to 106 in the first candle closed at 101: no. The second closes
+    # at 105.5 but is still forming at T0 + 20 min: no.
+    assert pa.evaluate(a, c, T0 + 20 * MIN) is None
+    hit = pa.evaluate(a, c, T0 + 2 * q)
+    assert hit[0] == c.index[1] and hit[1] == 105.5
+    below = _alert(kind="price", condition="close_below", level=100.5, timeframe="15m")
+    assert pa.evaluate(below, c, T0 + 2 * q) is None
+    # Wick conditions keep 1-minute candles whatever timeframe is passed.
+    assert _alert(kind="price", condition="above", level=1, timeframe="4h").timeframe == "1m"
+    with pytest.raises(ValueError):
+        _alert(kind="price", condition="close_above", level=1, timeframe="2h")
+
+
+def test_check_all_fetches_each_timeframe_and_old_dbs_upgrade(tmp_path):
+    import sqlite3
+    path = tmp_path / "alerts.db"
+    con = sqlite3.connect(path)          # the table as the previous version made it
+    con.execute("CREATE TABLE alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, coin TEXT, "
+                "symbol TEXT, kind TEXT, condition TEXT, level REAL, t1 REAL, p1 REAL, "
+                "t2 REAL, p2 REAL, low REAL, high REAL, note TEXT, created_ms REAL, "
+                "last_checked_ms REAL, status TEXT, triggered_ms REAL, trigger_price REAL)")
+    con.execute("INSERT INTO alerts (coin, symbol, kind, condition, level, note, "
+                "created_ms, status) VALUES ('BTC', 'BTCUSDT', 'price', 'above', 1e9, '', ?, "
+                "'active')", (T0,))
+    con.commit()
+    con.close()
+    store = pa.AlertStore(path)
+    assert store.list()[0].timeframe == "1m"
+    store.add(_alert(kind="price", condition="close_above", level=105, timeframe="15m"))
+    asked = []
+
+    def fetch(symbol, tf, n):
+        asked.append(tf)
+        q = 15 * MIN if tf == "15m" else MIN
+        idx = pd.to_datetime([T0, T0 + q], unit="ms", utc=True)
+        return pd.DataFrame({"open": 100, "high": 106, "low": 99, "close": [106, 100],
+                             "volume": 1}, index=idx)
+
+    fired = pa.check_all(store, fetch, now_ms=T0 + 30 * MIN)
+    assert sorted(asked) == ["15m", "1m"]
+    assert [a.timeframe for a in fired] == ["15m"]
+
+
 def test_store_check_all_fires_once_and_rearms(tmp_path):
     store = pa.AlertStore(tmp_path / "alerts.db")
     a_id = store.add(_alert(kind="price", condition="above", level=103, note="breakout"))

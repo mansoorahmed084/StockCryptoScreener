@@ -66,6 +66,15 @@ def sidebar_watch() -> None:
         _watch()
 
 
+def close_timeframe(where, cond: str, key: str, default: str = "15m") -> str:
+    """For a "closes above / below" condition, ask which candle has to close."""
+    if cond not in pa.CLOSES:
+        return "1m"
+    tfs = list(pa.TIMEFRAMES)
+    return where.radio("On a close of the", tfs, index=tfs.index(default), horizontal=True,
+                       key=key, format_func=lambda t: f"{t} candle")
+
+
 def _add(alert: pa.Alert, price: float) -> None:
     if pa.already_met(alert, price):
         st.warning(f"Price {fmt(price)} already meets this — it would fire at once. "
@@ -113,11 +122,14 @@ def alert_box(coin: str, symbol: str, df: pd.DataFrame, a: pt.ChartAnalysis,
         cond = st.radio("Condition", conds, horizontal=True, key=f"{key}_al_c",
                         index=conds.index(default) if default in conds else 0,
                         format_func=lambda c: pa.CONDITION_TEXT[c])
+        step = int((df.index[-1] - df.index[-2]).total_seconds() // 60) if n > 1 else 0
+        chart_tf = next((t for t, m in pa.TIMEFRAMES.items() if m == step), "15m")
+        tf = close_timeframe(st, cond, key=f"{key}_al_tf", default=chart_tf)
         note = st.text_input("Note (optional)", key=f"{key}_al_n",
                              placeholder="e.g. triangle breakout")
         if st.button("Add alert", key=f"{key}_al_add"):
             coin_ = coin or symbol.removesuffix("USDT")
             _add(pa.Alert(coin=coin_, symbol=symbol, kind=kind, condition=cond,
-                          note=note, **spec), price)
-        st.caption("Checked on 1-minute candles every minute while the dashboard is "
-                   "open — manage them on the Alerts page.")
+                          timeframe=tf, note=note, **spec), price)
+        st.caption("Checked every minute while the dashboard is open — manage them "
+                   "on the Alerts page.")

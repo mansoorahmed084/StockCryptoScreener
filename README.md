@@ -83,8 +83,10 @@ the full chart page. Every chart also labels price action: HH / HL / LH / LL
 swings, plus notes on structure, breaks, the last candle and volume.
 
 An **Alerts** page lets you set price, trendline and zone alerts (or set them
-in one click from the 🔔 box under any chart). They are checked on 1-minute
-candles every minute while any page is open, and pop up in the dashboard, as
+in one click from the 🔔 box under any chart). They are checked every minute
+while any page is open: "goes above / below" fires on any 1-minute wick,
+"closes above / below" waits for a closed candle of the size you pick (1m to
+1d, e.g. a 15m close). Hits pop up in the dashboard, as
 a Windows notification, and on Telegram if `.env` has a bot token. To watch
 them with the dashboard closed:
 

@@ -7,6 +7,8 @@ quick spike through a level is not missed between checks):
   price  above   the high reaches the level
          below   the low reaches the level
          touch   the candle trades through the level, from either side
+         close_above / close_below   a CLOSED candle of the alert's timeframe
+                 (1m .. 1d, e.g. a 15m close) closes above / below the level
   line   touch   the candle trades through the line (a straight line through
                  two (time, price) points, extended in time)
          break_up / break_down   a CLOSED candle closes above / below the line
@@ -30,13 +32,18 @@ import pandas as pd
 DEFAULT_DB = "data_cache/alerts.db"
 PRICE, LINE, ZONE = "price", "line", "zone"
 CONDITIONS = {
-    PRICE: ("above", "below", "touch"),
+    PRICE: ("above", "below", "touch", "close_above", "close_below"),
     LINE: ("touch", "break_up", "break_down"),
     ZONE: ("enter",),
 }
 CONDITION_TEXT = {"above": "goes above", "below": "goes below", "touch": "touches",
+                  "close_above": "closes above", "close_below": "closes below",
                   "break_up": "closes above", "break_down": "closes below",
                   "enter": "enters"}
+# Conditions that wait for a candle to close; their candle size is the alert's
+# timeframe. Wicks and zones always use 1-minute candles.
+CLOSES = ("close_above", "close_below", "break_up", "break_down")
+TIMEFRAMES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
 ACTIVE, TRIGGERED = "active", "triggered"
 MINUTE_MS = 60_000
 
@@ -55,6 +62,7 @@ class Alert:
     low: float | None = None          # zone
     high: float | None = None
     note: str = ""
+    timeframe: str = "1m"             # candle whose close counts (CLOSES only)
     created_ms: int = field(default_factory=lambda: int(time.time() * 1000))
     last_checked_ms: int | None = None
     status: str = ACTIVE
@@ -73,6 +81,14 @@ class Alert:
             raise ValueError("a line needs two different times")
         if self.kind == ZONE and (self.low is None or self.high is None):
             raise ValueError("a zone alert needs low and high")
+        if self.timeframe not in TIMEFRAMES:
+            raise ValueError(f"timeframe must be one of {list(TIMEFRAMES)}")
+        if self.condition not in CLOSES:
+            self.timeframe = "1m"
+
+    @property
+    def bar_ms(self) -> int:
+        return TIMEFRAMES[self.timeframe] * MINUTE_MS
 
     def line_at(self, t_ms: float) -> float:
         return self.p1 + (self.p2 - self.p1) * (t_ms - self.t1) / (self.t2 - self.t1)
@@ -91,6 +107,8 @@ class Alert:
                 LINE: f"line (now {_fmt(self.target_now())})",
                 ZONE: f"zone {_fmt(self.low)}–{_fmt(self.high)}"}[self.kind]
         text = f"{self.coin} {CONDITION_TEXT[self.condition]} {what}"
+        if self.condition in CLOSES:
+            text += f" on a {self.timeframe} close"
         return f"{text} · {self.note}" if self.note else text
 
 
@@ -102,8 +120,9 @@ def _fmt(v: float | None) -> str:
 
 def evaluate(alert: Alert, candles: pd.DataFrame,
              now_ms: int | None = None) -> tuple[pd.Timestamp, float] | None:
-    """First 1-minute candle at or after the alert's last check (or creation)
-    that meets the condition: (candle time, price at the trigger). None if not.
+    """First candle (of the alert's timeframe) at or after the alert's last
+    check (or creation) that meets the condition: (candle time, price at the
+    trigger). None if not.
 
     ``candles`` are oldest first, indexed by open time (UTC). The last one may
     still be forming: it counts for touches, never for closes.
@@ -111,12 +130,13 @@ def evaluate(alert: Alert, candles: pd.DataFrame,
     if candles.empty:
         return None
     since = alert.last_checked_ms or alert.created_ms
-    start = pd.Timestamp(since, unit="ms", tz="UTC").floor("min")   # the candle it sat in
+    bar = alert.bar_ms
+    start = pd.Timestamp(since - since % bar, unit="ms", tz="UTC")   # the candle it sat in
     df = candles[candles.index >= start]
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     for ts, c in df.iterrows():
         t = ts.value // 1_000_000                              # open time, ms
-        closed = t + MINUTE_MS <= now_ms
+        closed = t + bar <= now_ms
         hi, lo, cl = float(c["high"]), float(c["low"]), float(c["close"])
         if alert.kind == PRICE:
             lv = float(alert.level)
@@ -126,8 +146,12 @@ def evaluate(alert: Alert, candles: pd.DataFrame,
                 return ts, lv
             if alert.condition == "touch" and lo <= lv <= hi:
                 return ts, lv
+            if alert.condition == "close_above" and closed and cl > lv:
+                return ts, cl
+            if alert.condition == "close_below" and closed and cl < lv:
+                return ts, cl
         elif alert.kind == LINE:
-            lv = alert.line_at(t + MINUTE_MS / 2)
+            lv = alert.line_at(t + bar / 2)
             if alert.condition == "touch" and lo <= lv <= hi:
                 return ts, lv
             if alert.condition == "break_up" and closed and cl > lv:
@@ -145,12 +169,17 @@ def already_met(alert: Alert, price: float) -> bool:
     target = alert.target_now()
     if alert.kind == ZONE:
         return alert.low <= price <= alert.high
-    return (alert.condition in ("above", "break_up") and price >= target) or \
-           (alert.condition in ("below", "break_down") and price <= target)
+    return (alert.condition in ("above", "close_above", "break_up") and price >= target) or \
+           (alert.condition in ("below", "close_below", "break_down") and price <= target)
 
 
 # -- storage --------------------------------------------------------------------
 _COLUMNS = [f for f in Alert.__dataclass_fields__ if f != "id"]
+_TEXT = ("coin", "symbol", "kind", "condition", "note", "timeframe", "status")
+
+
+def _sql_type(column: str) -> str:
+    return "TEXT" if column in _TEXT else "REAL"
 
 
 class AlertStore:
@@ -158,10 +187,14 @@ class AlertStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as con:
-            cols = ", ".join(f"{c} {'TEXT' if c in ('coin', 'symbol', 'kind', 'condition', 'note', 'status') else 'REAL'}"
-                             for c in _COLUMNS)
+            cols = ", ".join(f"{c} {_sql_type(c)}" for c in _COLUMNS)
             con.execute(f"CREATE TABLE IF NOT EXISTS alerts "
                         f"(id INTEGER PRIMARY KEY AUTOINCREMENT, {cols})")
+            have = {r["name"] for r in con.execute("PRAGMA table_info(alerts)")}
+            for c in _COLUMNS:                  # alerts.db from an older version
+                if c not in have:
+                    default = " DEFAULT '1m'" if c == "timeframe" else ""
+                    con.execute(f"ALTER TABLE alerts ADD COLUMN {c} {_sql_type(c)}{default}")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -181,6 +214,7 @@ class AlertStore:
         for k in ("t1", "t2", "created_ms", "last_checked_ms", "triggered_ms"):
             if d.get(k) is not None:
                 d[k] = int(d[k])
+        d["timeframe"] = d.get("timeframe") or "1m"
         return Alert(**d)
 
     def add(self, alert: Alert) -> int:
@@ -238,19 +272,20 @@ def check_all(store: AlertStore, fetch: Callable[[str, str, int], pd.DataFrame],
               now_ms: int | None = None) -> list[Alert]:
     """Check every active alert once; returns the ones that fired now.
 
-    ``fetch(symbol, "1m", limit)`` returns 1-minute candles, oldest first.
+    ``fetch(symbol, timeframe, limit)`` returns candles, oldest first; one
+    call per symbol and timeframe in use (usually just "1m").
     """
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     active = store.list(ACTIVE)
-    by_symbol: dict[str, list[Alert]] = {}
+    groups: dict[tuple[str, str], list[Alert]] = {}
     for a in active:
-        by_symbol.setdefault(a.symbol, []).append(a)
+        groups.setdefault((a.symbol, a.timeframe), []).append(a)
     fired: list[Alert] = []
-    for symbol, alerts in by_symbol.items():
+    for (symbol, tf), alerts in groups.items():
         oldest = min(a.last_checked_ms or a.created_ms for a in alerts)
-        limit = int(min(1000, max(3, (now_ms - oldest) // MINUTE_MS + 3)))
+        limit = int(min(1000, max(3, (now_ms - oldest) // alerts[0].bar_ms + 3)))
         try:
-            candles = fetch(symbol, "1m", limit)
+            candles = fetch(symbol, tf, limit)
         except Exception:
             continue                          # try again next round
         for a in alerts:

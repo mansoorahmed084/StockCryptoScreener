@@ -244,8 +244,13 @@ right now?
 | Type | Conditions | Fires when |
 |---|---|---|
 | Price | goes above / goes below / touches | a 1-minute candle's high / low reaches the level |
-| Trendline | touches / closes above / closes below | a candle trades through the line, or a closed candle closes past it |
+| Price | closes above / closes below | a closed candle of the size you pick (1m, 5m, 15m, 1h, 4h, 1d) closes past the level |
+| Trendline | touches / closes above / closes below | a candle trades through the line, or a closed candle (size you pick) closes past it |
 | Zone | enters | a candle trades inside the zone (e.g. a purple order block) |
+
+A close alert ignores wicks and the candle still forming: "BTC closes above
+84,820 on a 15m close" fires only once a 15m candle has closed above 84,820.
+The 🔔 box under a chart picks that chart's timeframe by default.
 
 A trendline is a straight line through two (time, price) points, extended in
 time, so its level moves with the clock. Wicks count for touches, so a quick
