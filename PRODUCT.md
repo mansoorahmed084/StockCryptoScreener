@@ -368,5 +368,6 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `6c79d30` | Scanner: chart below the table on a ticked row, coin / 📈 links to the full chart; price action (HH / HL / LH / LL labels and notes) on every chart |
 | `e18a854` | Price, trendline and zone alerts: Alerts page, 🔔 box under every chart, checks on every page, Windows / Telegram / terminal watcher |
 | `b101f13` | Bull and bear flags (pole, pullback under a falling line, its break) in charts and the scanner; double tops / bottoms need the move into them; equal swings read as a retest; pattern analysis 2× faster |
+| `bb26488` | Close alerts: "closes above / below" a price on a candle size you pick (1m–1d, e.g. a 15m close); trendline breaks take the same choice |
 
-Tests: 89 at the start of the day, 127 at the end, all passing.
+Tests: 89 at the start of the day, 129 at the end, all passing.
