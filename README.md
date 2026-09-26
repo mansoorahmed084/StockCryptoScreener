@@ -94,6 +94,16 @@ them with the dashboard closed:
 .venv/Scripts/python.exe -m backend.cli alerts
 ```
 
+A **trade journal** in [journal/TRADE_JOURNAL.md](journal/TRADE_JOURNAL.md)
+tracks every buy setup the scans called, as paper trades ($100 each, no
+fees), and notes what worked and what didn't. The setups are rows in
+`journal/trades.csv`. This command replays them on Binance candles and
+refreshes the tables:
+
+```bash
+.venv/Scripts/python.exe -m backend.cli journal
+```
+
 Run the API (Phase 4):
 
 ```bash

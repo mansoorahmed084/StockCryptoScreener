@@ -160,6 +160,25 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         _time.sleep(args.every)
 
 
+def cmd_journal(args: argparse.Namespace) -> int:
+    """Replay the paper trades in journal/trades.csv and refresh the journal."""
+    import time as _time
+
+    from backend import trade_journal as tj
+    from backend.service import ScreenerService
+
+    svc = ScreenerService(load_config(args.config), refresh=False)
+    fut = svc.futures()
+    trades = tj.load(args.csv)
+    now = int(_time.time() * 1000)
+    outcomes = tj.run(trades, fut.klines, fut.perpetuals(), now)
+    blocks = tj.render(trades, outcomes, now)
+    tj.write_markdown(args.md, blocks)
+    print(blocks["SUMMARY"])
+    print(f"\nupdated {args.md}")
+    return 0
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     from backend.service import ScreenerService
     from backend.signals.backtest import backtest_signal
@@ -224,6 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--every", type=int, default=60, help="seconds between checks")
     a.add_argument("--once", action="store_true", help="check once and exit")
     a.set_defaults(func=cmd_alerts)
+
+    j = sub.add_parser("journal", help="replay the paper trades and refresh the journal")
+    j.add_argument("--csv", default="journal/trades.csv")
+    j.add_argument("--md", default="journal/TRADE_JOURNAL.md")
+    j.set_defaults(func=cmd_journal)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)

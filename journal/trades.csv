@@ -1,0 +1,33 @@
+id,day,list,coin,tf,setup,entry_rule,trigger,t1,p1,t2,p2,from_utc,entry_price,stop,target,note
+1,2026-09-24,24 Sep 15:10 best buys,ENA,1h,Bull flag,now,,,,,,2026-09-24 15:15,0.216,0.1977,0.311,broke up
+2,2026-09-24,24 Sep 15:10 best buys,ETC,4h,Ascending triangle,now,,,,,,2026-09-24 15:15,9.916,9.053,12.04,broke up; 15m double bottom too
+3,2026-09-24,24 Sep 15:10 best buys,KITE,1h,Bull flag,now,,,,,,2026-09-24 15:15,0.1326,0.1286,0.1619,15m and 1h flags broke up
+4,2026-09-24,24 Sep 15:10 best buys,JUP,1h,Ascending triangle,close_above,0.301,,,,,2026-09-24 15:15,,0.2742,0.3427,1h + 4h flags and a 1h triangle at the line
+5,2026-09-24,24 Sep 15:10 best buys,KAS,4h,Bull flag,now,,,,,,2026-09-24 15:15,0.03944,0.0377,0.05276,at the line; 4h trend mixed
+6,2026-09-25,25 Sep 10:15 morning,HBAR,1h,Bull flag,close_above,0.0931,,,,,2026-09-25 10:20,,0.0881,0.118,1h + 15m flags at the line
+7,2026-09-25,25 Sep 10:15 morning,INJ,1h,Bull flag,now,,,,,,2026-09-25 10:20,8.041,7.456,10.6,broke up; 15m double bottom forming
+8,2026-09-25,25 Sep 10:15 morning,BONK,4h,Ascending triangle,close_above,0.003692,,,,,2026-09-25 10:20,,0.003461,0.004917,4h triangle at the line + 15m flag
+9,2026-09-25,25 Sep 10:15 morning,ENA,1h,Ascending triangle,close_above,0.2261,,,,,2026-09-25 10:20,,0.2079,0.2841,15m flag + 1h triangle
+10,2026-09-25,25 Sep 10:15 morning,VVV,4h,Bull flag,now,,,,,,2026-09-25 10:20,32.06,28.38,44.64,4h + 1h flags broke up; wide stop
+11,2026-09-25,25 Sep 10:15 morning,LTC,1h,Bull flag,close_above,70.82,,,,,2026-09-25 10:20,,69.91,87.34,15m flag broke up; very tight stop
+12,2026-09-25,25 Sep 11:45 buy now,BONK,4h,Ascending triangle,now,,,,,,2026-09-25 11:50,0.003749,0.003461,0.004917,broke up
+13,2026-09-25,25 Sep 11:45 buy now,ENS,4h,Ascending triangle,now,,,,,,2026-09-25 11:50,7.242,6.711,8.147,broke up; daily demand just below
+14,2026-09-25,25 Sep 11:45 buy now,DASH,1h,Bull flag,now,,,,,,2026-09-25 11:50,64.79,61.67,71.25,flag + triangle broke up
+15,2026-09-25,25 Sep 11:45 buy now,ARB,1h,Ascending triangle,now,,,,,,2026-09-25 11:50,0.2245,0.2165,0.2366,broke up; 15m double bottom
+16,2026-09-25,25 Sep 11:45 buy now,VVV,1h,Bull flag,now,,,,,,2026-09-25 11:50,31.37,28.38,44.61,broke up; bearish 15m pattern too
+17,2026-09-25,25 Sep 11:45 about to break,XLM,15m,Ascending triangle,close_above,0.2235,,,,,2026-09-25 11:50,,0.2189,0.2508,broke before its alert was set
+18,2026-09-25,25 Sep 12:05 alerts,BNB,1h,Bull flag,close_above,,1790002800000,808.23,1790136000000,799.98,2026-09-25 12:04,,756.89,891.38,alert on the falling flag line
+19,2026-09-25,25 Sep 12:05 alerts,KITE,1h,Bull flag,close_above,,1790128800000,0.14181,1790276400000,0.1346,2026-09-25 12:04,,0.12502,0.16641,alert on the falling flag line
+20,2026-09-25,25 Sep 12:05 alerts,LDO,4h,Ascending triangle,close_above,0.461966,,,,,2026-09-25 12:04,,0.43095,0.5783,line + tolerance (price was on the line)
+21,2026-09-25,25 Sep 12:05 alerts,HYPE,1h,Bull flag,close_above,,1790110800000,97.835,1790330400000,94.342,2026-09-25 12:04,,89.828,111.64,alert on the falling flag line
+22,2026-09-25,25 Sep 12:05 alerts,INJ,4h,Double bottom,close_above,8.378,,,,,2026-09-25 12:04,,,9.3,neckline; no stop given
+23,2026-09-25,25 Sep 12:05 alerts,LTC,1h,Bull flag,close_above,70.5538,,,,,2026-09-25 12:04,,69.91,86.8943,line + tolerance (price was on the line)
+24,2026-09-25,25 Sep 12:05 alerts,ETH,1h,Bull flag,close_above,,1790020800000,2806.76,1790136000000,2787.82,2026-09-25 12:04,,2626.01,3204.44,alert on the falling flag line
+25,2026-09-26,26 Sep 14:00 buy now,AVAX,1h,Bull flag,now,,,,,,2026-09-26 14:05,10.83,9.972,15.27,broke up
+26,2026-09-26,26 Sep 14:00 buy now,BONK,1h,Bull flag,now,,,,,,2026-09-26 14:05,0.003699,0.003378,0.00542,15m + 1h flags broke up; 4h flag at the line
+27,2026-09-26,26 Sep 14:00 buy now,GRAM,1h,Bull flag,now,,,,,,2026-09-26 14:05,1.479,1.386,1.664,broke up; 4h triangle 0.5% away
+28,2026-09-26,26 Sep 14:00 about to break,SUI,1h,Bull flag,close_above,,1790377200000,1.2177,1790420400000,1.1918,2026-09-26 14:05,,1.1499,1.418,falling flag line
+29,2026-09-26,26 Sep 14:00 about to break,SOL,1h,Bull flag,close_above,,1790366400000,122.93,1790424000000,121.53,2026-09-26 14:05,,119.78,131.9,falling flag line; tight stop
+30,2026-09-26,26 Sep 14:00 about to break,HBAR,1h,Bull flag,close_above,,1790128800000,0.10135,1790377200000,0.09579,2026-09-26 14:05,,0.08808,0.124,falling flag line
+31,2026-09-26,26 Sep 14:00 about to break,SHIB,1h,Bull flag,close_above,,1790049600000,0.006276,1790420400000,0.005957,2026-09-26 14:05,,0.005534,0.007484,falling flag line
+32,2026-09-26,26 Sep 14:00 about to break,GRT,1h,Bull flag,close_above,,1790366400000,0.02886,1790424000000,0.02847,2026-09-26 14:05,,0.02719,0.03286,falling flag line
