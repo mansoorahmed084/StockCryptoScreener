@@ -369,5 +369,6 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `e18a854` | Price, trendline and zone alerts: Alerts page, 🔔 box under every chart, checks on every page, Windows / Telegram / terminal watcher |
 | `b101f13` | Bull and bear flags (pole, pullback under a falling line, its break) in charts and the scanner; double tops / bottoms need the move into them; equal swings read as a retest; pattern analysis 2× faster |
 | `bb26488` | Close alerts: "closes above / below" a price on a candle size you pick (1m–1d, e.g. a 15m close); trendline breaks take the same choice |
+| `002d311` | Trade journal (`journal/TRADE_JOURNAL.md`): every buy setup the scans called, replayed as a paper trade, with what worked and what didn't; `python -m backend.cli journal` refreshes it |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
