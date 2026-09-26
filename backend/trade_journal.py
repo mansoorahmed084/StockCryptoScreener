@@ -292,4 +292,4 @@ def write_markdown(path: str | Path, blocks: dict[str, str]) -> None:
         if not pat.search(text):
             raise ValueError(f"{path} has no AUTO:{name} markers")
         text = pat.sub(lambda m: m.group(1) + body + "\n" + m.group(2), text)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")    # LF on Windows too

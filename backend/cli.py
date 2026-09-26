@@ -179,6 +179,51 @@ def cmd_journal(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setups(args: argparse.Namespace) -> int:
+    """Scan the top coins, rank the buy setups, and optionally journal the picks."""
+    from backend.screener import buy_setups as bs
+    from backend.screener import pattern_scan as ps
+    from backend.service import ScreenerService
+
+    svc = ScreenerService(load_config(args.config), refresh=False)
+    fut = svc.futures()
+    coins = svc.liquidation_coins(args.top)
+    scan = ps.scan(fut.klines, coins, ["15m", "1h", "4h", "1d"],
+                   patterns=ps.BULLISH + ps.BEARISH)
+    trends = {}
+    for sym in scan["symbol"].unique():
+        try:
+            trends[sym] = (bs.trend(fut.klines(sym, "1d", 300)["close"]),
+                           bs.trend(fut.klines(sym, "4h", 300)["close"]))
+        except Exception:
+            trends[sym] = ("?", "?")
+    ranked = bs.rank(scan, trends)
+
+    taken: set[tuple[str, str, str]] = set()
+    trades = None
+    if args.journal:
+        trades = pd.read_csv(args.csv)
+        recent = pd.to_datetime(trades["day"]) >= pd.Timestamp.now() - pd.Timedelta(days=args.skip_days)
+        taken = set(zip(trades.loc[recent, "coin"], trades.loc[recent, "tf"],
+                        trades.loc[recent, "setup"]))
+    picks = bs.pick(ranked, args.n, taken)
+    cols = ["kind", "score", "coin", "timeframe", "pattern", "status", "price", "up_level",
+            "down_level", "target_up", "rr", "zone_above_pct", "setup"]
+    print(f"{len(scan)} patterns on {scan['coin'].nunique()} coins; "
+          f"{len(ranked)} live buy setups; {len(picks)} pass every rule:\n")
+    print(picks[cols].to_string(index=False, float_format=lambda v: f"{v:.5g}"))
+    if args.journal and len(picks):
+        now = pd.Timestamp.now(tz="UTC").floor("min")
+        rows = bs.journal_rows(picks, fut.klines, first_id=int(trades["id"].max()) + 1,
+                               day=now.strftime("%Y-%m-%d"),
+                               when_utc=now.strftime("%Y-%m-%d %H:%M"),
+                               list_name=now.strftime("%d %b %H:%M"))
+        pd.concat([trades, pd.DataFrame(rows)], ignore_index=True) \
+            .to_csv(args.csv, index=False, lineterminator="\n")
+        print(f"\nadded {len(rows)} trade(s) to {args.csv}")
+    return 0
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     from backend.service import ScreenerService
     from backend.signals.backtest import backtest_signal
@@ -248,6 +293,15 @@ def main(argv: list[str] | None = None) -> int:
     j.add_argument("--csv", default="journal/trades.csv")
     j.add_argument("--md", default="journal/TRADE_JOURNAL.md")
     j.set_defaults(func=cmd_journal)
+
+    u = sub.add_parser("setups", help="rank today's buy setups; --journal adds the picks")
+    u.add_argument("--top", type=int, default=100, help="coins by market cap")
+    u.add_argument("--n", type=int, default=5, help="picks of each kind")
+    u.add_argument("--journal", action="store_true", help="append the picks to --csv")
+    u.add_argument("--csv", default="journal/trades.csv")
+    u.add_argument("--skip-days", type=int, default=3,
+                   help="skip a coin/timeframe/pattern journaled this many days back")
+    u.set_defaults(func=cmd_setups)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)

@@ -104,6 +104,16 @@ refreshes the tables:
 .venv/Scripts/python.exe -m backend.cli journal
 ```
 
+New setups come from a fixed set of rules, so the journal tests the scanner
+itself (see `backend/screener/buy_setups.py`). The rules are: 1h / 4h / 1d
+only, daily and 4h trend up, no bearish setup on the coin, 5% of room to
+daily supply, and reward at least 2× risk.
+
+```bash
+.venv/Scripts/python.exe -m backend.cli setups            # show today's picks
+.venv/Scripts/python.exe -m backend.cli setups --journal  # add them to trades.csv
+```
+
 Run the API (Phase 4):
 
 ```bash
