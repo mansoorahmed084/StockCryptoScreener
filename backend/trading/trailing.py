@@ -14,6 +14,7 @@ the trail can only be as fine as ``trade watch --every``.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,7 @@ class Settings:
     min_step_r: float = 0.25          # move only when the stop gains at least this much
     breakeven_buffer_pct: float = 0.2  # breakeven = entry + this % (covers both fees)
     min_gap_pct: float = 0.2          # never put the stop closer than this to the price
+    candle_buffer_pct: float = 0.1    # candle trail: this % below the low (above the high)
 
     @classmethod
     def from_config(cls, raw: dict[str, Any] | None) -> "Settings":
@@ -58,6 +60,44 @@ def next_stop(side: str, *, entry: float, initial_stop: float, best: float, pric
     return new
 
 
+def next_stop_pct(side: str, *, pct: float, best: float, price: float,
+                  current_stop: float | None, s: Settings) -> float | None:
+    """Percent trail (positions adopted with ``trade adopt``): the stop sits ``pct``%
+    behind the best price from the first round, and moves in steps of a quarter
+    of that distance."""
+    if pct <= 0:
+        return None
+    sign = 1 if side == risk.LONG else -1
+    new = best * (1 - sign * pct / 100)
+    gap = price * (1 - sign * s.min_gap_pct / 100)
+    new = min(new, gap) if sign > 0 else max(new, gap)
+    if current_stop and sign * (new - current_stop) < best * pct / 100 * s.min_step_r:
+        return None
+    return new
+
+
+CANDLE_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
+
+
+def last_closed(candles: list[dict], minutes: int, now_ms: int) -> dict | None:
+    closed = [c for c in candles if c["time"] + minutes * 60_000 <= now_ms]
+    return closed[-1] if closed else None
+
+
+def next_stop_candle(side: str, *, candle: dict, price: float, current_stop: float | None,
+                     s: Settings) -> float | None:
+    """Candle trail: a notch under the last closed candle's low (over its high for
+    a short). Moves only in the trade's favour, never onto the price."""
+    sign = 1 if side == risk.LONG else -1
+    edge = float(candle["low"] if sign > 0 else candle["high"])
+    new = edge * (1 - sign * s.candle_buffer_pct / 100)
+    gap = price * (1 - sign * s.min_gap_pct / 100)
+    new = min(new, gap) if sign > 0 else max(new, gap)
+    if current_stop and sign * (new - current_stop) <= 0:
+        return None
+    return new
+
+
 def run(mgr: TradeManager, s: Settings) -> list[str]:
     """Move the stop of every trailed open trade that has earned it."""
     if not s.enabled:
@@ -71,17 +111,29 @@ def run(mgr: TradeManager, s: Settings) -> list[str]:
         pair = t["pair"]
         side = position_side(pos)
         entry = _f(pos.get("avg_price")) or _f(t["entry"])
+        pct = _f(t["trail_pct"])
+        tf = t["trail_candle"]
         initial = _f(t["initial_stop"]) or _f(t["stop_loss"])
         price = mgr.last_price(pair)
-        if not (entry and initial and price):
+        if not (entry and price and (initial or pct or tf)):
             continue
         prev_best = _f(t["best_price"]) or entry
         best = max(prev_best, price) if side == risk.LONG else min(prev_best, price)
-        if best != _f(t["best_price"]) or not _f(t["initial_stop"]):
-            mgr.store.update_trade(t["id"], best_price=best, initial_stop=initial)
+        if best != _f(t["best_price"]) or (initial and not _f(t["initial_stop"])):
+            mgr.store.update_trade(t["id"], best_price=best, initial_stop=initial or None)
         current = _f(pos.get("stop_loss_trigger")) or None
-        new = next_stop(side, entry=entry, initial_stop=initial, best=best, price=price,
-                        current_stop=current, s=s)
+        if tf:
+            minutes = CANDLE_MINUTES[tf]
+            candle = last_closed(mgr.client.candles(pair, minutes, 6 * minutes * 60),
+                                 minutes, int(time.time() * 1000))
+            if candle is None:
+                continue
+            new = next_stop_candle(side, candle=candle, price=price, current_stop=current, s=s)
+        elif pct:
+            new = next_stop_pct(side, pct=pct, best=best, price=price, current_stop=current, s=s)
+        else:
+            new = next_stop(side, entry=entry, initial_stop=initial, best=best, price=price,
+                            current_stop=current, s=s)
         if new is None:
             continue
         new = risk.round_step(new, mgr.instrument(pair).price_step,

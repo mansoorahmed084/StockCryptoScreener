@@ -367,6 +367,18 @@ of at least 0.25R. The target stays in place.
   CoinDCX still shows no stop, the old one is put back.
 - `trade watch --dry-run` shows the moves it would make and sends nothing.
 
+Two more ways to trail, set per trade:
+- **Candle:** a notch (0.1%, `candle_buffer_pct`) under the low of the last
+  **closed CoinDCX** futures candle (1m, 5m, 15m or 1h; the one still forming
+  is ignored) — over its high for a short. `--trail-candle 15m`.
+- **Percent:** a fixed % behind the best price. `--trail-pct 1.5`.
+
+`trade trail-set PAIR --trail-candle 15m` (or `--trail-pct X`) switches an
+open trade's method. `trade adopt PAIR --trail-candle 15m` hands a position
+you **opened by hand** to the watcher: it records it and sends nothing; the
+watcher then sets and moves its stop. Both ask you to type the pair first.
+Checked live on 2026-09-27: AR's stop moved 4.799 → 4.818 under a 15m low.
+
 ### The watcher (live mode)
 `.venv/Scripts/python.exe -m backend.cli trade watch` checks every 30 s: it
 attaches SL / target to filled limit entries, marks trades closed when their

@@ -370,6 +370,56 @@ def cmd_trade(args: argparse.Namespace) -> int:
                 when = _time.strftime("%m-%d %H:%M:%S", _time.localtime(e["ts_ms"] / 1000))
                 print(f"{when} {'ok ' if e['ok'] else 'ERR'} {e['action']}: "
                       f"{e['request']} -> {e['response'][:200]}")
+        elif act in ("adopt", "trail-set"):
+            from backend.trading import trailing
+            from backend.trading.manager import check_trail
+
+            check_trail(args.trail_pct, args.trail_candle)
+            pair = risk.to_pair(args.pair)
+            pos = mgr.position(pair)
+            if pos is None:
+                raise TradeError(f"no open {pair} position")
+            s = trailing.Settings.from_config(config.trading.get("trailing"))
+            side = "long" if float(pos["active_pos"]) > 0 else "short"
+            px = mgr.last_price(pair)
+            entry = float(pos["avg_price"])
+            if args.trail_candle:
+                minutes = trailing.CANDLE_MINUTES[args.trail_candle]
+                c = trailing.last_closed(mgr.client.candles(pair, minutes, 6 * minutes * 60),
+                                         minutes, int(_time.time() * 1000))
+                first = c and trailing.next_stop_candle(side, candle=c, price=px,
+                                                        current_stop=None, s=s)
+                how = (f"a notch ({s.candle_buffer_pct:g}%) {'under' if side == 'long' else 'over'}"
+                       f" the last closed CoinDCX {args.trail_candle} candle")
+            else:
+                first = trailing.next_stop_pct(side, pct=args.trail_pct, best=max(entry, px)
+                                               if side == "long" else min(entry, px), price=px,
+                                               current_stop=None, s=s)
+                how = f"{args.trail_pct:g}% behind the best price"
+            now_sl = float(pos.get("stop_loss_trigger") or 0)
+            if first and now_sl and (first <= now_sl if side == "long" else first >= now_sl):
+                nxt = f"the stop stays at {now_sl:g} until this rule gives a better one"
+            elif first:
+                vs = (first / entry - 1) * 100 * (1 if side == "long" else -1)
+                nxt = f"the watcher's next stop: about {first:.6g} ({vs:+.2f}% vs entry)"
+            else:
+                nxt = "no closed candle yet"
+            print(f"[{banner}] {pair} {side} {pos['active_pos']} @ {entry:g}, now {px:g}, "
+                  f"SL {pos.get('stop_loss_trigger') or 'none'}, "
+                  f"TP {pos.get('take_profit_trigger') or 'none'}\n"
+                  f"  trail: {how}; it only moves in your favour. The target stays.\n"
+                  f"  {nxt}")
+            typed = _ask(f"Type {pair} to let the watcher trail it this way: ")
+            if act == "adopt":
+                trade_id = mgr.adopt(pair, args.trail_pct, confirm=typed,
+                                     trail_candle=args.trail_candle)
+                print(f"done: trade #{trade_id}.", end=" ")
+            else:
+                if typed.strip().upper() != pair:
+                    raise TradeError("not confirmed")
+                mgr.set_trail(pair, trail_pct=args.trail_pct, trail_candle=args.trail_candle)
+                print("done.", end=" ")
+            print("Keep `trade watch` running; it moves the stop on its next round.")
         elif act in ("trail-on", "trail-off"):
             pair = risk.to_pair(args.pair)
             trade = mgr.store.latest_for_pair(pair)
@@ -469,7 +519,8 @@ def main(argv: list[str] | None = None) -> int:
                                      "tpsl, close, cancel, panic, resume, log, watch")
     t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
                                       "panic", "resume", "log", "reconcile", "watch",
-                                      "scan", "ideas", "take", "trail-on", "trail-off"])
+                                      "scan", "ideas", "take", "trail-on", "trail-off",
+                                      "adopt", "trail-set"])
     t.add_argument("pair", nargs="?", default="",
                    help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
     t.add_argument("side", nargs="?", choices=["long", "short"], default=None)
@@ -488,6 +539,11 @@ def main(argv: list[str] | None = None) -> int:
                         "this one trade")
     t.add_argument("--dry-run", action="store_true",
                    help="send nothing, whatever trading.mode says")
+    t.add_argument("--trail-pct", type=float, default=0.0,
+                   help="adopt: keep the stop this %% behind the best price")
+    t.add_argument("--trail-candle", default=None, choices=["1m", "5m", "15m", "1h"],
+                   help="adopt / trail-set: keep the stop a notch under the last closed "
+                        "CoinDCX candle of this size")
     t.add_argument("--every-min", type=int, default=0,
                    help="scan: repeat every N minutes (0 = once)")
     t.set_defaults(func=cmd_trade)

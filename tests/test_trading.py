@@ -519,3 +519,77 @@ def test_moving_the_stop_retries_with_the_target_when_sl_alone_is_refused(tmp_pa
     trailing.run(m, TS)
     assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(100.5)   # 1R behind 105.5
     assert ("exit_position", "p1") not in ex.writes
+
+
+def test_adopted_hand_position_trails_by_percent(tmp_path):
+    ex = FakeExchange()
+    ex.fill(PAIR, 10.0)                                   # opened by hand: no SL, entry 100
+    ex.pos[PAIR]["take_profit_trigger"] = 110.0
+    ex.px = 102.0
+    m = manager(tmp_path, ex)
+    with pytest.raises(TradeError, match="not confirmed"):
+        m.adopt("SOL", 1.5, confirm="yes")
+    with pytest.raises(TradeError, match="at most 10%"):
+        m.adopt("SOL", 12, confirm=PAIR)
+    m.adopt("SOL", 1.5, confirm=PAIR)
+    assert ex.writes == []                                # adopting sends nothing
+    assert m.reconcile() == []                            # no "NO stop loss" warning now
+
+    trailing.run(m, TS)                                   # first stop: 1.5% under 102
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(100.47)
+    assert ex.pos[PAIR]["take_profit_trigger"] == 110.0
+    ex.px = 102.2                                         # step under a quarter of 1.5%
+    assert trailing.run(m, TS) == []
+    ex.px = 105.0
+    trailing.run(m, TS)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(103.42)
+    ex.px = 103.8                                         # pullback: stop stays
+    assert trailing.run(m, TS) == []
+    with pytest.raises(TradeError, match="already managed"):
+        m.adopt("SOL", 2, confirm=PAIR)
+
+
+def test_adopting_needs_live_mode(tmp_path):
+    ex = FakeExchange()
+    ex.fill(PAIR, 1.0)
+    with pytest.raises(TradeError, match="live mode"):
+        manager(tmp_path, ex, mode=DRY_RUN).adopt("SOL", 1.5, confirm=PAIR)
+
+
+def test_candle_trail_uses_the_last_closed_candle():
+    now = 10 * 900_000 - 1
+    rows =[{"time": 8 * 900_000, "low": 99.0, "high": 101.0},
+            {"time": 9 * 900_000, "low": 100.0, "high": 102.0}]     # still forming
+    assert trailing.last_closed(rows, 15, now)["low"] == 99.0
+    c = {"low": 104.0, "high": 106.0}
+    assert trailing.next_stop_candle(risk.LONG, candle=c, price=106.0, current_stop=100.0,
+                                     s=TS) == pytest.approx(103.896)   # 0.1% under the low
+    assert trailing.next_stop_candle(risk.LONG, candle=c, price=106.0, current_stop=104.0,
+                                     s=TS) is None                     # never down
+    assert trailing.next_stop_candle(risk.SHORT, candle=c, price=103.0, current_stop=110.0,
+                                     s=TS) == pytest.approx(106.106)   # 0.1% over the high
+    assert trailing.next_stop_candle(risk.LONG, candle=c, price=104.05, current_stop=None,
+                                     s=TS) == pytest.approx(104.05 * 0.998)  # not on the price
+
+
+def test_watcher_trails_an_adopted_position_under_coindcx_candles(tmp_path):
+    import time as _t
+    ex = FakeExchange()
+    ex.fill(PAIR, 10.0)
+    ex.pos[PAIR]["stop_loss_trigger"] = 98.0
+    ex.px = 104.0
+    now = int(_t.time() * 1000)
+    ex.bars = [{"time": now - 45 * 60_000, "low": 101.0, "high": 103.0},
+               {"time": now - 20 * 60_000, "low": 102.5, "high": 104.0},   # last closed
+               {"time": now - 5 * 60_000, "low": 90.0, "high": 104.5}]     # forming: ignored
+    ex.candles = lambda pair, minutes, lookback_s=0: ex.bars
+    m = manager(tmp_path, ex)
+    with pytest.raises(TradeError, match="one trail"):
+        m.adopt("SOL", 1.5, confirm=PAIR, trail_candle="15m")
+    m.adopt("SOL", 0, confirm=PAIR, trail_candle="15m")
+    trailing.run(m, TS)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(102.39)      # 102.5 - 0.1%
+    ex.bars[1]["low"] = 101.0                                              # lower low: stays
+    assert trailing.run(m, TS) == []
+    m.set_trail("SOL", trail_pct=2.0)
+    assert m.store.trades()[0]["trail_candle"] is None

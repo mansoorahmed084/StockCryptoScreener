@@ -140,6 +140,15 @@ class FuturesClient:
         """pair -> {"ls": last price, "mp": mark price, ...}"""
         return dict(self._read("GET", PRICES_URL, signed=False).get("prices", {}))
 
+    def candles(self, pair: str, minutes: int, lookback_s: int = 4 * 3600) -> list[dict]:
+        """CoinDCX futures candles, oldest first (the last one may still be forming).
+        The docs list 1, 5, 60 and 1D; 15 works too (checked 2026-09-27)."""
+        now = int(time.time())
+        data = self._read("GET", "https://public.coindcx.com/market_data/candlesticks"
+                          f"?pair={pair}&from={now - lookback_s}&to={now}"
+                          f"&resolution={minutes}&pcode=f", signed=False)
+        return sorted(data.get("data", []), key=lambda c: c["time"])
+
     def spot_usdt_inr(self) -> float:
         for t in self._read("GET", "/exchange/ticker", signed=False):
             if t.get("market") == "USDTINR":

@@ -67,7 +67,9 @@ class TradeStore:
             have = {r["name"] for r in db.execute("PRAGMA table_info(trades)")}
             for col, kind in (("initial_stop", "REAL"),     # stop at entry: 1R = entry - this
                               ("best_price", "REAL"),       # best price since entry
-                              ("trail", "INTEGER DEFAULT 1")):
+                              ("trail", "INTEGER DEFAULT 1"),
+                              ("trail_pct", "REAL"),        # set: trail this % behind best
+                              ("trail_candle", "TEXT")):    # set: stop under last closed candle
                 if col not in have:
                     db.execute(f"ALTER TABLE trades ADD COLUMN {col} {kind}")
 

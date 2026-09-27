@@ -45,6 +45,18 @@ def _f(x: Any) -> float:
         return 0.0
 
 
+TRAIL_CANDLES = ("1m", "5m", "15m", "1h")
+
+
+def check_trail(trail_pct: float, trail_candle: str | None) -> None:
+    if bool(trail_pct) == bool(trail_candle):
+        raise TradeError("give one trail: a percent (--trail-pct) or a candle (--trail-candle)")
+    if trail_candle and trail_candle not in TRAIL_CANDLES:
+        raise TradeError(f"--trail-candle must be one of {', '.join(TRAIL_CANDLES)}")
+    if trail_pct and not 0 < trail_pct <= risk.MAX_STOP_PCT:
+        raise TradeError(f"trail must be above 0% and at most {risk.MAX_STOP_PCT:g}%")
+
+
 def position_side(pos: dict) -> str:
     return risk.LONG if _f(pos.get("active_pos")) > 0 else risk.SHORT
 
@@ -378,6 +390,47 @@ class TradeManager:
                                     stop_loss=_f(fresh.get("stop_loss_trigger")) or old_sl,
                                     take_profit=_f(fresh.get("take_profit_trigger")) or old_tp)
         return fresh or {}
+
+    def adopt(self, pair: str, trail_pct: float, confirm: str,
+              trail_candle: str | None = None) -> int:
+        """Let the watcher trail a position opened by hand: ``trail_pct``% behind its
+        best price, or under the last closed ``trail_candle`` candle. Sends nothing
+        itself; the watcher sets and moves the stop."""
+        pair = risk.to_pair(pair)
+        if confirm.strip().upper() != pair:
+            raise TradeError(f"not confirmed: type {pair} to hand this position to the watcher")
+        check_trail(trail_pct, trail_candle)
+        if not self.live:
+            raise TradeError("adopting needs live mode (the watcher trails live trades only)")
+        pos = self.position(pair)
+        if pos is None:
+            raise TradeError(f"no open {pair} position")
+        if self.store.latest_for_pair(pair, (PENDING, OPEN)):
+            raise TradeError(f"{pair} is already managed by this tool")
+        entry = _f(pos.get("avg_price"))
+        return self.store.add_trade(
+            mode=LIVE, pair=pair, side=position_side(pos), entry_type="adopted",
+            entry=entry, qty=abs(_f(pos.get("active_pos"))), leverage=int(_f(pos.get("leverage"))),
+            stop_loss=_f(pos.get("stop_loss_trigger")) or None,
+            take_profit=_f(pos.get("take_profit_trigger")) or None,
+            position_id=pos["id"], status=OPEN, trail=1, trail_pct=trail_pct or None,
+            trail_candle=trail_candle,
+            best_price=max(entry, self.last_price(pair)) if position_side(pos) == risk.LONG
+            else min(entry, self.last_price(pair)),
+            note="adopted (opened by hand); trailing "
+                 + (f"under the last closed {trail_candle} candle" if trail_candle
+                    else f"{trail_pct:g}% behind best"))
+
+    def set_trail(self, pair: str, *, trail_pct: float = 0.0,
+                  trail_candle: str | None = None) -> None:
+        """Change how an open trade's stop is trailed (sends nothing itself)."""
+        pair = risk.to_pair(pair)
+        check_trail(trail_pct, trail_candle)
+        trade = self.store.latest_for_pair(pair, (OPEN,))
+        if trade is None:
+            raise TradeError(f"no open {pair} trade managed by this tool")
+        self.store.update_trade(trade["id"], trail=1, trail_pct=trail_pct or None,
+                                trail_candle=trail_candle)
 
     # -- close and cancel ----------------------------------------------------------
     def close(self, pair: str, confirm: str) -> None:
