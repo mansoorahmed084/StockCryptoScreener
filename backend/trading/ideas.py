@@ -64,6 +64,16 @@ def find_setups(svc, top: int) -> pd.DataFrame:
     return bs.pick(bs.rank(scan, trends), n=10)
 
 
+def rr_error(plan: risk.Plan) -> str | None:
+    """Gold-standard rule for suggestions: reward at least 2x risk, at the live price
+    with fees in. Not lifted by the override (that is for size only)."""
+    if plan.rr is None or plan.rr < risk.MIN_SUGGEST_RR:
+        got = "no target" if plan.rr is None else f"{plan.rr:.2f}R"
+        return (f"reward is under {risk.MIN_SUGGEST_RR:g}x the risk at the current price "
+                f"({got}, fees in)")
+    return None
+
+
 def request_for(idea: dict, free_inr: float, settings: Settings) -> risk.TradeRequest:
     return risk.TradeRequest(pair=idea["pair"], side=risk.LONG, stop_loss=idea["stop"],
                              take_profit=idea["target"], risk_inr=0.0,
@@ -113,8 +123,9 @@ def scan(mgr: TradeManager, setups: pd.DataFrame, settings: Settings) -> list[di
             status, reason = BLOCKED, "no API keys"
         else:
             plan = mgr.preview(request_for(idea, free, settings))
-            status = READY if plan.ok else BLOCKED
-            reason = ("; ".join(plan.errors) if plan.errors else
+            errors = plan.errors + ([rr] if (rr := rr_error(plan)) else [])
+            status = BLOCKED if errors else READY
+            reason = ("; ".join(errors) if errors else
                       f"{plan.qty:g} at ~{plan.entry:g}, lose ~Rs {plan.risk_inr:,.0f} at SL, "
                       f"make ~Rs {plan.reward_inr or 0:,.0f} at TP, margin Rs "
                       f"{plan.margin_inr:,.0f}")
@@ -127,8 +138,10 @@ def scan(mgr: TradeManager, setups: pd.DataFrame, settings: Settings) -> list[di
     return new
 
 
-def place(mgr: TradeManager, idea_id: int, settings: Settings) -> int:
-    """Place one recorded setup, re-checked at the current price. Returns the trade id."""
+def place(mgr: TradeManager, idea_id: int, settings: Settings, *,
+          margin_inr: float | None = None, override: bool = False) -> int:
+    """Place one recorded setup, re-checked at the current price. Returns the trade id.
+    ``margin_inr`` / ``override``: a bigger trade the owner explicitly asked for."""
     idea = mgr.store.idea(idea_id)
     if idea is None:
         raise TradeError(f"no setup #{idea_id}")
@@ -147,8 +160,16 @@ def place(mgr: TradeManager, idea_id: int, settings: Settings) -> int:
     free = mgr.free_inr()
     if free is None:
         raise TradeError("no API keys")
+    req = request_for(idea, free, settings)
+    if margin_inr:
+        req.margin_inr = margin_inr
+    req.override = override
+    rr = rr_error(mgr.preview(req))
+    if rr:
+        mgr.store.update_idea(idea_id, status=BLOCKED, reason=rr)
+        raise TradeError(rr)
     try:
-        _, trade_id = mgr.open(request_for(idea, free, settings), confirm=idea["pair"])
+        _, trade_id = mgr.open(req, confirm=idea["pair"])
     except TradeError as exc:
         mgr.store.update_idea(idea_id, status=FAILED, reason=str(exc)[:300])
         raise

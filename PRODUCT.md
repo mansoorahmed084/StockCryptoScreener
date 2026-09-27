@@ -323,6 +323,15 @@ Every trade must meet these, from any screen or command: **stop loss at most
 **leverage at most 5x**. They live in `backend/trading/risk.py`, not in
 config. Only a trade you explicitly mark **override** (a tick box on the page,
 `--override` in the terminal) may break them, and it is logged as overridden.
+The override lifts only these size rules, never your `trading.limits`.
+
+A setup is **only suggested when its reward is at least 2x its risk**,
+re-checked at the CoinDCX price with fees in, both when a scan lists it and
+when you place it; the override does not lift this. `trade take ID --margin X
+--override` places a setup bigger than 5%.
+
+Terminal confirmations show the pair and ask **y/n**; only `panic` asks you
+to type `PANIC`.
 
 ### Setups from the scan: tap to place
 - **Scan now** on the page, or `trade scan` (add `--every-min 15` to repeat),

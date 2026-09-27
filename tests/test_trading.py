@@ -374,7 +374,7 @@ from backend.trading import ideas  # noqa: E402
 
 def setups(**kw):
     row = dict(coin="SOL", timeframe="1h", pattern="Bull flag", kind="now", price=100.0,
-               up_level=99.0, down_level=95.0, target_up=110.0, rr=2.0, score=5.0)
+               up_level=99.0, down_level=95.0, target_up=111.0, rr=2.2, score=5.0)
     return ideas.pd.DataFrame([{**row, **kw}])
 
 
@@ -629,3 +629,40 @@ def test_an_expired_setup_is_offered_again_by_the_next_scan(tmp_path):
     blocked, = ideas.scan(m, setups(coin="XYZ"), s)         # a blocked one still waits 6h
     m.store.update_idea(blocked["id"], ts_ms=int(ideas.time.time() * 1000) - 3 * 3_600_000)
     assert ideas.scan(m, setups(coin="XYZ"), s) == []
+
+
+def test_a_bigger_setup_trade_needs_the_override(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    idea, = ideas.scan(m, setups(), s)
+    with pytest.raises(TradeError, match="5% of your free balance"):
+        ideas.place(m, idea["id"], s, margin_inr=3500.0)
+    idea, = ideas.scan(m, setups(pattern="Ascending triangle"), ideas.Settings(cooldown_hours=0))
+    ideas.place(m, idea["id"], s, margin_inr=3500.0, override=True)
+    order = next(w[1] for w in ex.writes if w[0] == "create_order")
+    assert order["total_quantity"] * 100 * 90 / 5 == pytest.approx(3500, rel=0.01)
+    assert m.store.trades()[0]["note"] == "rules overridden"
+
+
+def test_the_override_does_not_lift_your_config_limits(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    idea, = ideas.scan(m, setups(), s)
+    with pytest.raises(TradeError, match="above your limit of Rs 1,000"):
+        ideas.place(m, idea["id"], s, margin_inr=5000.0, override=True)
+    assert [w[0] for w in ex.writes] == []
+
+
+def test_setups_under_2r_are_never_suggested_or_placed(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    # stop 5 below, target 9 above: under 2R after fees (the scanner's own rr said 2.0)
+    low, = ideas.scan(m, setups(target_up=109.0), s)
+    assert low["status"] == ideas.BLOCKED and "under 2x the risk" in low["reason"]
+    ok, = ideas.scan(m, setups(pattern="Ascending triangle", target_up=111.0), s)
+    assert ok["status"] == ideas.READY
+    ex.px = 103.0                                          # price ran up: now under 2R
+    with pytest.raises(TradeError, match="under 2x the risk"):
+        ideas.place(m, ok["id"], s, override=True)         # the override does not lift it
+    assert ex.writes == []
+    assert m.store.idea(ok["id"])["status"] == ideas.BLOCKED

@@ -251,6 +251,12 @@ def _ask(prompt: str) -> str:
         return ""
 
 
+def _yes(pair: str, question: str) -> str:
+    """Show the pair and ask y/n. Returns the pair (the manager's confirm token) on yes."""
+    answer = _ask(f"{question} {pair}? [y/N]: ").strip().lower()
+    return pair if answer in ("y", "yes") else ""
+
+
 def _request(args: argparse.Namespace):
     from backend.trading import risk
 
@@ -299,22 +305,22 @@ def cmd_trade(args: argparse.Namespace) -> int:
             print(f"[{banner}]\n{plan.summary()}")
             if act == "preview" or not plan.ok:
                 return 0 if plan.ok else 1
-            typed = _ask(f"\nType {plan.request.pair} to place this {banner} trade: ")
+            typed = _yes(plan.request.pair, f"\nPlace this {banner} trade on")
             plan, trade_id = mgr.open(_request(args), confirm=typed)
             print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
         elif act == "tpsl":
             pair = risk.to_pair(args.pair)
-            typed = _ask(f"Type {pair} to set SL {args.sl or '-'} / TP {args.tp or '-'}: ")
+            typed = _yes(pair, f"Set SL {args.sl or '-'} / TP {args.tp or '-'} on")
             if typed.strip().upper() != pair:
                 raise TradeError("not confirmed")
             pos = mgr.set_tpsl(pair, stop_loss=args.sl, take_profit=args.tp)
             print(f"done. SL {pos.get('stop_loss_trigger')}  TP {pos.get('take_profit_trigger')}")
         elif act == "close":
             pair = risk.to_pair(args.pair)
-            mgr.close(pair, confirm=_ask(f"Type {pair} to close it at market: "))
+            mgr.close(pair, confirm=_yes(pair, "Close at market"))
             print("exit sent")
         elif act == "cancel":
-            if _ask(f"Type yes to cancel order {args.pair}: ").strip().lower() != "yes":
+            if not _yes(args.pair, "Cancel order"):
                 raise TradeError("not confirmed")
             mgr.cancel_order(args.pair)
             print("cancel sent")
@@ -355,12 +361,25 @@ def cmd_trade(args: argparse.Namespace) -> int:
             idea = mgr.store.idea(int(args.pair))
             if idea is None:
                 raise TradeError(f"no setup #{args.pair}")
-            print(f"[{banner}] setup #{idea['id']}: LONG {idea['coin']} {idea['timeframe']} "
-                  f"{idea['pattern']}, SL {idea['stop']:g}, TP {idea['target']:g}\n"
-                  f"  {idea['reason']}")
-            if _ask(f"Type {idea['pair']} to place it: ").strip().upper() != idea["pair"]:
+            free = mgr.free_inr()
+            if free is None:
+                raise TradeError("no API keys")
+            req = ideas.request_for(idea, free, settings)
+            if args.margin:
+                req.margin_inr = args.margin
+            req.override = args.override
+            plan = mgr.preview(req)
+            print(f"[{banner}] setup #{idea['id']}: {idea['coin']} {idea['timeframe']} "
+                  f"{idea['pattern']} ({idea['status']})\n{plan.summary()}")
+            rr = ideas.rr_error(plan)
+            if rr:
+                print(f"  BLOCKED: {rr}")
+            if not plan.ok or rr:
+                return 1
+            if not _yes(idea["pair"], f"Place this {banner} trade on"):
                 raise TradeError("not confirmed")
-            trade_id = ideas.place(mgr, idea["id"], settings)
+            trade_id = ideas.place(mgr, idea["id"], settings, margin_inr=args.margin or None,
+                                   override=args.override)
             print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
         elif act == "resume":
             mgr.resume()
@@ -409,7 +428,7 @@ def cmd_trade(args: argparse.Namespace) -> int:
                   f"TP {pos.get('take_profit_trigger') or 'none'}\n"
                   f"  trail: {how}; it only moves in your favour. The target stays.\n"
                   f"  {nxt}")
-            typed = _ask(f"Type {pair} to let the watcher trail it this way: ")
+            typed = _yes(pair, "Let the watcher trail it this way:")
             if act == "adopt":
                 trade_id = mgr.adopt(pair, args.trail_pct, confirm=typed,
                                      trail_candle=args.trail_candle)

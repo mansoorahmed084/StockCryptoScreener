@@ -23,6 +23,7 @@ MARKET, LIMIT = "market", "limit"
 MAX_STOP_PCT = 10.0            # a stop further than this from entry: no trade
 MAX_MARGIN_PCT_OF_FREE = 5.0   # margin per trade, % of the free INR futures balance
 MAX_LEVERAGE = 5
+MIN_SUGGEST_RR = 2.0           # a setup is only suggested when its reward is >= 2x its risk
 
 
 def margin_budget(free_inr: float) -> float:
