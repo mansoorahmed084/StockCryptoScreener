@@ -510,5 +510,6 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `8341078` | Gold-standard rules in code (stop ≤ 10%, margin ≤ 5% of free balance, ≤ 5x; override only when asked); scan setups on the Trade page with tap-to-place; no re-trading a setup or a coin closed by hand |
 | `23cee24` | Trailing stop loss run by the watcher: breakeven at 1R, then 1R behind the best price; per-trade on/off; hand-opened positions untouched |
 | `8560021` | `trade adopt` / `trail-set`: trail positions opened by hand; percent trail and a trail under the last closed CoinDCX 1m–1h candle |
+| `b7f807e` | Candle trail waits 60 s for a closed candle to settle and skips moves under 0.1%; trail-set fixes the trade's note. AR's 15m trail took it out at 4.843 for +Rs 306 net |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
