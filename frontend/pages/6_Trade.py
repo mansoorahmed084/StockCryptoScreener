@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from backend.config import load_config  # noqa: E402
 from backend.trading import ideas, risk  # noqa: E402
 from backend.trading.manager import TradeError, TradeManager  # noqa: E402
+from frontend import trade_hours_view  # noqa: E402
 
 st.set_page_config(page_title="Trade", layout="wide")
 
@@ -323,6 +324,7 @@ def setups(m: TradeManager) -> None:
 def main() -> None:
     m = manager()
     header(m)
+    trade_hours_view.render()
     setups(m)
     st.divider()
     new_trade(m)

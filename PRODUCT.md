@@ -34,6 +34,19 @@ Then open http://localhost:8501 and pick a page in the sidebar.
 | Alerts | `/Alerts` | Price, trendline and zone alerts you set, checked every minute |
 | Trade | `/Trade` | Open, protect (SL + target) and close CoinDCX INR futures trades |
 
+### Best time to trade (IST)
+The main screener and the Trade page show a strip of 24 hour boxes in IST.
+**Green = good time to trade** (high liquidity). **White = no trade.** An
+orange border marks the current hour. A line below says "good time to trade"
+or "no trade" now, and when the next good slot starts.
+
+An hour is green when BTC perpetual volume at that hour is at least 1.1× an
+average hour (median of the last 1,000 Binance 1h candles, weekdays only).
+Binance candles open on the UTC hour, so every IST slot starts at :30. With
+2026-09 data the green hours are 13:30–14:30 (London open) and 17:30–23:30
+(London / New York overlap). On weekends a note says liquidity is thin all
+day. If Binance cannot be reached, the strip shows those usual hours.
+
 ---
 
 ## 1. BTC Strength page

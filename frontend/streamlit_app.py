@@ -24,7 +24,7 @@ from backend.screener import sectors as sectors_mod  # noqa: E402
 from backend.signals.backtest import backtest_signal  # noqa: E402
 from backend.signals.journal import SignalJournal  # noqa: E402
 from backend.service import ScreenerService  # noqa: E402
-from frontend import alerts_view  # noqa: E402
+from frontend import alerts_view, trade_hours_view  # noqa: E402
 
 st.set_page_config(page_title="Crypto RS Screener", layout="wide")
 
@@ -188,6 +188,7 @@ def main():
     b1d = reg.breadth.get("1d", float("nan"))
     c3.metric("Breadth 1d (% bull vs USDT)",
               f"{b1d:.0f}%" if b1d == b1d else "—")
+    trade_hours_view.render()
 
     (tab_screen, tab_report, tab_filter, tab_sector, tab_chart, tab_bt,
      tab_journal) = st.tabs(
