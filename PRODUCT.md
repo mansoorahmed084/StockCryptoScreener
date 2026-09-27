@@ -472,5 +472,7 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `bb26488` | Close alerts: "closes above / below" a price on a candle size you pick (1m–1d, e.g. a 15m close); trendline breaks take the same choice |
 | `002d311` | Trade journal (`journal/TRADE_JOURNAL.md`): every buy setup the scans called, replayed as a paper trade, with what worked and what didn't; `python -m backend.cli journal` refreshes it |
 | `f6797c6` | Trade page and `cli trade`: CoinDCX INR futures sized from the rupees you risk, SL/TP attached and checked after every fill (closed if no stop shows), your limits, panic, a log of every order; dry run until `trading.mode: live` |
+| `eefc9d2` | Trades sized by margin (`--margin`); CoinDCX history paging and stop-order price fixes; first live test (SOL, Rs 1,000 margin, 5x) placed with SL/TP checked |
+| `8341078` | Gold-standard rules in code (stop ≤ 10%, margin ≤ 5% of free balance, ≤ 5x; override only when asked); scan setups on the Trade page with tap-to-place; no re-trading a setup or a coin closed by hand |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
