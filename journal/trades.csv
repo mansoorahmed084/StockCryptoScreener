@@ -16,18 +16,27 @@ id,day,list,coin,tf,setup,entry_rule,trigger,t1,p1,t2,p2,from_utc,entry_price,st
 15,2026-09-25,25 Sep 11:45 buy now,ARB,1h,Ascending triangle,now,,,,,,2026-09-25 11:50,0.2245,0.2165,0.2366,broke up; 15m double bottom
 16,2026-09-25,25 Sep 11:45 buy now,VVV,1h,Bull flag,now,,,,,,2026-09-25 11:50,31.37,28.38,44.61,broke up; bearish 15m pattern too
 17,2026-09-25,25 Sep 11:45 about to break,XLM,15m,Ascending triangle,close_above,0.2235,,,,,2026-09-25 11:50,,0.2189,0.2508,broke before its alert was set
-18,2026-09-25,25 Sep 12:05 alerts,BNB,1h,Bull flag,close_above,,1790002800000,808.23,1790136000000,799.98,2026-09-25 12:04,,756.89,891.38,alert on the falling flag line
-19,2026-09-25,25 Sep 12:05 alerts,KITE,1h,Bull flag,close_above,,1790128800000,0.14181,1790276400000,0.1346,2026-09-25 12:04,,0.12502,0.16641,alert on the falling flag line
+18,2026-09-25,25 Sep 12:05 alerts,BNB,1h,Bull flag,close_above,,1790002800000.0,808.23,1790136000000.0,799.98,2026-09-25 12:04,,756.89,891.38,alert on the falling flag line
+19,2026-09-25,25 Sep 12:05 alerts,KITE,1h,Bull flag,close_above,,1790128800000.0,0.14181,1790276400000.0,0.1346,2026-09-25 12:04,,0.12502,0.16641,alert on the falling flag line
 20,2026-09-25,25 Sep 12:05 alerts,LDO,4h,Ascending triangle,close_above,0.461966,,,,,2026-09-25 12:04,,0.43095,0.5783,line + tolerance (price was on the line)
-21,2026-09-25,25 Sep 12:05 alerts,HYPE,1h,Bull flag,close_above,,1790110800000,97.835,1790330400000,94.342,2026-09-25 12:04,,89.828,111.64,alert on the falling flag line
+21,2026-09-25,25 Sep 12:05 alerts,HYPE,1h,Bull flag,close_above,,1790110800000.0,97.835,1790330400000.0,94.342,2026-09-25 12:04,,89.828,111.64,alert on the falling flag line
 22,2026-09-25,25 Sep 12:05 alerts,INJ,4h,Double bottom,close_above,8.378,,,,,2026-09-25 12:04,,,9.3,neckline; no stop given
 23,2026-09-25,25 Sep 12:05 alerts,LTC,1h,Bull flag,close_above,70.5538,,,,,2026-09-25 12:04,,69.91,86.8943,line + tolerance (price was on the line)
-24,2026-09-25,25 Sep 12:05 alerts,ETH,1h,Bull flag,close_above,,1790020800000,2806.76,1790136000000,2787.82,2026-09-25 12:04,,2626.01,3204.44,alert on the falling flag line
+24,2026-09-25,25 Sep 12:05 alerts,ETH,1h,Bull flag,close_above,,1790020800000.0,2806.76,1790136000000.0,2787.82,2026-09-25 12:04,,2626.01,3204.44,alert on the falling flag line
 25,2026-09-26,26 Sep 14:00 buy now,AVAX,1h,Bull flag,now,,,,,,2026-09-26 14:05,10.83,9.972,15.27,broke up
 26,2026-09-26,26 Sep 14:00 buy now,BONK,1h,Bull flag,now,,,,,,2026-09-26 14:05,0.003699,0.003378,0.00542,15m + 1h flags broke up; 4h flag at the line
 27,2026-09-26,26 Sep 14:00 buy now,GRAM,1h,Bull flag,now,,,,,,2026-09-26 14:05,1.479,1.386,1.664,broke up; 4h triangle 0.5% away
-28,2026-09-26,26 Sep 14:00 about to break,SUI,1h,Bull flag,close_above,,1790377200000,1.2177,1790420400000,1.1918,2026-09-26 14:05,,1.1499,1.418,falling flag line
-29,2026-09-26,26 Sep 14:00 about to break,SOL,1h,Bull flag,close_above,,1790366400000,122.93,1790424000000,121.53,2026-09-26 14:05,,119.78,131.9,falling flag line; tight stop
-30,2026-09-26,26 Sep 14:00 about to break,HBAR,1h,Bull flag,close_above,,1790128800000,0.10135,1790377200000,0.09579,2026-09-26 14:05,,0.08808,0.124,falling flag line
-31,2026-09-26,26 Sep 14:00 about to break,SHIB,1h,Bull flag,close_above,,1790049600000,0.006276,1790420400000,0.005957,2026-09-26 14:05,,0.005534,0.007484,falling flag line
-32,2026-09-26,26 Sep 14:00 about to break,GRT,1h,Bull flag,close_above,,1790366400000,0.02886,1790424000000,0.02847,2026-09-26 14:05,,0.02719,0.03286,falling flag line
+28,2026-09-26,26 Sep 14:00 about to break,SUI,1h,Bull flag,close_above,,1790377200000.0,1.2177,1790420400000.0,1.1918,2026-09-26 14:05,,1.1499,1.418,falling flag line
+29,2026-09-26,26 Sep 14:00 about to break,SOL,1h,Bull flag,close_above,,1790366400000.0,122.93,1790424000000.0,121.53,2026-09-26 14:05,,119.78,131.9,falling flag line; tight stop
+30,2026-09-26,26 Sep 14:00 about to break,HBAR,1h,Bull flag,close_above,,1790128800000.0,0.10135,1790377200000.0,0.09579,2026-09-26 14:05,,0.08808,0.124,falling flag line
+31,2026-09-26,26 Sep 14:00 about to break,SHIB,1h,Bull flag,close_above,,1790049600000.0,0.006276,1790420400000.0,0.005957,2026-09-26 14:05,,0.005534,0.007484,falling flag line
+32,2026-09-26,26 Sep 14:00 about to break,GRT,1h,Bull flag,close_above,,1790366400000.0,0.02886,1790424000000.0,0.02847,2026-09-26 14:05,,0.02719,0.03286,falling flag line
+33,2026-09-27,27 Sep 06:08 buy now,USELESS,4h,Bull flag,now,,,,,,2026-09-27 06:08,0.2894,0.27009,0.449654,"auto: score 9, reward/risk 8.3"
+34,2026-09-27,27 Sep 06:08 buy now,BTC,4h,Bull flag,now,,,,,,2026-09-27 06:08,84497.3,82832.0,96200.3555555556,"auto: score 8, reward/risk 7.0"
+35,2026-09-27,27 Sep 06:08 buy now,SEI,1h,Bull flag,now,,,,,,2026-09-27 06:08,0.07365,0.07041,0.0931204,"auto: score 8, reward/risk 6.0"
+36,2026-09-27,27 Sep 06:08 about to break,HBAR,4h,Bull flag,close_above,,1790121600000.0,0.10135,1790438400000.0,0.09531,2026-09-27 06:08,,0.08808,0.1239063636,"auto: score 10, reward/risk 5.3"
+37,2026-09-27,27 Sep 06:08 about to break,ARB,4h,Bull flag,close_above,,1790121600000.0,0.25569,1790438400000.0,0.23096,2026-09-27 06:08,,0.21022,0.3520677273,"auto: score 9, reward/risk 7.2"
+38,2026-09-27,27 Sep 06:08 about to break,BONK,4h,Bull flag,close_above,,1790136000000.0,0.004204,1790424000000.0,0.003769,2026-09-27 06:08,,0.003378,0.005425,"auto: score 9, reward/risk 6.6"
+39,2026-09-27,27 Sep 06:08 about to break,ETH,4h,Bull flag,close_above,,1790020800000.0,2806.76,1790323200000.0,2742.66,2026-09-27 06:08,,2626.01,3158.8438095238,"auto: score 9, reward/risk 5.6"
+40,2026-09-27,27 Sep 06:08 about to break,AVAX,4h,Bull flag,close_above,,1789948800000.0,11.792,1790424000000.0,11.129,2026-09-27 06:08,,9.972,15.6696363636,"auto: score 9, reward/risk 5.2"
+41,2026-09-26,26 Sep 15:20 S/ARB analysis,ARB,1h,Bull flag,close_above,,1790132400000.0,0.25569,1790373600000.0,0.23109,2026-09-26 14:54,,0.2102,0.2445,alert on the 4h/1h flag line; targets 0.2282 / 0.2320 / 0.2445
