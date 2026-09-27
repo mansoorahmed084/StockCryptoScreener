@@ -1,0 +1,454 @@
+"""Open, protect, change and close INR-margined CoinDCX futures trades.
+
+Safety rules the manager enforces:
+
+* Nothing is sent unless ``trading.mode`` is ``live``. In ``dry_run`` every
+  write is logged as "not sent" and the exchange is only read.
+* Every trade is re-sized and re-checked against live prices right before it
+  is sent (risk.build_plan); a plan with any error is refused.
+* Every entry carries a stop loss. After a fill the stop is attached and then
+  read back from the position. If the exchange does not show it, the manager
+  tries once more and then closes the position at market rather than leave it
+  unprotected.
+* A write that times out is never blindly re-sent; the exchange is re-read.
+* ``panic`` cancels every open order, closes every position and blocks new
+  trades until ``resume``.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import logging
+import time
+from collections.abc import Callable
+from typing import Any
+
+from backend.trading import risk
+from backend.trading.client import CoinDcxError, FuturesClient, UnknownOutcome
+from backend.trading.store import CLOSED, FAILED, OPEN, PENDING, TradeStore
+
+log = logging.getLogger(__name__)
+
+LIVE, DRY_RUN = "live", "dry_run"
+HALT_FLAG = "halted"
+SL_TYPES = ("stop_market", "stop_limit")
+TP_TYPES = ("take_profit_market", "take_profit_limit")
+
+
+class TradeError(Exception):
+    pass
+
+
+def _f(x: Any) -> float:
+    try:
+        return float(x or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def position_side(pos: dict) -> str:
+    return risk.LONG if _f(pos.get("active_pos")) > 0 else risk.SHORT
+
+
+class TradeManager:
+    def __init__(self, client: FuturesClient, store: TradeStore, limits: risk.Limits, *,
+                 mode: str = DRY_RUN, notify: Callable[[str], Any] | None = None,
+                 fill_timeout_s: float = 20.0, poll_s: float = 1.0,
+                 close_unprotected: bool = False,
+                 sleep: Callable[[float], None] = time.sleep):
+        if mode not in (LIVE, DRY_RUN):
+            raise ValueError(f"trading.mode must be {LIVE!r} or {DRY_RUN!r}")
+        self.client = client
+        self.store = store
+        self.limits = limits
+        self.mode = mode
+        self._notify = notify or (lambda text: None)
+        self.fill_timeout_s = fill_timeout_s
+        self.poll_s = poll_s
+        self.close_unprotected = close_unprotected
+        self._sleep = sleep
+        self._instruments: dict[str, risk.Instrument] = {}
+        self._warned_unprotected: set[str] = set()
+
+    @classmethod
+    def from_config(cls, config) -> "TradeManager":
+        from backend.alerts.telegram import notifier_from_env
+
+        t = config.trading
+        return cls(FuturesClient.from_env(), TradeStore(t.get("db", "data_cache/trading.db")),
+                   risk.Limits.from_config(t.get("limits")),
+                   mode=str(t.get("mode", DRY_RUN)),
+                   notify=notifier_from_env().send,
+                   fill_timeout_s=float(t.get("fill_timeout_s", 20)),
+                   close_unprotected=bool(t.get("close_unprotected", False)))
+
+    @property
+    def live(self) -> bool:
+        return self.mode == LIVE
+
+    @property
+    def halted(self) -> bool:
+        return self.store.flag(HALT_FLAG) == "1"
+
+    def notify(self, text: str) -> None:
+        log.warning(text)
+        try:
+            self._notify(f"[CoinDCX] {text}")
+        except Exception as exc:              # a failed message must not stop trading logic
+            log.warning("notify failed: %s", exc)
+
+    # -- market data -------------------------------------------------------------
+    def instrument(self, pair: str) -> risk.Instrument:
+        if pair not in self._instruments:
+            self._instruments[pair] = risk.Instrument.from_api(self.client.instrument(pair))
+        return self._instruments[pair]
+
+    def last_price(self, pair: str) -> float:
+        p = self.client.prices().get(pair) or {}
+        return _f(p.get("ls")) or _f(p.get("mp"))
+
+    def rate(self) -> tuple[float, str | None]:
+        """(INR per USDT, warning). The futures rate needs keys; without them
+        the INR spot price of USDT stands in for previews."""
+        if self.client.has_keys:
+            return self.client.conversion_rate(), None
+        return self.client.spot_usdt_inr(), ("no API keys: sized with the spot USDT/INR "
+                                             "price, not the futures rate")
+
+    # -- account ---------------------------------------------------------------
+    def positions(self) -> list[dict]:
+        if not self.client.has_keys:
+            return []
+        return [p for p in self.client.positions() if _f(p.get("active_pos")) != 0]
+
+    def position(self, pair: str) -> dict | None:
+        rows = [p for p in self.client.positions([pair])
+                if p.get("pair") == pair and _f(p.get("active_pos")) != 0]
+        return rows[0] if rows else None
+
+    def loss_today_inr(self) -> float:
+        if not self.client.has_keys:
+            return 0.0
+        start = dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0,
+                                                         microsecond=0)
+        start_ms = start.timestamp() * 1000
+        pnl = sum(_f(t.get("amount")) - _f(t.get("fee_amount"))
+                  for t in self.client.transactions(200)
+                  if _f(t.get("created_at")) >= start_ms)
+        return max(0.0, -pnl)
+
+    def status(self) -> dict:
+        out: dict[str, Any] = {"mode": self.mode, "halted": self.halted,
+                               "keys": self.client.has_keys}
+        if self.client.has_keys:
+            out["wallets"] = self.client.wallets()
+            out["positions"] = self.positions()
+            out["orders"] = self.client.orders()
+            out["loss_today_inr"] = self.loss_today_inr()
+        return out
+
+    # -- writes go through here --------------------------------------------------
+    def _write(self, action: str, fn: Callable[..., Any], *args, trade_id: int | None = None,
+               **kwargs) -> Any:
+        request = {"args": args, **kwargs}
+        if not self.live:
+            self.store.log(action, request, "dry run: not sent", True, trade_id)
+            return None
+        try:
+            resp = fn(*args, **kwargs)
+        except Exception as exc:
+            self.store.log(action, request, f"{type(exc).__name__}: {exc}", False, trade_id)
+            raise
+        self.store.log(action, request, resp, True, trade_id)
+        return resp
+
+    # -- plan and open ------------------------------------------------------------
+    def preview(self, req: risk.TradeRequest) -> risk.Plan:
+        req.pair = risk.to_pair(req.pair)
+        inst = self.instrument(req.pair)
+        rate, rate_warning = self.rate()
+        held = self.positions()
+        plan = risk.build_plan(
+            req, inst, last_price=self.last_price(req.pair), rate=rate, limits=self.limits,
+            open_positions=len(held), has_position=any(p["pair"] == req.pair for p in held),
+            loss_today_inr=self.loss_today_inr())
+        if rate_warning:
+            plan.warnings.append(rate_warning)
+        if self.halted:
+            plan.errors.append("trading is halted (panic); run `trade resume` first")
+        if self.live and not self.client.has_keys:
+            plan.errors.append("live mode needs COINDCX_API_KEY and COINDCX_API_SECRET in .env")
+        return plan
+
+    def open(self, req: risk.TradeRequest, confirm: str) -> tuple[risk.Plan, int]:
+        """Place the entry and, once filled, the stop loss and target.
+
+        ``confirm`` must be the pair name typed by the person placing the trade.
+        """
+        plan = self.preview(req)
+        if confirm.strip().upper() != plan.request.pair:
+            raise TradeError(f"not confirmed: type {plan.request.pair} to place this trade")
+        if not plan.ok:
+            raise TradeError("; ".join(plan.errors))
+
+        pair = plan.request.pair
+        trade_id = self.store.add_trade(
+            mode=self.mode, pair=pair, side=req.side, entry_type=req.entry_type,
+            entry=plan.entry, qty=plan.qty, leverage=req.leverage, stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit, risk_inr=plan.risk_inr, margin_inr=plan.margin_inr,
+            status=PENDING)
+
+        order = {"side": plan.order_side, "pair": pair, "total_quantity": plan.qty,
+                 "leverage": req.leverage, "notification": "email_notification"}
+        if req.entry_type == risk.LIMIT:
+            order.update(order_type="limit_order", price=plan.entry,
+                         time_in_force="good_till_cancel")
+        else:
+            order["order_type"] = "market_order"
+
+        try:
+            self._write("update_leverage", self.client.update_leverage, pair, req.leverage,
+                        trade_id=trade_id)
+            resp = self._write("create_order", self.client.create_order, order,
+                               trade_id=trade_id)
+        except UnknownOutcome:
+            resp = self._find_entry(pair)
+            if resp is None:
+                self.store.update_trade(trade_id, status=FAILED,
+                                        note="entry timed out and nothing reached the exchange")
+                raise TradeError("the order timed out and is not on the exchange; "
+                                 "nothing was opened")
+        except CoinDcxError as exc:
+            self.store.update_trade(trade_id, status=FAILED, note=exc.message)
+            raise TradeError(f"CoinDCX refused the order: {exc.message}") from exc
+
+        if not self.live:
+            self.store.update_trade(trade_id, status="dry_run",
+                                    note="dry run: nothing was sent")
+            return plan, trade_id
+
+        self.store.update_trade(trade_id, order_id=str((resp or {}).get("id", "")))
+        self.notify(f"entry sent: {plan.summary().splitlines()[0]}")
+        if req.entry_type == risk.MARKET:
+            pos = self._wait_for_position(pair)
+            if pos is None:
+                self.store.update_trade(trade_id, note="no fill seen yet; the watcher will "
+                                                      "attach SL/TP when it fills")
+                self.notify(f"{pair}: market order sent but no position seen after "
+                            f"{self.fill_timeout_s:.0f}s. Run `trade reconcile`.")
+            else:
+                self._protect(trade_id, pos, plan.stop_loss, plan.take_profit)
+        return plan, trade_id
+
+    def _find_entry(self, pair: str) -> dict | None:
+        pos = self.position(pair)
+        if pos:
+            return {"id": "", "position": pos}
+        for o in self.client.orders("open,partially_filled"):
+            if o.get("pair") == pair:
+                return o
+        return None
+
+    def _wait_for_position(self, pair: str) -> dict | None:
+        deadline = time.monotonic() + self.fill_timeout_s
+        while True:
+            pos = self.position(pair)
+            if pos is not None or time.monotonic() >= deadline:
+                return pos
+            self._sleep(self.poll_s)
+
+    # -- stop loss and target ---------------------------------------------------------
+    def _protect(self, trade_id: int | None, pos: dict, stop_loss: float,
+                 take_profit: float | None) -> bool:
+        """Attach SL/TP to a filled position and read them back. Closes the
+        position if the stop loss cannot be confirmed."""
+        pair, pos_id = pos["pair"], pos["id"]
+        for attempt in range(2):
+            try:
+                self._write("create_tpsl", self.client.create_tpsl, pos_id,
+                            trade_id=trade_id, stop_loss=stop_loss,
+                            take_profit=take_profit if attempt == 0 else None)
+            except (CoinDcxError, UnknownOutcome) as exc:
+                log.warning("create_tpsl failed on %s: %s", pair, exc)
+            fresh = self.position(pair)
+            if fresh is None:           # already closed (e.g. stop hit instantly)
+                if trade_id:
+                    self.store.update_trade(trade_id, status=CLOSED,
+                                            note="position closed right after the fill")
+                return True
+            if _f(fresh.get("stop_loss_trigger")) > 0:
+                if trade_id:
+                    self.store.update_trade(trade_id, status=OPEN, position_id=pos_id,
+                                            entry=_f(fresh.get("avg_price")) or None)
+                if take_profit and not _f(fresh.get("take_profit_trigger")):
+                    self.notify(f"{pair}: stop loss set at {fresh['stop_loss_trigger']} but the "
+                                "target was not accepted; set it again with `trade tpsl`")
+                else:
+                    self.notify(f"{pair}: protected. SL {fresh['stop_loss_trigger']}"
+                                f"  TP {fresh.get('take_profit_trigger') or 'none'}")
+                return True
+        # Could not confirm a stop loss: do not leave the position naked.
+        try:
+            self._write("exit_position", self.client.exit_position, pos_id, trade_id=trade_id)
+            note = "stop loss not accepted by CoinDCX; position closed at market"
+        except Exception as exc:
+            note = f"stop loss not accepted AND the exit failed ({exc}); CLOSE IT BY HAND"
+        if trade_id:
+            self.store.update_trade(trade_id, status=FAILED, position_id=pos_id, note=note)
+        self.notify(f"{pair}: {note}")
+        return False
+
+    def set_tpsl(self, pair: str, *, stop_loss: float | None = None,
+                 take_profit: float | None = None) -> dict:
+        """Move the stop loss and/or target of an open position."""
+        pair = risk.to_pair(pair)
+        if stop_loss is None and take_profit is None:
+            raise TradeError("give a new stop loss, a new target, or both")
+        pos = self.position(pair)
+        if pos is None:
+            raise TradeError(f"no open {pair} position")
+        inst = self.instrument(pair)
+        stop_loss = risk.round_step(stop_loss, inst.price_step) if stop_loss else None
+        take_profit = risk.round_step(take_profit, inst.price_step) if take_profit else None
+        errors = risk.check_stop_move(position_side(pos), stop_loss=stop_loss,
+                                      take_profit=take_profit, mark=self.last_price(pair))
+        if errors:
+            raise TradeError("; ".join(errors))
+
+        trade = self.store.latest_for_pair(pair)
+        trade_id = trade["id"] if trade else None
+        old_sl = _f(pos.get("stop_loss_trigger")) or None
+        old_tp = _f(pos.get("take_profit_trigger")) or None
+        tpsl = [o for o in self.client.orders("untriggered")
+                if o.get("pair") == pair and o.get("stage") == "tpsl_exit"]
+
+        def cancel(types: tuple[str, ...]) -> None:
+            for o in tpsl:
+                if o.get("order_type") in types:
+                    self._write("cancel_order", self.client.cancel_order, o["id"],
+                                trade_id=trade_id)
+
+        if take_profit is not None:
+            cancel(TP_TYPES)
+            self._write("create_tpsl", self.client.create_tpsl, pos["id"], trade_id=trade_id,
+                        take_profit=take_profit)
+        if stop_loss is not None:
+            cancel(SL_TYPES)
+            try:
+                self._write("create_tpsl", self.client.create_tpsl, pos["id"],
+                            trade_id=trade_id, stop_loss=stop_loss)
+            except (CoinDcxError, UnknownOutcome) as exc:
+                log.warning("new stop loss refused on %s: %s", pair, exc)
+        if not self.live:
+            return pos
+
+        fresh = self.position(pair)
+        if fresh is not None and stop_loss is not None and not _f(fresh.get("stop_loss_trigger")):
+            # The new stop was refused after the old one was cancelled: put a stop back.
+            self._protect(trade_id, fresh, old_sl or stop_loss, None)
+            raise TradeError(f"CoinDCX refused the new stop loss; "
+                             f"{'restored the old one' if old_sl else 'protection re-applied'}")
+        if trade_id and fresh is not None:
+            self.store.update_trade(trade_id,
+                                    stop_loss=_f(fresh.get("stop_loss_trigger")) or old_sl,
+                                    take_profit=_f(fresh.get("take_profit_trigger")) or old_tp)
+        return fresh or {}
+
+    # -- close and cancel ----------------------------------------------------------
+    def close(self, pair: str, confirm: str) -> None:
+        pair = risk.to_pair(pair)
+        if confirm.strip().upper() != pair:
+            raise TradeError(f"not confirmed: type {pair} to close this position")
+        pos = self.position(pair)
+        if pos is None:
+            raise TradeError(f"no open {pair} position")
+        trade = self.store.latest_for_pair(pair)
+        trade_id = trade["id"] if trade else None
+        self._write("exit_position", self.client.exit_position, pos["id"], trade_id=trade_id)
+        try:
+            self._write("cancel_position_orders", self.client.cancel_position_orders,
+                        pos["id"], trade_id=trade_id)
+        except Exception as exc:
+            log.warning("cancelling leftover orders on %s failed: %s", pair, exc)
+        if trade_id and self.live:
+            self.store.update_trade(trade_id, status=CLOSED, note="closed by you")
+
+    def cancel_order(self, order_id: str) -> None:
+        self._write("cancel_order", self.client.cancel_order, order_id)
+        if self.live:
+            for t in self.store.trades(PENDING):
+                if t["order_id"] == order_id:
+                    self.store.update_trade(t["id"], status=CLOSED, note="entry cancelled")
+
+    def panic(self, confirm: str) -> list[str]:
+        """Block new trades, cancel every open order and close every position."""
+        if confirm != "PANIC":
+            raise TradeError("not confirmed: type PANIC")
+        self.store.set_flag(HALT_FLAG, "1")
+        done = []
+        try:
+            self._write("cancel_all_orders", self.client.cancel_all_orders)
+            done.append("cancelled all open orders")
+        except Exception as exc:
+            done.append(f"cancel all orders FAILED: {exc}")
+        for pos in self.positions():
+            try:
+                self._write("exit_position", self.client.exit_position, pos["id"])
+                done.append(f"closed {pos['pair']}")
+            except Exception as exc:
+                done.append(f"closing {pos['pair']} FAILED: {exc} - close it by hand")
+        self.notify("PANIC: " + "; ".join(done or ["nothing was open"]))
+        return done
+
+    def resume(self) -> None:
+        self.store.set_flag(HALT_FLAG, "0")
+
+    # -- watcher ---------------------------------------------------------------
+    def reconcile(self) -> list[str]:
+        """Bring the records in line with the exchange; protect filled entries.
+
+        Run every ~30 s by ``trade watch``. SL/TP already on the exchange keep
+        working if this stops; the watcher only handles limit fills, closed
+        trades and positions that have no stop loss.
+        """
+        if not (self.live and self.client.has_keys):
+            return []
+        msgs: list[str] = []
+        held = {p["pair"]: p for p in self.positions()}
+        open_orders = {o.get("id") for o in self.client.orders("open,partially_filled")}
+
+        for t in self.store.trades(PENDING):
+            if t["mode"] != LIVE:
+                continue
+            pos = held.get(t["pair"])
+            if pos is not None:
+                if not _f(pos.get("stop_loss_trigger")):
+                    self._protect(t["id"], pos, t["stop_loss"], t["take_profit"])
+                    msgs.append(f"{t['pair']}: entry filled; SL/TP attached")
+                else:
+                    self.store.update_trade(t["id"], status=OPEN, position_id=pos["id"])
+            elif t["order_id"] and t["order_id"] not in open_orders:
+                self.store.update_trade(t["id"], status=CLOSED,
+                                        note="entry order is gone (cancelled or rejected)")
+                msgs.append(f"{t['pair']}: entry order is no longer open")
+
+        for t in self.store.trades(OPEN):
+            if t["mode"] == LIVE and t["pair"] not in held:
+                self.store.update_trade(t["id"], status=CLOSED,
+                                        note="position closed (stop, target or by hand)")
+                msgs.append(f"{t['pair']}: position closed")
+
+        known = {t["pair"] for t in self.store.trades(PENDING) + self.store.trades(OPEN)}
+        unprotected = {pair for pair, pos in held.items()
+                       if not _f(pos.get("stop_loss_trigger")) and pair not in known}
+        self._warned_unprotected &= unprotected
+        for pair in sorted(unprotected - self._warned_unprotected):
+            if self.close_unprotected:
+                self._write("exit_position", self.client.exit_position, held[pair]["id"])
+                msgs.append(f"{pair}: had no stop loss; closed (trading.close_unprotected)")
+            else:
+                self._warned_unprotected.add(pair)
+                msgs.append(f"{pair}: open with NO stop loss. Set one: "
+                            f"python -m backend.cli trade tpsl {pair} --sl PRICE")
+        for m in msgs:
+            self.notify(m)
+        return msgs

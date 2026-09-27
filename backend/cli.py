@@ -244,6 +244,110 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError:
+        return ""
+
+
+def _request(args: argparse.Namespace):
+    from backend.trading import risk
+
+    return risk.TradeRequest(
+        pair=args.pair, side=args.side, stop_loss=args.sl, take_profit=args.tp,
+        risk_inr=args.risk, leverage=args.lev,
+        entry_type=risk.LIMIT if args.limit else risk.MARKET, limit_price=args.limit)
+
+
+def cmd_trade(args: argparse.Namespace) -> int:
+    """CoinDCX INR futures: status, preview, open, move SL/TP, close, panic."""
+    import time as _time
+
+    from backend.trading import risk
+    from backend.trading.manager import TradeError, TradeManager
+
+    mgr = TradeManager.from_config(load_config(args.config))
+    act = args.action
+    banner = "LIVE" if mgr.live else "DRY RUN (nothing is sent)"
+    try:
+        if act == "status":
+            s = mgr.status()
+            print(f"mode: {banner}   keys: {'set' if s['keys'] else 'MISSING'}"
+                  f"   halted: {s['halted']}")
+            if not s["keys"]:
+                return 0
+            for w in s["wallets"]:
+                print(f"wallet {w.get('currency_short_name')}: balance {w.get('balance')}"
+                      f"  locked {w.get('locked_balance')}")
+            print(f"loss today: Rs {s['loss_today_inr']:,.0f}")
+            for p in s["positions"]:
+                print(f"{p['pair']}: {p['active_pos']:+g} @ {p['avg_price']}  "
+                      f"SL {p.get('stop_loss_trigger') or 'NONE'}  "
+                      f"TP {p.get('take_profit_trigger') or 'none'}  "
+                      f"{p.get('leverage')}x  liq {p.get('liquidation_price')}")
+            for o in s["orders"]:
+                print(f"order {o['id']}: {o['pair']} {o['side']} {o['order_type']} "
+                      f"{o.get('total_quantity')} @ {o.get('price') or o.get('stop_price')} "
+                      f"[{o['status']}]")
+            if not (s["positions"] or s["orders"]):
+                print("no open positions or orders")
+        elif act in ("preview", "open"):
+            plan = mgr.preview(_request(args))
+            print(f"[{banner}]\n{plan.summary()}")
+            if act == "preview" or not plan.ok:
+                return 0 if plan.ok else 1
+            typed = _ask(f"\nType {plan.request.pair} to place this {banner} trade: ")
+            plan, trade_id = mgr.open(_request(args), confirm=typed)
+            print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
+        elif act == "tpsl":
+            pair = risk.to_pair(args.pair)
+            typed = _ask(f"Type {pair} to set SL {args.sl or '-'} / TP {args.tp or '-'}: ")
+            if typed.strip().upper() != pair:
+                raise TradeError("not confirmed")
+            pos = mgr.set_tpsl(pair, stop_loss=args.sl, take_profit=args.tp)
+            print(f"done. SL {pos.get('stop_loss_trigger')}  TP {pos.get('take_profit_trigger')}")
+        elif act == "close":
+            pair = risk.to_pair(args.pair)
+            mgr.close(pair, confirm=_ask(f"Type {pair} to close it at market: "))
+            print("exit sent")
+        elif act == "cancel":
+            if _ask(f"Type yes to cancel order {args.pair}: ").strip().lower() != "yes":
+                raise TradeError("not confirmed")
+            mgr.cancel_order(args.pair)
+            print("cancel sent")
+        elif act == "panic":
+            for line in mgr.panic(_ask("Type PANIC to cancel all orders, close all "
+                                       "positions and block new trades: ")):
+                print(line)
+        elif act == "resume":
+            mgr.resume()
+            print("new trades allowed again")
+        elif act == "log":
+            for e in reversed(mgr.store.events(args.n)):
+                when = _time.strftime("%m-%d %H:%M:%S", _time.localtime(e["ts_ms"] / 1000))
+                print(f"{when} {'ok ' if e['ok'] else 'ERR'} {e['action']}: "
+                      f"{e['request']} -> {e['response'][:200]}")
+        elif act in ("reconcile", "watch"):
+            if not mgr.live:
+                print("the watcher only runs in live mode")
+                return 0
+            print(f"watching CoinDCX positions every {args.every}s - Ctrl+C to stop", flush=True)
+            while True:
+                try:
+                    for m in mgr.reconcile():
+                        print(m, flush=True)
+                except Exception as exc:         # keep watching through a bad round
+                    print(f"check failed: {exc}", flush=True)
+                if act == "reconcile":
+                    return 0
+                _time.sleep(args.every)
+    except TradeError as exc:
+        print(f"refused: {exc}")
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Crypto relative-strength screener")
     parser.add_argument("--config", default=None, help="path to config.yaml")
@@ -311,7 +415,28 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--horizon", type=int, default=10)
     b.set_defaults(func=cmd_backtest)
 
+    t = sub.add_parser("trade", help="CoinDCX INR futures: status, preview, open, "
+                                     "tpsl, close, cancel, panic, resume, log, watch")
+    t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
+                                      "panic", "resume", "log", "reconcile", "watch"])
+    t.add_argument("pair", nargs="?", default="",
+                   help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
+    t.add_argument("side", nargs="?", choices=["long", "short"], default=None)
+    t.add_argument("--sl", type=float, default=None, help="stop loss price (USDT)")
+    t.add_argument("--tp", type=float, default=None, help="target price (USDT)")
+    t.add_argument("--risk", type=float, default=0.0, help="INR to lose if the stop is hit")
+    t.add_argument("--lev", type=int, default=1, help="leverage")
+    t.add_argument("--limit", type=float, default=None,
+                   help="limit entry price; leave out for a market entry")
+    t.add_argument("--every", type=int, default=30, help="watch: seconds between checks")
+    t.add_argument("-n", type=int, default=30, help="log: how many events")
+    t.set_defaults(func=cmd_trade)
+
     args = parser.parse_args(argv)
+    if getattr(args, "action", None) in ("preview", "open") and not (
+            args.pair and args.side and args.sl and args.risk):
+        parser.error("preview/open need: PAIR long|short --sl PRICE --risk INR [--tp] "
+                     "[--lev] [--limit]")
     try:  # ensure non-ASCII output never crashes on Windows consoles
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):

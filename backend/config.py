@@ -129,6 +129,11 @@ class Config:
         return dict(self.raw.get("alerts", {}))
 
     @property
+    def trading(self) -> dict[str, Any]:
+        """CoinDCX futures execution settings (empty -> dry run, default limits)."""
+        return dict(self.raw.get("trading", {}))
+
+    @property
     def btc_strength(self) -> dict[str, Any]:
         """Settings for the coins-vs-BTC board (empty -> module defaults)."""
         return dict(self.raw.get("btc_strength", {}))

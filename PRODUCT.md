@@ -11,7 +11,9 @@ tells you when price reaches a level, trendline or zone you set:
    patterns and daily order blocks, drawn automatically?
 4. **Which coins have a pattern breaking out right now**, on any timeframe?
 
-It needs no API keys. Everything below is a read of market data, not
+The screener needs no API keys. The Trade page places orders on CoinDCX
+INR futures only with your keys and `trading.mode: live`. Everything else
+below is a read of market data, not
 financial advice.
 
 Run it:
@@ -30,6 +32,7 @@ Then open http://localhost:8501 and pick a page in the sidebar.
 | Chart Patterns | `/Chart_Patterns` | Auto-drawn lines, Fibonacci, patterns and daily order blocks on one chart |
 | Pattern Scanner | `/Pattern_Scanner` | Triangles, wedges and flags across many coins and timeframes |
 | Alerts | `/Alerts` | Price, trendline and zone alerts you set, checked every minute |
+| Trade | `/Trade` | Open, protect (SL + target) and close CoinDCX INR futures trades |
 
 ---
 
@@ -280,6 +283,80 @@ already met when you set it is refused with a warning.
 Alerts are stored in `data_cache/alerts.db` (SQLite). Firing an alert is one
 atomic update, so two open tabs or a tab plus the watcher never send it twice.
 
+## 6. Trade page
+
+**Question it answers:** place this trade on CoinDCX with a stop loss and a
+target, sized so I lose only what I choose.
+
+"INR futures" on CoinDCX are the USDT perpetuals (e.g. `B-BTC_USDT`) with
+INR as margin. Prices are in USDT; margin, risk and P&L are in INR at
+CoinDCX's fixed USDT→INR rate.
+
+### A trade ticket
+Pick the coin, long or short, market or limit entry, a **stop loss (always
+required)**, an optional target, the **INR you accept to lose** if the stop
+is hit, and leverage. The page sizes the trade from that risk (fees
+included) and shows: size, entry, margin, loss at the stop, profit at the
+target and its R multiple, and an estimated liquidation price.
+
+A trade is **refused** when the stop is on the wrong side, closer than
+`min_stop_pct`, beyond the liquidation price, the size is under CoinDCX's
+minimum, the leverage is above the pair's tier or your limit, the risk or
+margin is above your limit, you already hold that coin, you have
+`max_open_positions` open, or you have lost `max_daily_loss_inr` today (UTC).
+
+To place it you **type the pair name** (e.g. `B-SOL_USDT`) and click.
+
+### What happens when you place it
+1. Leverage is set for the pair, then the entry is sent.
+2. Market entry: the page waits for the fill, attaches the stop loss and
+   target on the exchange, then **reads the position back** to make sure the
+   stop is there. If CoinDCX does not show the stop after a second try, the
+   position is **closed at market** — it is never left without a stop.
+3. Limit entry: it waits on the exchange; the watcher attaches SL / target
+   when it fills.
+4. A request that times out is never sent twice; the exchange is re-read.
+
+### Managing open trades
+- Each open position shows entry, SL, target and the price now. Move the SL
+  or target (type the pair to confirm) or **close at market**.
+- Open orders, with cancel.
+- **Panic** (type `PANIC`): cancels every order, closes every position and
+  blocks new trades until you allow them again.
+- A **log** of every request sent and CoinDCX's answer
+  (`data_cache/trading.db`).
+
+### The watcher (live mode)
+`.venv/Scripts/python.exe -m backend.cli trade watch` checks every 30 s: it
+attaches SL / target to filled limit entries, marks trades closed when their
+stop or target hits, and warns (Telegram / Windows) about any position with
+no stop loss — including ones opened by hand in the CoinDCX app. SL and
+target orders sit on CoinDCX, so they work even when the watcher is off.
+
+### From a terminal
+```bash
+.venv/Scripts/python.exe -m backend.cli trade status
+.venv/Scripts/python.exe -m backend.cli trade preview SOL long --sl 115 --tp 135 --risk 300 --lev 3
+.venv/Scripts/python.exe -m backend.cli trade open SOL long --sl 115 --tp 135 --risk 300 --lev 3
+.venv/Scripts/python.exe -m backend.cli trade tpsl SOL --sl 118
+.venv/Scripts/python.exe -m backend.cli trade close SOL
+.venv/Scripts/python.exe -m backend.cli trade panic
+.venv/Scripts/python.exe -m backend.cli trade log
+```
+Add `--limit PRICE` for a limit entry. Every command that sends something
+asks you to type the pair (or `PANIC`) first.
+
+### Safety set-up
+- `trading.mode: dry_run` (the default) checks and logs every order and sends
+  nothing. Switch to `live` only after a dry run looks right.
+- Keys live only in `.env` (git-ignored): `COINDCX_API_KEY`,
+  `COINDCX_API_SECRET`. They are sent in headers, never logged or stored.
+- CoinDCX has **no read-only keys**: bind the key to the IP of the machine
+  that trades, and keep only trading money in that account (a sub-account
+  has its own keys).
+- Claude can preview trades, read status and prepare commands; you type the
+  confirmation that places or closes a trade.
+
 ---
 
 ## Data sources
@@ -290,6 +367,7 @@ atomic update, so two open tabs or a tab plus the watcher never send it twice.
 | Binance USDⓈ-M futures public API | Futures candles, open interest, funding, perpetual list (heatmap, market read, patterns, scanner) | none |
 | Binance `BTCDOMUSDT` | BTC dominance candles on every timeframe | none |
 | CoinGecko public API | Live BTC.D %, market-cap ranking | none |
+| CoinDCX futures API | Trade page: INR futures instruments, prices, orders, positions | yes, for orders |
 
 Binance refuses US servers, so hosting must be outside the US for the BTC.D
 and futures data.
@@ -304,6 +382,7 @@ and futures data.
 | `liquidation.leverages`, `maintenance_margin`, `bins` | Liquidation model |
 | `data.watchlists_file` | Where custom watchlists are saved |
 | `alerts.db`, `check_seconds`, `desktop` | Alert store, how often open pages check, Windows pop-ups |
+| `trading.mode`, `trading.limits`, `close_unprotected` | Dry run or live; per-trade and daily risk limits; auto-close positions with no stop |
 
 ## Hosting (planned, not done)
 

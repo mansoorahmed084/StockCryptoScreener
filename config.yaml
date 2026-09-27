@@ -89,6 +89,23 @@ alerts:
   check_seconds: 60        # how often an open dashboard page checks them
   desktop: true            # Windows pop-up when one fires; Telegram too if .env has it
 
+# Order execution on CoinDCX INR-margined futures (Trade page, `backend.cli trade`).
+# dry_run logs every order and sends nothing. Set live only after a dry run
+# looks right. Keys go in .env (COINDCX_API_KEY / COINDCX_API_SECRET), never here.
+trading:
+  mode: dry_run            # dry_run | live
+  db: data_cache/trading.db
+  fill_timeout_s: 20       # wait this long for a market entry to fill before SL/TP
+  close_unprotected: false # true = the watcher closes any position with no stop loss
+  limits:                  # a trade that breaks any of these is refused
+    max_risk_inr: 500      # most you can lose on one trade if its stop is hit
+    max_margin_inr: 5000   # most margin one trade may lock
+    max_leverage: 5
+    max_open_positions: 3
+    max_daily_loss_inr: 1500   # no new trades after losing this much today (UTC)
+    min_stop_pct: 0.3      # refuse a stop closer than this % to entry
+    allowed_pairs: []      # e.g. [BTC, ETH, SOL]; empty = any active INR pair
+
 # Index base construction.
 index:
   exclude: [BTC]           # equal-weight alt index excludes these

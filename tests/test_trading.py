@@ -1,0 +1,344 @@
+import hashlib
+import hmac
+import json
+
+import httpx
+import pytest
+
+from backend.trading import risk
+from backend.trading.client import CoinDcxError, FuturesClient, UnknownOutcome
+from backend.trading.manager import DRY_RUN, LIVE, TradeError, TradeManager
+from backend.trading.store import CLOSED, FAILED, OPEN, PENDING, TradeStore
+
+PAIR = "B-SOL_USDT"
+INSTRUMENT = {
+    "pair": PAIR, "status": "active", "price_increment": 0.01, "quantity_increment": 0.01,
+    "min_quantity": 0.01, "max_quantity": 50000, "max_market_order_quantity": 5000,
+    "min_notional": 6.0, "taker_fee": 0.075, "multiplier_up": 8.0, "multiplier_down": 8.0,
+    "exit_only": False, "max_leverage_long": 20.0,
+    "dynamic_position_leverage_details": {"10": 1000000.0, "20": 100000.0},
+    "dynamic_safety_margin_details": {"50000": 1.5, "100000": 2.0},
+}
+LIMITS = risk.Limits(max_risk_inr=1000, max_margin_inr=20000, max_leverage=10,
+                     max_open_positions=2, max_daily_loss_inr=2000, min_stop_pct=0.3)
+
+
+def req(**kw):
+    base = dict(pair="SOL", side=risk.LONG, stop_loss=95.0, take_profit=110.0,
+                risk_inr=500.0, leverage=5)
+    return risk.TradeRequest(**{**base, **kw})
+
+
+def plan_for(r, **kw):
+    r.pair = risk.to_pair(r.pair)
+    args = dict(last_price=100.0, rate=90.0, limits=LIMITS)
+    return risk.build_plan(r, risk.Instrument.from_api(INSTRUMENT), **{**args, **kw})
+
+
+# -- sizing and checks ---------------------------------------------------------
+
+def test_size_comes_from_inr_risk_with_fees():
+    p = plan_for(req())
+    assert p.ok, p.errors
+    # 5 USDT stop + 0.075% taker fee on 100 and 95, at 90 INR/USDT
+    per_unit = (5 + 195 * 0.00075) * 90
+    assert p.qty == pytest.approx(int(500 / per_unit * 100) / 100)
+    assert p.risk_inr <= 500
+    assert p.margin_inr == pytest.approx(p.qty * 100 * 90 / 5)
+    assert p.rr == pytest.approx(p.reward_inr / p.risk_inr)
+
+
+@pytest.mark.parametrize("kw, text", [
+    (dict(stop_loss=101.0), "must be below entry"),
+    (dict(side=risk.SHORT, stop_loss=95.0, take_profit=90.0), "must be above entry"),
+    (dict(take_profit=99.0), "target"),
+    (dict(stop_loss=99.9), "minimum is 0.3%"),
+    (dict(stop_loss=0.0), "needs a stop loss"),
+    (dict(leverage=12), "above your limit of 10x"),
+    (dict(risk_inr=5000.0), "above your limit"),
+    (dict(leverage=10, stop_loss=85.0, risk_inr=400.0), "liquidated"),
+    (dict(entry_type=risk.LIMIT, limit_price=None), "needs a limit price"),
+    (dict(entry_type=risk.LIMIT, limit_price=80.0, stop_loss=78.0), "between"),
+])
+def test_bad_trades_are_blocked(kw, text):
+    p = plan_for(req(**kw))
+    assert not p.ok
+    assert any(text in e for e in p.errors), p.errors
+    assert "BLOCKED" in p.summary()
+
+
+def test_account_limits_block_new_trades():
+    assert any("already hold" in e for e in plan_for(req(), has_position=True).errors)
+    assert any("positions are open" in e for e in plan_for(req(), open_positions=2).errors)
+    assert any("daily limit" in e for e in plan_for(req(), loss_today_inr=2500).errors)
+    lim = risk.Limits.from_config({"allowed_pairs": ["BTC"]})
+    assert any("allowed_pairs" in e for e in plan_for(req(), limits=lim).errors)
+
+
+def test_short_liquidation_is_above_entry():
+    assert risk.liquidation_price(risk.SHORT, 100, 5, 1.5) == pytest.approx(118.5)
+    assert risk.liquidation_price(risk.LONG, 100, 5, 1.5) == pytest.approx(81.5)
+
+
+def test_pair_names_and_rounding():
+    assert risk.to_pair("sol") == risk.to_pair("SOLUSDT") == risk.to_pair("B-SOL_USDT") == PAIR
+    from decimal import Decimal
+    assert risk.round_step(0.123456, Decimal("0.001"), down=True) == 0.123
+    assert risk.round_step(101.237, Decimal("0.01")) == 101.24
+
+
+def test_moving_a_stop_through_the_price_is_refused():
+    assert risk.check_stop_move(risk.LONG, stop_loss=101, take_profit=None, mark=100)
+    assert not risk.check_stop_move(risk.LONG, stop_loss=99, take_profit=120, mark=100)
+    assert risk.check_stop_move(risk.SHORT, stop_loss=None, take_profit=101, mark=100)
+
+
+# -- signed client ---------------------------------------------------------------
+
+def test_signature_is_hmac_of_the_exact_body_sent():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content
+        seen["headers"] = request.headers
+        return httpx.Response(200, json=[])
+
+    c = FuturesClient("k", "s3cret", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    c.positions([PAIR])
+    body = json.loads(seen["body"])
+    assert body["pairs"] == PAIR and body["margin_currency_short_name"] == ["INR"]
+    assert body["timestamp"] > 1_700_000_000_000          # milliseconds
+    assert seen["headers"]["X-AUTH-APIKEY"] == "k"
+    assert seen["headers"]["X-AUTH-SIGNATURE"] == hmac.new(
+        b"s3cret", seen["body"], hashlib.sha256).hexdigest()
+    assert "s3cret" not in repr(c)
+
+
+def test_writes_are_never_retried_but_reads_are():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("/orders/create"):
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(503, json={"message": "down"})
+
+    c = FuturesClient("k", "s", client=httpx.Client(transport=httpx.MockTransport(handler)),
+                      retries=2)
+    with pytest.raises(UnknownOutcome):
+        c.create_order({"pair": PAIR})
+    assert len(calls) == 1
+    with pytest.raises(CoinDcxError):
+        c.positions()
+    assert len(calls) == 3
+
+
+def test_client_refuses_private_calls_without_keys():
+    c = FuturesClient(client=httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json=[]))))
+    with pytest.raises(CoinDcxError, match="not set"):
+        c.wallets()
+
+
+# -- manager against a fake exchange ---------------------------------------------
+
+class FakeExchange:
+    has_keys = True
+
+    def __init__(self, *, fills=True, accepts_sl=True):
+        self.fills = fills
+        self.accepts_sl = accepts_sl
+        self.pos: dict[str, dict] = {}
+        self.open_orders: list[dict] = []
+        self.writes: list[tuple] = []
+
+    # reads
+    def instrument(self, pair):
+        return INSTRUMENT
+
+    def prices(self):
+        return {PAIR: {"ls": 100.0, "mp": 100.0}}
+
+    def conversion_rate(self):
+        return 90.0
+
+    def positions(self, pairs=None):
+        return [dict(p) for p in self.pos.values() if not pairs or p["pair"] in pairs]
+
+    def orders(self, status="open"):
+        return [o for o in self.open_orders if o["status"] in status.split(",")]
+
+    def transactions(self, size=100):
+        return []
+
+    def wallets(self):
+        return []
+
+    # writes
+    def update_leverage(self, pair, lev):
+        self.writes.append(("update_leverage", pair, lev))
+
+    def create_order(self, order):
+        self.writes.append(("create_order", order))
+        if self.fills and order["order_type"] == "market_order":
+            self.fill(order["pair"], order["total_quantity"])
+        else:
+            self.open_orders.append({"id": "o1", "pair": order["pair"], "status": "open"})
+        return {"id": "o1"}
+
+    def fill(self, pair, qty):
+        self.pos[pair] = {"id": "p1", "pair": pair, "active_pos": qty, "avg_price": 100.0,
+                          "stop_loss_trigger": None, "take_profit_trigger": None}
+        self.open_orders = [o for o in self.open_orders if o["pair"] != pair]
+
+    def create_tpsl(self, position_id, stop_loss=None, take_profit=None):
+        self.writes.append(("create_tpsl", stop_loss, take_profit))
+        p = next(p for p in self.pos.values() if p["id"] == position_id)
+        if stop_loss is not None and self.accepts_sl:
+            p["stop_loss_trigger"] = stop_loss
+            self.open_orders.append({"id": "sl1", "pair": p["pair"], "status": "untriggered",
+                                     "stage": "tpsl_exit", "order_type": "stop_market"})
+        if take_profit is not None:
+            p["take_profit_trigger"] = take_profit
+        return {}
+
+    def cancel_order(self, oid):
+        self.writes.append(("cancel_order", oid))
+        self.open_orders = [o for o in self.open_orders if o["id"] != oid]
+        for p in self.pos.values():
+            if oid == "sl1":
+                p["stop_loss_trigger"] = None
+
+    def exit_position(self, pid):
+        self.writes.append(("exit_position", pid))
+        self.pos = {k: v for k, v in self.pos.items() if v["id"] != pid}
+
+    def cancel_position_orders(self, pid):
+        self.writes.append(("cancel_position_orders", pid))
+
+    def cancel_all_orders(self):
+        self.writes.append(("cancel_all_orders",))
+        self.open_orders = []
+
+
+def manager(tmp_path, ex, mode=LIVE, **kw):
+    return TradeManager(ex, TradeStore(tmp_path / "t.db"), LIMITS, mode=mode,
+                        fill_timeout_s=0.01, poll_s=0.001, sleep=lambda s: None, **kw)
+
+
+def test_dry_run_sends_nothing(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex, mode=DRY_RUN)
+    plan, tid = m.open(req(), confirm=PAIR)
+    assert plan.ok and ex.writes == []
+    assert m.store.trades()[0]["status"] == "dry_run"
+    assert all(e["response"] == '"dry run: not sent"' for e in m.store.events())
+
+
+def test_live_market_entry_gets_sl_and_tp(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    plan, tid = m.open(req(), confirm="b-sol_usdt")
+    kinds = [w[0] for w in ex.writes]
+    assert kinds == ["update_leverage", "create_order", "create_tpsl"]
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 95.0
+    assert ex.pos[PAIR]["take_profit_trigger"] == 110.0
+    t = m.store.trades()[0]
+    assert t["status"] == OPEN and t["position_id"] == "p1"
+
+
+def test_position_is_closed_when_stop_loss_is_not_accepted(tmp_path):
+    ex = FakeExchange(accepts_sl=False)
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    assert ("exit_position", "p1") in ex.writes
+    assert PAIR not in ex.pos
+    assert m.store.trades()[0]["status"] == FAILED
+
+
+def test_nothing_is_sent_without_the_typed_confirmation(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    with pytest.raises(TradeError, match="not confirmed"):
+        m.open(req(), confirm="yes")
+    assert ex.writes == []
+
+
+def test_a_blocked_plan_is_never_sent(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    with pytest.raises(TradeError, match="below entry"):
+        m.open(req(stop_loss=105.0), confirm=PAIR)
+    assert ex.writes == []
+
+
+def test_timed_out_entry_is_checked_not_resent(tmp_path):
+    ex = FakeExchange()
+
+    def lost(order):
+        ex.writes.append(("create_order", order))
+        raise UnknownOutcome("timeout")
+
+    ex.create_order = lost
+    m = manager(tmp_path, ex)
+    with pytest.raises(TradeError, match="not on the exchange"):
+        m.open(req(), confirm=PAIR)
+    assert [w[0] for w in ex.writes] == ["update_leverage", "create_order"]
+    assert m.store.trades()[0]["status"] == FAILED
+
+
+def test_panic_closes_everything_and_blocks_new_trades(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    with pytest.raises(TradeError):
+        m.panic("yes")
+    m.panic("PANIC")
+    assert PAIR not in ex.pos and ("cancel_all_orders",) in ex.writes
+    assert any("halted" in e for e in m.preview(req()).errors)
+    m.resume()
+    assert m.preview(req()).ok
+
+
+def test_watcher_protects_a_filled_limit_entry_and_closes_records(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(entry_type=risk.LIMIT, limit_price=99.0), confirm=PAIR)
+    assert m.store.trades()[0]["status"] == PENDING
+    assert m.reconcile() == []                        # not filled yet
+    ex.fill(PAIR, 1.0)
+    assert m.reconcile()                              # filled -> SL/TP attached
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 95.0
+    assert m.store.trades()[0]["status"] == OPEN
+    ex.pos.clear()                                    # stop hit on the exchange
+    m.reconcile()
+    assert m.store.trades()[0]["status"] == CLOSED
+
+
+def test_watcher_warns_once_about_a_position_with_no_stop(tmp_path):
+    ex = FakeExchange()
+    ex.fill(PAIR, 1.0)                                # opened by hand in the app
+    m = manager(tmp_path, ex)
+    assert "NO stop loss" in m.reconcile()[0]
+    assert m.reconcile() == []
+    m2 = manager(tmp_path, ex, close_unprotected=True)
+    m2.reconcile()
+    assert PAIR not in ex.pos
+
+
+def test_moving_the_stop_restores_protection_if_refused(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    m.set_tpsl("SOL", stop_loss=97.0)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 97.0
+    assert m.store.trades()[0]["stop_loss"] == 97.0
+
+    ex.accepts_sl = False
+    with pytest.raises(TradeError, match="refused the new stop"):
+        m.set_tpsl("SOL", stop_loss=98.0)
+    assert ("exit_position", "p1") in ex.writes       # could not restore -> closed
+    with pytest.raises(TradeError, match="wrong side"):
+        ex.accepts_sl = True
+        ex.fill(PAIR, 1.0)
+        m.set_tpsl("SOL", stop_loss=101.0)
