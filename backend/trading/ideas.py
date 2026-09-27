@@ -89,6 +89,10 @@ def scan(mgr: TradeManager, setups: pd.DataFrame, settings: Settings) -> list[di
     active = set(mgr.client.active_pairs())
     free = mgr.free_inr()
     now = int(time.time() * 1000)
+    # An expired ready setup must not hide the same setup for recheck_hours: expire it,
+    # so a scan that still finds it records it again as a fresh one.
+    mgr.store.expire_ideas(SOURCE, now - settings.max_age_minutes * 60_000,
+                           f"older than {settings.max_age_minutes} minutes")
     new: list[dict] = []
     for r in setups.itertuples(index=False):
         pair = risk.to_pair(r.coin)

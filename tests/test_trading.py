@@ -615,3 +615,17 @@ def test_switching_the_trail_rewrites_its_note(tmp_path):
     m.set_trail("SOL", trail_candle="15m")
     note = m.store.trades()[0]["note"]
     assert note == "adopted (opened by hand); trailing under the last closed 15m candle"
+
+
+def test_an_expired_setup_is_offered_again_by_the_next_scan(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    first, = ideas.scan(m, setups(), s)
+    assert ideas.scan(m, setups(), s) == []                 # fresh: not recorded twice
+    m.store.update_idea(first["id"], ts_ms=int(ideas.time.time() * 1000) - 3 * 3_600_000)
+    again, = ideas.scan(m, setups(), s)                     # 3h old: expired, re-offered
+    assert again["status"] == ideas.READY and again["id"] != first["id"]
+    assert m.store.idea(first["id"])["status"] == ideas.EXPIRED
+    blocked, = ideas.scan(m, setups(coin="XYZ"), s)         # a blocked one still waits 6h
+    m.store.update_idea(blocked["id"], ts_ms=int(ideas.time.time() * 1000) - 3 * 3_600_000)
+    assert ideas.scan(m, setups(coin="XYZ"), s) == []

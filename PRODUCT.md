@@ -332,7 +332,8 @@ config. Only a trade you explicitly mark **override** (a tick box on the page,
   A scan never places an order. A new ready setup is also sent to Telegram.
 - Each setup is **ready** (tap **Place**, then confirm), **waiting** (near its
   line; ready once a later scan sees the break), **blocked** (with the rule
-  that failed), **placed** or **expired** (a ready setup older than 2 hours).
+  that failed), **placed** or **expired** (a ready setup older than 2 hours;
+  the next scan offers it again, fresh, if it still passes every rule).
 - Tapping Place re-checks size, stop and every rule at the current price.
 - A setup you traded is never offered again. A coin rests 24 hours after any
   trade on it — including one you **closed by hand** in the app, which the

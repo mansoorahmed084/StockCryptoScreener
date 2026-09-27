@@ -156,11 +156,20 @@ class TradeStore:
 
     def idea_seen(self, source: str, pair: str, timeframe: str, pattern: str, kind: str,
                   since_ms: int) -> bool:
+        """Recorded since ``since_ms`` and not expired (an expired setup may be offered again)."""
         with self._db() as db:
             return db.execute("SELECT 1 FROM ideas WHERE source=? AND pair=? AND timeframe=? "
-                              "AND pattern=? AND kind=? AND ts_ms>=? LIMIT 1",
+                              "AND pattern=? AND kind=? AND ts_ms>=? AND status!='expired' "
+                              "LIMIT 1",
                               (source, pair, timeframe, pattern, kind, since_ms)
                               ).fetchone() is not None
+
+    def expire_ideas(self, source: str, before_ms: int, reason: str) -> int:
+        """Mark ready setups recorded before ``before_ms`` as expired."""
+        with self._db() as db:
+            return db.execute("UPDATE ideas SET status='expired', reason=? WHERE source=? "
+                              "AND status='ready' AND ts_ms<?",
+                              (reason, source, before_ms)).rowcount
 
     # -- events ----------------------------------------------------------------
     def log(self, action: str, request: Any, response: Any, ok: bool,
