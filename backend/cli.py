@@ -258,7 +258,7 @@ def _request(args: argparse.Namespace):
         pair=args.pair, side=args.side, stop_loss=args.sl, take_profit=args.tp,
         risk_inr=args.risk, leverage=args.lev,
         entry_type=risk.LIMIT if args.limit else risk.MARKET, limit_price=args.limit,
-        margin_inr=args.margin)
+        margin_inr=args.margin, override=args.override)
 
 
 def cmd_trade(args: argparse.Namespace) -> int:
@@ -268,7 +268,8 @@ def cmd_trade(args: argparse.Namespace) -> int:
     from backend.trading import risk
     from backend.trading.manager import TradeError, TradeManager
 
-    mgr = TradeManager.from_config(load_config(args.config))
+    config = load_config(args.config)
+    mgr = TradeManager.from_config(config, force_dry_run=args.dry_run)
     act = args.action
     banner = "LIVE" if mgr.live else "DRY RUN (nothing is sent)"
     try:
@@ -321,6 +322,46 @@ def cmd_trade(args: argparse.Namespace) -> int:
             for line in mgr.panic(_ask("Type PANIC to cancel all orders, close all "
                                        "positions and block new trades: ")):
                 print(line)
+        elif act == "scan":
+            from backend.service import ScreenerService
+            from backend.trading import ideas
+
+            settings = ideas.Settings.from_config(config.trading.get("setups"))
+            svc = ScreenerService(config, refresh=False)
+            while True:
+                print(f"scanning the top {settings.top} coins (places no orders)...", flush=True)
+                try:
+                    new = ideas.scan(mgr, ideas.find_setups(svc, settings.top), settings)
+                    for i in new:
+                        print(f"#{i['id']} {i['coin']} {i['timeframe']} {i['pattern']}: "
+                              f"{i['status'].upper()} - {i['reason']}", flush=True)
+                    print(f"{len(new)} new setup(s). Ready ones: tap Place on the Trade page, "
+                          "or `trade take ID`.", flush=True)
+                except Exception as exc:         # keep scanning through a bad round
+                    print(f"scan failed: {exc}", flush=True)
+                if not args.every_min:
+                    return 0
+                _time.sleep(args.every_min * 60)
+        elif act == "ideas":
+            for i in reversed(mgr.store.ideas(args.n)):
+                when = _time.strftime("%m-%d %H:%M", _time.localtime(i["ts_ms"] / 1000))
+                print(f"#{i['id']} {when} {i['coin']} {i['timeframe']} {i['pattern']} "
+                      f"SL {i['stop']:g} TP {i['target']:g}: {i['status'].upper()} "
+                      f"- {i['reason']}")
+        elif act == "take":
+            from backend.trading import ideas
+
+            settings = ideas.Settings.from_config(config.trading.get("setups"))
+            idea = mgr.store.idea(int(args.pair))
+            if idea is None:
+                raise TradeError(f"no setup #{args.pair}")
+            print(f"[{banner}] setup #{idea['id']}: LONG {idea['coin']} {idea['timeframe']} "
+                  f"{idea['pattern']}, SL {idea['stop']:g}, TP {idea['target']:g}\n"
+                  f"  {idea['reason']}")
+            if _ask(f"Type {idea['pair']} to place it: ").strip().upper() != idea["pair"]:
+                raise TradeError("not confirmed")
+            trade_id = ideas.place(mgr, idea["id"], settings)
+            print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
         elif act == "resume":
             mgr.resume()
             print("new trades allowed again")
@@ -419,7 +460,8 @@ def main(argv: list[str] | None = None) -> int:
     t = sub.add_parser("trade", help="CoinDCX INR futures: status, preview, open, "
                                      "tpsl, close, cancel, panic, resume, log, watch")
     t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
-                                      "panic", "resume", "log", "reconcile", "watch"])
+                                      "panic", "resume", "log", "reconcile", "watch",
+                                      "scan", "ideas", "take"])
     t.add_argument("pair", nargs="?", default="",
                    help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
     t.add_argument("side", nargs="?", choices=["long", "short"], default=None)
@@ -432,7 +474,14 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--limit", type=float, default=None,
                    help="limit entry price; leave out for a market entry")
     t.add_argument("--every", type=int, default=30, help="watch: seconds between checks")
-    t.add_argument("-n", type=int, default=30, help="log: how many events")
+    t.add_argument("-n", type=int, default=30, help="log / ideas: how many rows")
+    t.add_argument("--override", action="store_true",
+                   help="break the gold-standard rules (10%% stop, 5%% margin, 5x) for "
+                        "this one trade")
+    t.add_argument("--dry-run", action="store_true",
+                   help="send nothing, whatever trading.mode says")
+    t.add_argument("--every-min", type=int, default=0,
+                   help="scan: repeat every N minutes (0 = once)")
     t.set_defaults(func=cmd_trade)
 
     args = parser.parse_args(argv)

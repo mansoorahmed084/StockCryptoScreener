@@ -15,7 +15,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from backend.config import load_config  # noqa: E402
-from backend.trading import risk  # noqa: E402
+from backend.trading import ideas, risk  # noqa: E402
 from backend.trading.manager import TradeError, TradeManager  # noqa: E402
 
 st.set_page_config(page_title="Trade", layout="wide")
@@ -55,6 +55,13 @@ def header(m: TradeManager) -> None:
         if st.button("Allow new trades again"):
             m.resume()
             st.rerun()
+    free = m.free_inr()
+    budget = (f" — now Rs {risk.margin_budget(free):,.0f} of Rs {free:,.0f} free"
+              if free is not None else "")
+    st.markdown(f"**Gold-standard rules** (in code): stop loss ≤ {risk.MAX_STOP_PCT:g}% "
+                f"from entry · margin ≤ {risk.MAX_MARGIN_PCT_OF_FREE:g}% of free balance"
+                f"{budget} · leverage ≤ {risk.MAX_LEVERAGE}x. Only a trade you tick "
+                "**override** on may break them.")
     lim = m.limits
     st.caption(f"Your limits: risk ≤ Rs {lim.max_risk_inr:,.0f} a trade · margin ≤ "
                f"Rs {lim.max_margin_inr:,.0f} · leverage ≤ {lim.max_leverage}x · "
@@ -90,14 +97,20 @@ def new_trade(m: TradeManager) -> None:
                                    value=min(200.0, m.limits.max_risk_inr), step=50.0,
                                    key="t_risk")
     else:
-        margin_inr = c3.number_input("Margin (Rs)", min_value=100.0,
-                                     value=min(1000.0, m.limits.max_margin_inr), step=100.0,
+        free = m.free_inr()
+        default_margin = risk.margin_budget(free) if free else 1000.0
+        margin_inr = c3.number_input("Margin (Rs)", min_value=50.0,
+                                     value=float(round(max(50.0, default_margin))), step=50.0,
                                      key="t_margin")
     lev = c3.slider("Leverage", 1, max(1, m.limits.max_leverage), 2, key="t_lev")
+    override = c3.checkbox("Override the gold-standard rules (bigger position)",
+                           key="t_override",
+                           help="Only for a trade you explicitly want bigger than the rules "
+                                "allow. It is logged as overridden.")
 
     req = risk.TradeRequest(pair=pair, side=side, stop_loss=sl, take_profit=tp,
                             risk_inr=risk_inr, leverage=lev, entry_type=kind,
-                            limit_price=limit, margin_inr=margin_inr)
+                            limit_price=limit, margin_inr=margin_inr, override=override)
     try:
         plan = m.preview(req)
     except Exception as exc:
@@ -215,9 +228,79 @@ def log(m: TradeManager) -> None:
                    "with no stop loss.")
 
 
+@st.cache_resource(show_spinner=False)
+def screener_service():
+    from backend.service import ScreenerService
+    return ScreenerService(load_config(), refresh=False)
+
+
+def setup_settings() -> ideas.Settings:
+    return ideas.Settings.from_config(load_config().trading.get("setups"))
+
+
+@st.dialog("Place this trade?")
+def confirm_place(m: TradeManager, idea: dict) -> None:
+    word = "LIVE" if m.live else "dry-run"
+    st.markdown(f"**LONG {idea['coin']}** ({idea['timeframe']} {idea['pattern']}) at market\n\n"
+                f"Stop loss **{idea['stop']:g}** · target **{idea['target']:g}**\n\n"
+                f"{idea['reason']}")
+    st.caption("Size, stop and rules are checked again at the current price before "
+               "anything is sent.")
+    a, b = st.columns(2)
+    if a.button(f"Yes, place {word}", type="primary"):
+        try:
+            with st.spinner("Placing entry, then stop loss and target…"):
+                trade_id = ideas.place(m, idea["id"], setup_settings())
+            st.success(f"Placed: trade #{trade_id}.")
+        except Exception as exc:
+            st.error(f"Refused: {exc}")
+    if b.button("Cancel"):
+        st.rerun()
+
+
+def setups(m: TradeManager) -> None:
+    st.subheader("Setups from the scan")
+    st.caption("The scanner's buy setups with the trade each would make. Nothing is placed "
+               "until you tap Place and confirm. A setup you traded is never offered "
+               "again, and a coin rests 24h after any trade on it, including one you "
+               "closed by hand.")
+    s = setup_settings()
+    if st.button(f"Scan the top {s.top} coins now (places nothing)"):
+        with st.spinner("Scanning… about a minute"):
+            try:
+                new = ideas.scan(m, ideas.find_setups(screener_service(), s.top), s)
+                st.success(f"{len(new)} new setup(s).")
+            except Exception as exc:
+                st.error(f"Scan failed: {exc}")
+    rows = m.store.ideas(60)
+    if not rows:
+        st.caption("No setups yet. Scan now, or run `python -m backend.cli trade scan`.")
+        return
+    fresh_ms = s.max_age_minutes * 60_000
+    now = time.time() * 1000
+    ready = [i for i in rows if i["status"] == ideas.READY and now - i["ts_ms"] <= fresh_ms]
+    for i in ready:
+        a, b = st.columns([5, 1])
+        a.markdown(f"🟢 **{i['coin']}** {i['timeframe']} {i['pattern']} · SL {i['stop']:g} · "
+                   f"TP {i['target']:g} · {i['rr']:.1f}R — {i['reason']}")
+        if b.button("Place", key=f"idea_{i['id']}", type="primary"):
+            confirm_place(m, i)
+    if not ready:
+        st.caption("No setup is ready to place right now.")
+    with st.expander(f"All recent setups ({len(rows)})"):
+        st.dataframe(pd.DataFrame([{
+            "When": time.strftime("%m-%d %H:%M", time.localtime(i["ts_ms"] / 1000)),
+            "Coin": i["coin"], "TF": i["timeframe"], "Pattern": i["pattern"],
+            "Status": i["status"], "SL": i["stop"], "TP": i["target"],
+            "R": round(i["rr"], 1), "Why / plan": i["reason"]} for i in rows]),
+            hide_index=True, width="stretch")
+
+
 def main() -> None:
     m = manager()
     header(m)
+    setups(m)
+    st.divider()
     new_trade(m)
     st.divider()
     positions(m)

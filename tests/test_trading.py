@@ -76,6 +76,18 @@ def test_size_by_margin():
     assert any("risk Rs" in e for e in big.errors), big.errors
 
 
+def test_gold_standard_rules_and_override():
+    wide = plan_for(req(stop_loss=88.0, risk_inr=300.0))          # 12% stop
+    assert any("at most 10%" in e for e in wide.errors)
+    assert any("at most 5x" in e for e in plan_for(req(leverage=6)).errors)
+    small = plan_for(req(), free_inr=10000.0)                      # 5% = Rs 500
+    assert any("5% of your free balance" in e for e in small.errors)
+    assert plan_for(req(risk_inr=0.0, margin_inr=500.0), free_inr=10000.0).ok
+    big = plan_for(req(stop_loss=88.0, risk_inr=300.0, override=True), free_inr=10000.0)
+    assert big.ok, big.errors
+    assert any("OVERRIDDEN" in w for w in big.warnings)
+
+
 def test_account_limits_block_new_trades():
     assert any("already hold" in e for e in plan_for(req(), has_position=True).errors)
     assert any("positions are open" in e for e in plan_for(req(), open_positions=2).errors)
@@ -181,7 +193,7 @@ class FakeExchange:
         return []
 
     def wallets(self):
-        return []
+        return [{"currency_short_name": "INR", "balance": "50000"}]
 
     # writes
     def update_leverage(self, pair, lev):
@@ -351,3 +363,81 @@ def test_moving_the_stop_restores_protection_if_refused(tmp_path):
         ex.accepts_sl = True
         ex.fill(PAIR, 1.0)
         m.set_tpsl("SOL", stop_loss=101.0)
+
+
+# -- setups from the scan: tap to place -------------------------------------------
+
+from backend.trading import ideas  # noqa: E402
+
+
+def setups(**kw):
+    row = dict(coin="SOL", timeframe="1h", pattern="Bull flag", kind="now", price=100.0,
+               up_level=99.0, down_level=95.0, target_up=110.0, rr=2.0, score=5.0)
+    return ideas.pd.DataFrame([{**row, **kw}])
+
+
+def scanner(tmp_path, ex, **kw):
+    ex.active_pairs = lambda: [PAIR]
+    return manager(tmp_path, ex, **kw), ideas.Settings()
+
+
+def test_scan_records_setups_and_places_nothing(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    new = ideas.scan(m, setups(), s)
+    assert [i["status"] for i in new] == [ideas.READY]
+    assert "margin Rs" in new[0]["reason"]
+    assert ex.writes == []
+    assert ideas.scan(m, setups(), s) == []               # not recorded twice
+
+
+def test_scan_blocks_rule_breakers(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    wide, = ideas.scan(m, setups(down_level=85.0), s)          # 15% stop
+    assert wide["status"] == ideas.BLOCKED and "at most 10%" in wide["reason"]
+    gone, = ideas.scan(m, setups(coin="XYZ"), s)
+    assert "not an INR future" in gone["reason"]
+    wait, = ideas.scan(m, setups(pattern="Ascending triangle", kind="close_above"), s)
+    assert wait["status"] == ideas.WAITING
+
+
+def test_tap_places_with_gold_standard_size(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    idea, = ideas.scan(m, setups(), s)
+    ideas.place(m, idea["id"], s)
+    order = next(w[1] for w in ex.writes if w[0] == "create_order")
+    assert order["leverage"] == 5
+    margin = order["total_quantity"] * 100 * 90 / 5
+    assert 50000 * 0.05 * 0.95 < margin <= 50000 * 0.05    # 5% of the free balance
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 95.0
+    assert m.store.idea(idea["id"])["status"] == ideas.PLACED
+    with pytest.raises(TradeError, match="placed, not ready"):
+        ideas.place(m, idea["id"], s)
+
+
+def test_a_trade_closed_by_hand_is_not_offered_again(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    idea, = ideas.scan(m, setups(), s)
+    ideas.place(m, idea["id"], s)
+    ex.pos.clear()                                         # you closed it in the app
+    s2 = ideas.Settings(recheck_hours=0)
+    again, = ideas.scan(m, setups(), s2)
+    assert m.store.trades()[0]["status"] == CLOSED
+    assert again["status"] == ideas.BLOCKED and "already traded" in again["reason"]
+    other, = ideas.scan(m, setups(pattern="Ascending triangle"), s2)
+    assert "in the last 24h" in other["reason"]            # the coin rests after a trade
+    assert [w[0] for w in ex.writes].count("create_order") == 1
+
+
+def test_old_setups_expire(tmp_path):
+    ex = FakeExchange()
+    m, s = scanner(tmp_path, ex)
+    idea, = ideas.scan(m, setups(), s)
+    m.store.update_idea(idea["id"], ts_ms=0)
+    with pytest.raises(TradeError, match="too old"):
+        ideas.place(m, idea["id"], s)
+    assert m.store.idea(idea["id"])["status"] == ideas.EXPIRED
+    assert ex.writes == []

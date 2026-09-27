@@ -317,6 +317,28 @@ To place it you **type the pair name** (e.g. `B-SOL_USDT`) and click.
    when it fills.
 4. A request that times out is never sent twice; the exchange is re-read.
 
+### Gold-standard rules (fixed in code)
+Every trade must meet these, from any screen or command: **stop loss at most
+10% from entry**, **margin at most 5% of the free INR futures balance**,
+**leverage at most 5x**. They live in `backend/trading/risk.py`, not in
+config. Only a trade you explicitly mark **override** (a tick box on the page,
+`--override` in the terminal) may break them, and it is logged as overridden.
+
+### Setups from the scan: tap to place
+- **Scan now** on the page, or `trade scan` (add `--every-min 15` to repeat),
+  runs the scanner's fixed buy-setup rules over the top 50 coins and lists
+  each setup with the trade it would make: a LONG at market, the pattern's
+  lower line as stop loss, its target, sized at 5% of the free balance, 5x.
+  A scan never places an order. A new ready setup is also sent to Telegram.
+- Each setup is **ready** (tap **Place**, then confirm), **waiting** (near its
+  line; ready once a later scan sees the break), **blocked** (with the rule
+  that failed), **placed** or **expired** (a ready setup older than 2 hours).
+- Tapping Place re-checks size, stop and every rule at the current price.
+- A setup you traded is never offered again. A coin rests 24 hours after any
+  trade on it — including one you **closed by hand** in the app, which the
+  next scan or the watcher records as closed.
+- Terminal: `trade ideas` lists setups, `trade take ID` places one.
+
 ### Managing open trades
 - Each open position shows entry, SL, target and the price now. Move the SL
   or target (type the pair to confirm) or **close at market**.

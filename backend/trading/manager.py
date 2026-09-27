@@ -70,13 +70,13 @@ class TradeManager:
         self._warned_unprotected: set[str] = set()
 
     @classmethod
-    def from_config(cls, config) -> "TradeManager":
+    def from_config(cls, config, *, force_dry_run: bool = False) -> "TradeManager":
         from backend.alerts.telegram import notifier_from_env
 
         t = config.trading
         return cls(FuturesClient.from_env(), TradeStore(t.get("db", "data_cache/trading.db")),
                    risk.Limits.from_config(t.get("limits")),
-                   mode=str(t.get("mode", DRY_RUN)),
+                   mode=DRY_RUN if force_dry_run else str(t.get("mode", DRY_RUN)),
                    notify=notifier_from_env().send,
                    fill_timeout_s=float(t.get("fill_timeout_s", 20)),
                    close_unprotected=bool(t.get("close_unprotected", False)))
@@ -124,6 +124,15 @@ class TradeManager:
         rows = [p for p in self.client.positions([pair])
                 if p.get("pair") == pair and _f(p.get("active_pos")) != 0]
         return rows[0] if rows else None
+
+    def free_inr(self) -> float | None:
+        """Unused INR in the futures wallet (CoinDCX's ``balance``), or None without keys."""
+        if not self.client.has_keys:
+            return None
+        for w in self.client.wallets():
+            if w.get("currency_short_name") == "INR":
+                return _f(w.get("balance"))
+        return 0.0
 
     def loss_today_inr(self) -> float:
         if not self.client.has_keys:
@@ -174,7 +183,7 @@ class TradeManager:
         plan = risk.build_plan(
             req, inst, last_price=self.last_price(req.pair), rate=rate, limits=self.limits,
             open_positions=len(held), has_position=any(p["pair"] == req.pair for p in held),
-            loss_today_inr=self.loss_today_inr())
+            loss_today_inr=self.loss_today_inr(), free_inr=self.free_inr())
         if rate_warning:
             plan.warnings.append(rate_warning)
         if self.halted:
@@ -199,7 +208,7 @@ class TradeManager:
             mode=self.mode, pair=pair, side=req.side, entry_type=req.entry_type,
             entry=plan.entry, qty=plan.qty, leverage=req.leverage, stop_loss=plan.stop_loss,
             take_profit=plan.take_profit, risk_inr=plan.risk_inr, margin_inr=plan.margin_inr,
-            status=PENDING)
+            status=PENDING, note="rules overridden" if req.override else "")
 
         order = {"side": plan.order_side, "pair": pair, "total_quantity": plan.qty,
                  "leverage": req.leverage, "notification": "email_notification"}

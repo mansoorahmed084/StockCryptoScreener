@@ -17,6 +17,17 @@ from typing import Any
 LONG, SHORT = "long", "short"
 MARKET, LIMIT = "market", "limit"
 
+# Gold-standard rules, fixed in code on purpose (not in config.yaml). Every
+# trade must meet them; only a trade the owner explicitly asks to make bigger
+# (TradeRequest.override) may break them. The autopilot never overrides.
+MAX_STOP_PCT = 10.0            # a stop further than this from entry: no trade
+MAX_MARGIN_PCT_OF_FREE = 5.0   # margin per trade, % of the free INR futures balance
+MAX_LEVERAGE = 5
+
+
+def margin_budget(free_inr: float) -> float:
+    return max(0.0, free_inr) * MAX_MARGIN_PCT_OF_FREE / 100.0
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -95,6 +106,7 @@ class TradeRequest:
     entry_type: str = MARKET        # market | limit
     limit_price: float | None = None
     margin_inr: float = 0.0         # > 0: size by this margin instead of by risk_inr
+    override: bool = False          # owner asked to break the gold-standard rules
 
 
 @dataclass
@@ -172,7 +184,7 @@ def liquidation_price(side: str, entry: float, leverage: int, maint_pct: float) 
 
 def build_plan(req: TradeRequest, inst: Instrument, *, last_price: float, rate: float,
                limits: Limits, open_positions: int = 0, has_position: bool = False,
-               loss_today_inr: float = 0.0) -> Plan:
+               loss_today_inr: float = 0.0, free_inr: float | None = None) -> Plan:
     plan = Plan(request=req, rate=rate)
     err, warn = plan.errors.append, plan.warnings.append
 
@@ -255,6 +267,22 @@ def build_plan(req: TradeRequest, inst: Instrument, *, last_price: float, rate: 
     if long and sl <= plan.liq_price or not long and sl >= plan.liq_price:
         err(f"the position would be liquidated near {plan.liq_price:g} before the stop "
             f"loss at {sl:g}; lower the leverage")
+
+    # -- gold-standard rules -------------------------------------------------
+    if req.override:
+        warn("gold-standard rules OVERRIDDEN for this trade (asked for explicitly)")
+    else:
+        stop_pct = stop_dist / entry * 100
+        if stop_pct > MAX_STOP_PCT:
+            err(f"stop loss is {stop_pct:.1f}% away; the rule is at most {MAX_STOP_PCT:g}%")
+        if req.leverage > MAX_LEVERAGE:
+            err(f"leverage {req.leverage}x; the rule is at most {MAX_LEVERAGE}x")
+        if free_inr is None:
+            warn("free balance unknown (no API keys); the 5%-of-balance margin rule "
+                 "is checked only with keys")
+        elif plan.margin_inr > margin_budget(free_inr) + 0.005:
+            err(f"margin Rs {plan.margin_inr:,.0f} is above {MAX_MARGIN_PCT_OF_FREE:g}% of your "
+                f"free balance (Rs {margin_budget(free_inr):,.0f} of Rs {free_inr:,.0f})")
 
     # -- your limits ---------------------------------------------------------
     if limits.allowed_pairs and req.pair not in limits.allowed_pairs:
