@@ -506,5 +506,6 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `eefc9d2` | Trades sized by margin (`--margin`); CoinDCX history paging and stop-order price fixes; first live test (SOL, Rs 1,000 margin, 5x) placed with SL/TP checked |
 | `8341078` | Gold-standard rules in code (stop ≤ 10%, margin ≤ 5% of free balance, ≤ 5x; override only when asked); scan setups on the Trade page with tap-to-place; no re-trading a setup or a coin closed by hand |
 | `23cee24` | Trailing stop loss run by the watcher: breakeven at 1R, then 1R behind the best price; per-trade on/off; hand-opened positions untouched |
+| `8560021` | `trade adopt` / `trail-set`: trail positions opened by hand; percent trail and a trail under the last closed CoinDCX 1m–1h candle |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
