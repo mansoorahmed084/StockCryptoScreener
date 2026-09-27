@@ -173,9 +173,10 @@ class FuturesClient:
                 "margin_currency_short_name": [MARGIN]})
         return out
 
-    def transactions(self, size: int = 100) -> list[dict]:
+    def transactions(self, page: int = 1, size: int = 100) -> list[dict]:
+        """Newest first. CoinDCX answers 422 to a page size above 100."""
         return list(self._read("POST", f"{FUTURES}/positions/transactions", {
-            "stage": "all", "page": "1", "size": str(size),
+            "stage": "all", "page": str(page), "size": str(min(size, 100)),
             "margin_currency_short_name": [MARGIN]}))
 
     # -- writes ----------------------------------------------------------------

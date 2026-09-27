@@ -94,6 +94,7 @@ class TradeRequest:
     take_profit: float | None = None
     entry_type: str = MARKET        # market | limit
     limit_price: float | None = None
+    margin_inr: float = 0.0         # > 0: size by this margin instead of by risk_inr
 
 
 @dataclass
@@ -214,10 +215,12 @@ def build_plan(req: TradeRequest, inst: Instrument, *, last_price: float, rate: 
     if plan.errors:
         return plan
 
-    # -- size from risk ------------------------------------------------------
+    # -- size from risk, or from margin ------------------------------------
     fee = inst.taker_fee_pct / 100.0
     loss_per_unit_inr = (stop_dist + (entry + sl) * fee) * rate
-    qty = round_step(req.risk_inr / loss_per_unit_inr, inst.qty_step, down=True)
+    units = (req.margin_inr * req.leverage / (entry * rate) if req.margin_inr > 0
+             else req.risk_inr / loss_per_unit_inr)
+    qty = round_step(units, inst.qty_step, down=True)
     plan.qty = qty
     plan.notional_usdt = qty * entry
     plan.margin_inr = plan.notional_usdt * rate / req.leverage
@@ -258,8 +261,9 @@ def build_plan(req: TradeRequest, inst: Instrument, *, last_price: float, rate: 
         err(f"{req.pair} is not in trading.limits.allowed_pairs")
     if req.leverage > limits.max_leverage:
         err(f"leverage {req.leverage}x is above your limit of {limits.max_leverage}x")
-    if req.risk_inr > limits.max_risk_inr:
-        err(f"risk Rs {req.risk_inr:,.0f} is above your limit of Rs {limits.max_risk_inr:,.0f}")
+    trade_risk = max(req.risk_inr, plan.risk_inr)
+    if trade_risk > limits.max_risk_inr:
+        err(f"risk Rs {trade_risk:,.0f} is above your limit of Rs {limits.max_risk_inr:,.0f}")
     if plan.margin_inr > limits.max_margin_inr:
         err(f"margin Rs {plan.margin_inr:,.0f} is above your limit of "
             f"Rs {limits.max_margin_inr:,.0f}")

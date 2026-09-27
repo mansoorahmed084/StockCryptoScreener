@@ -82,14 +82,22 @@ def new_trade(m: TradeManager) -> None:
     use_tp = c2.checkbox("Set a target", value=True, key="t_use_tp")
     tp = (c2.number_input("Target", value=now * (1.06 if long else 0.94), format="%.6g",
                           key=f"t_tp_{pair}_{side}") if use_tp else None)
-    risk_inr = c3.number_input("Risk (Rs lost if the stop is hit)", min_value=10.0,
-                               value=min(200.0, m.limits.max_risk_inr), step=50.0,
-                               key="t_risk")
+    size_by = c3.radio("Size by", ["risk", "margin"], horizontal=True, key="t_size_by",
+                       format_func={"risk": "Rs I can lose", "margin": "Rs of margin"}.get)
+    risk_inr = margin_inr = 0.0
+    if size_by == "risk":
+        risk_inr = c3.number_input("Risk (Rs lost if the stop is hit)", min_value=10.0,
+                                   value=min(200.0, m.limits.max_risk_inr), step=50.0,
+                                   key="t_risk")
+    else:
+        margin_inr = c3.number_input("Margin (Rs)", min_value=100.0,
+                                     value=min(1000.0, m.limits.max_margin_inr), step=100.0,
+                                     key="t_margin")
     lev = c3.slider("Leverage", 1, max(1, m.limits.max_leverage), 2, key="t_lev")
 
     req = risk.TradeRequest(pair=pair, side=side, stop_loss=sl, take_profit=tp,
                             risk_inr=risk_inr, leverage=lev, entry_type=kind,
-                            limit_price=limit)
+                            limit_price=limit, margin_inr=margin_inr)
     try:
         plan = m.preview(req)
     except Exception as exc:
@@ -171,7 +179,7 @@ def orders(m: TradeManager) -> None:
         return
     df = pd.DataFrame([{"Coin": coin(o["pair"]), "Side": o["side"], "Type": o["order_type"],
                         "Qty": o.get("total_quantity"),
-                        "Price": o.get("price") or o.get("stop_price"),
+                        "Price": o.get("stop_price") or o.get("price"),
                         "Status": o["status"], "id": o["id"]} for o in rows])
     st.dataframe(df, hide_index=True, width="stretch")
     oid = st.selectbox("Cancel an order", [""] + list(df["id"]), key="o_cancel")

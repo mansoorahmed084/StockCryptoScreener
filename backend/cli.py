@@ -257,7 +257,8 @@ def _request(args: argparse.Namespace):
     return risk.TradeRequest(
         pair=args.pair, side=args.side, stop_loss=args.sl, take_profit=args.tp,
         risk_inr=args.risk, leverage=args.lev,
-        entry_type=risk.LIMIT if args.limit else risk.MARKET, limit_price=args.limit)
+        entry_type=risk.LIMIT if args.limit else risk.MARKET, limit_price=args.limit,
+        margin_inr=args.margin)
 
 
 def cmd_trade(args: argparse.Namespace) -> int:
@@ -288,7 +289,7 @@ def cmd_trade(args: argparse.Namespace) -> int:
                       f"{p.get('leverage')}x  liq {p.get('liquidation_price')}")
             for o in s["orders"]:
                 print(f"order {o['id']}: {o['pair']} {o['side']} {o['order_type']} "
-                      f"{o.get('total_quantity')} @ {o.get('price') or o.get('stop_price')} "
+                      f"{o.get('total_quantity')} @ {o.get('stop_price') or o.get('price')} "
                       f"[{o['status']}]")
             if not (s["positions"] or s["orders"]):
                 print("no open positions or orders")
@@ -425,6 +426,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--sl", type=float, default=None, help="stop loss price (USDT)")
     t.add_argument("--tp", type=float, default=None, help="target price (USDT)")
     t.add_argument("--risk", type=float, default=0.0, help="INR to lose if the stop is hit")
+    t.add_argument("--margin", type=float, default=0.0,
+                   help="size by this INR margin instead of by --risk")
     t.add_argument("--lev", type=int, default=1, help="leverage")
     t.add_argument("--limit", type=float, default=None,
                    help="limit entry price; leave out for a market entry")
@@ -434,8 +437,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if getattr(args, "action", None) in ("preview", "open") and not (
-            args.pair and args.side and args.sl and args.risk):
-        parser.error("preview/open need: PAIR long|short --sl PRICE --risk INR [--tp] "
+            args.pair and args.side and args.sl and (args.risk or args.margin)):
+        parser.error("preview/open need: PAIR long|short --sl PRICE --risk INR|--margin INR [--tp] "
                      "[--lev] [--limit]")
     try:  # ensure non-ASCII output never crashes on Windows consoles
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

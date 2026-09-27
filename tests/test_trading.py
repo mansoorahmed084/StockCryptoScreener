@@ -67,6 +67,15 @@ def test_bad_trades_are_blocked(kw, text):
     assert "BLOCKED" in p.summary()
 
 
+def test_size_by_margin():
+    p = plan_for(req(risk_inr=0.0, margin_inr=1000.0, leverage=5))
+    assert p.ok, p.errors
+    assert p.qty == pytest.approx(int(1000 * 5 / (100 * 90) * 100) / 100)
+    assert p.margin_inr <= 1000
+    big = plan_for(req(risk_inr=0.0, margin_inr=15000.0, leverage=5))
+    assert any("risk Rs" in e for e in big.errors), big.errors
+
+
 def test_account_limits_block_new_trades():
     assert any("already hold" in e for e in plan_for(req(), has_position=True).errors)
     assert any("positions are open" in e for e in plan_for(req(), open_positions=2).errors)
@@ -168,7 +177,7 @@ class FakeExchange:
     def orders(self, status="open"):
         return [o for o in self.open_orders if o["status"] in status.split(",")]
 
-    def transactions(self, size=100):
+    def transactions(self, page=1, size=100):
         return []
 
     def wallets(self):

@@ -90,7 +90,7 @@ class TradeManager:
         return self.store.flag(HALT_FLAG) == "1"
 
     def notify(self, text: str) -> None:
-        log.warning(text)
+        log.info(text)
         try:
             self._notify(f"[CoinDCX] {text}")
         except Exception as exc:              # a failed message must not stop trading logic
@@ -131,9 +131,13 @@ class TradeManager:
         start = dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0,
                                                          microsecond=0)
         start_ms = start.timestamp() * 1000
-        pnl = sum(_f(t.get("amount")) - _f(t.get("fee_amount"))
-                  for t in self.client.transactions(200)
-                  if _f(t.get("created_at")) >= start_ms)
+        pnl = 0.0
+        for page in range(1, 21):
+            rows = self.client.transactions(page)
+            pnl += sum(_f(t.get("amount")) - _f(t.get("fee_amount"))
+                       for t in rows if _f(t.get("created_at")) >= start_ms)
+            if len(rows) < 100 or min(_f(t.get("created_at")) for t in rows) < start_ms:
+                break
         return max(0.0, -pnl)
 
     def status(self) -> dict:
