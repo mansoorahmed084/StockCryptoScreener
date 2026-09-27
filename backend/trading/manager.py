@@ -429,8 +429,14 @@ class TradeManager:
         trade = self.store.latest_for_pair(pair, (OPEN,))
         if trade is None:
             raise TradeError(f"no open {pair} trade managed by this tool")
+        how = (f"under the last closed {trail_candle} candle" if trail_candle
+               else f"{trail_pct:g}% behind best")
+        note = trade["note"] or ""
+        note = (note.split("; trailing")[0] if "; trailing" in note else note) or "trailing"
         self.store.update_trade(trade["id"], trail=1, trail_pct=trail_pct or None,
-                                trail_candle=trail_candle)
+                                trail_candle=trail_candle,
+                                note=f"{note}; trailing {how}" if note != "trailing"
+                                else f"trailing {how}")
 
     # -- close and cancel ----------------------------------------------------------
     def close(self, pair: str, confirm: str) -> None:

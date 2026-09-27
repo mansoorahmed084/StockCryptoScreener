@@ -593,3 +593,25 @@ def test_watcher_trails_an_adopted_position_under_coindcx_candles(tmp_path):
     assert trailing.run(m, TS) == []
     m.set_trail("SOL", trail_pct=2.0)
     assert m.store.trades()[0]["trail_candle"] is None
+
+
+def test_candle_trail_skips_tiny_moves_and_waits_for_the_candle_to_settle():
+    c = {"low": 104.0, "high": 106.0}
+    # new stop 103.896: only 0.05 above 103.85, under 0.1% of the price -> skip
+    assert trailing.next_stop_candle(risk.LONG, candle=c, price=105.0, current_stop=103.85,
+                                     s=TS) is None
+    assert trailing.next_stop_candle(risk.LONG, candle=c, price=105.0, current_stop=103.7,
+                                     s=TS) == pytest.approx(103.896)
+    rows = [{"time": 0, "low": 1.0}, {"time": 900_000, "low": 2.0}]   # 2nd closes at 1.8M
+    assert trailing.last_closed(rows, 15, 1_800_000 + 30_000, settle_s=60)["low"] == 1.0
+    assert trailing.last_closed(rows, 15, 1_800_000 + 60_000, settle_s=60)["low"] == 2.0
+
+
+def test_switching_the_trail_rewrites_its_note(tmp_path):
+    ex = FakeExchange()
+    ex.fill(PAIR, 1.0)
+    m = manager(tmp_path, ex)
+    m.adopt("SOL", 1.5, confirm=PAIR)
+    m.set_trail("SOL", trail_candle="15m")
+    note = m.store.trades()[0]["note"]
+    assert note == "adopted (opened by hand); trailing under the last closed 15m candle"

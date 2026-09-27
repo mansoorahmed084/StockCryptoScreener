@@ -370,7 +370,10 @@ of at least 0.25R. The target stays in place.
 Two more ways to trail, set per trade:
 - **Candle:** a notch (0.1%, `candle_buffer_pct`) under the low of the last
   **closed CoinDCX** futures candle (1m, 5m, 15m or 1h; the one still forming
-  is ignored) — over its high for a short. `--trail-candle 15m`.
+  is ignored) — over its high for a short. `--trail-candle 15m`. A candle is
+  read 60 s after it closes (`candle_settle_s`; CoinDCX revises it for a few
+  seconds), and moves smaller than 0.1% of the price are skipped
+  (`candle_min_step_pct`), so each 15m close gives at most one re-place.
 - **Percent:** a fixed % behind the best price. `--trail-pct 1.5`.
 
 `trade trail-set PAIR --trail-candle 15m` (or `--trail-pct X`) switches an

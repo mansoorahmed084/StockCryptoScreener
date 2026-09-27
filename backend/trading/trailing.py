@@ -32,6 +32,8 @@ class Settings:
     breakeven_buffer_pct: float = 0.2  # breakeven = entry + this % (covers both fees)
     min_gap_pct: float = 0.2          # never put the stop closer than this to the price
     candle_buffer_pct: float = 0.1    # candle trail: this % below the low (above the high)
+    candle_min_step_pct: float = 0.1  # candle trail: skip moves smaller than this % of price
+    candle_settle_s: int = 60         # read a candle only this long after it closes
 
     @classmethod
     def from_config(cls, raw: dict[str, Any] | None) -> "Settings":
@@ -79,8 +81,12 @@ def next_stop_pct(side: str, *, pct: float, best: float, price: float,
 CANDLE_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}
 
 
-def last_closed(candles: list[dict], minutes: int, now_ms: int) -> dict | None:
-    closed = [c for c in candles if c["time"] + minutes * 60_000 <= now_ms]
+def last_closed(candles: list[dict], minutes: int, now_ms: int,
+                settle_s: int = 0) -> dict | None:
+    """The newest candle that closed at least ``settle_s`` ago. CoinDCX revises a
+    candle for a few seconds after it closes, so reading it at once can see a
+    low that changes a moment later."""
+    closed = [c for c in candles if c["time"] + minutes * 60_000 + settle_s * 1000 <= now_ms]
     return closed[-1] if closed else None
 
 
@@ -93,8 +99,8 @@ def next_stop_candle(side: str, *, candle: dict, price: float, current_stop: flo
     new = edge * (1 - sign * s.candle_buffer_pct / 100)
     gap = price * (1 - sign * s.min_gap_pct / 100)
     new = min(new, gap) if sign > 0 else max(new, gap)
-    if current_stop and sign * (new - current_stop) <= 0:
-        return None
+    if current_stop and sign * (new - current_stop) < price * s.candle_min_step_pct / 100:
+        return None                   # not better, or too small to be worth a re-place
     return new
 
 
@@ -125,7 +131,7 @@ def run(mgr: TradeManager, s: Settings) -> list[str]:
         if tf:
             minutes = CANDLE_MINUTES[tf]
             candle = last_closed(mgr.client.candles(pair, minutes, 6 * minutes * 60),
-                                 minutes, int(time.time() * 1000))
+                                 minutes, int(time.time() * 1000), s.candle_settle_s)
             if candle is None:
                 continue
             new = next_stop_candle(side, candle=candle, price=price, current_stop=current, s=s)
