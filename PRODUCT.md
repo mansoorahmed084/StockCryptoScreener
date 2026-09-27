@@ -348,6 +348,25 @@ config. Only a trade you explicitly mark **override** (a tick box on the page,
 - A **log** of every request sent and CoinDCX's answer
   (`data_cache/trading.db`).
 
+### Trailing stop loss
+CoinDCX has none, so the watcher moves the stop itself. R is the trade's first
+risk (entry to its first stop). Once price is **1R in profit**, the stop moves
+to **breakeven** (entry + 0.2% for fees); after that it follows the **best
+price, 1R behind it**. It only moves in the trade's favour, and only in steps
+of at least 0.25R. The target stays in place.
+
+- On for every trade this tool opens; off for positions opened by hand.
+  Switch it per trade with the toggle in the position panel or
+  `trade trail-on PAIR` / `trade trail-off PAIR`.
+- Settings: `trading.trailing` (`activate_r`, `trail_r`, `min_step_r`,
+  `breakeven_buffer_pct`, `min_gap_pct`, `enabled`).
+- It works only while `trade watch` runs, and it sees the price once per
+  round (every 30 s by default), so a spike between rounds is missed.
+- Moving a stop: the old stop is cancelled, the new one placed and read
+  back. If "stop alone" is refused, it is sent again with the target; if
+  CoinDCX still shows no stop, the old one is put back.
+- `trade watch --dry-run` shows the moves it would make and sends nothing.
+
 ### The watcher (live mode)
 `.venv/Scripts/python.exe -m backend.cli trade watch` checks every 30 s: it
 attaches SL / target to filled limit entries, marks trades closed when their

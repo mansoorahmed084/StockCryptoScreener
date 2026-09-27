@@ -177,8 +177,10 @@ class FakeExchange:
     def instrument(self, pair):
         return INSTRUMENT
 
+    px = 100.0
+
     def prices(self):
-        return {PAIR: {"ls": 100.0, "mp": 100.0}}
+        return {PAIR: {"ls": self.px, "mp": self.px}}
 
     def conversion_rate(self):
         return 90.0
@@ -441,3 +443,79 @@ def test_old_setups_expire(tmp_path):
         ideas.place(m, idea["id"], s)
     assert m.store.idea(idea["id"])["status"] == ideas.EXPIRED
     assert ex.writes == []
+
+
+# -- trailing stop -----------------------------------------------------------------
+
+from backend.trading import trailing  # noqa: E402
+
+TS = trailing.Settings()
+
+
+def test_trailing_stop_maths():
+    ns = lambda **kw: trailing.next_stop(**{**dict(  # noqa: E731
+        side=risk.LONG, entry=100.0, initial_stop=95.0, best=100.0, price=100.0,
+        current_stop=95.0, s=TS), **kw})
+    assert ns(best=104.9, price=104.9) is None                   # under 1R: wait
+    assert ns(best=105.0, price=105.0) == pytest.approx(100.2)   # 1R: breakeven + fees
+    assert ns(best=112.0, price=112.0) == pytest.approx(107.0)   # 1R behind the best
+    assert ns(best=112.0, price=112.0, current_stop=106.0) is None   # step under 0.25R
+    assert ns(best=112.0, price=107.1) == pytest.approx(107.1 * 0.998)  # not at the price
+    short = ns(side=risk.SHORT, initial_stop=105.0, best=90.0, price=90.0, current_stop=105.0)
+    assert short == pytest.approx(95.0)
+
+
+def test_watcher_trails_the_stop_up_and_never_down(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)                          # entry 100, SL 95, TP 110
+    assert trailing.run(m, TS) == []
+    ex.px = 105.2                                         # just past 1R: breakeven
+    msgs = trailing.run(m, TS)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(100.2)
+    assert "trailing stop" in msgs[0]
+    ex.px = 108.0
+    trailing.run(m, TS)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(103.0)
+    assert ex.pos[PAIR]["take_profit_trigger"] == 110.0   # the target stays
+    ex.px = 104.0                                         # pullback: stop stays put
+    assert trailing.run(m, TS) == []
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(103.0)
+    assert m.store.trades()[0]["best_price"] == 108.0
+
+
+def test_trailing_can_be_turned_off_and_skips_hand_positions(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    m.store.update_trade(m.store.trades()[0]["id"], trail=0)
+    ex.px = 108.0
+    assert trailing.run(m, TS) == []
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 95.0
+
+    ex2 = FakeExchange()
+    ex2.fill(PAIR, 1.0)                                   # opened by hand, no record
+    ex2.pos[PAIR]["stop_loss_trigger"] = 95.0
+    ex2.px = 108.0
+    m2 = manager(tmp_path / "b", ex2)
+    assert trailing.run(m2, TS) == []
+    assert ex2.writes == []
+
+
+def test_moving_the_stop_retries_with_the_target_when_sl_alone_is_refused(tmp_path):
+    ex = FakeExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    real = ex.create_tpsl
+
+    def picky(position_id, stop_loss=None, take_profit=None):
+        if take_profit is None:                           # "SL alone" not accepted
+            ex.writes.append(("create_tpsl", stop_loss, None))
+            return {}
+        return real(position_id, stop_loss=stop_loss, take_profit=take_profit)
+
+    ex.create_tpsl = picky
+    ex.px = 105.5
+    trailing.run(m, TS)
+    assert ex.pos[PAIR]["stop_loss_trigger"] == pytest.approx(100.5)   # 1R behind 105.5
+    assert ("exit_position", "p1") not in ex.writes

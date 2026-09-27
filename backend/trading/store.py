@@ -64,6 +64,12 @@ class TradeStore:
                     trade_id INTEGER
                 );
             """)
+            have = {r["name"] for r in db.execute("PRAGMA table_info(trades)")}
+            for col, kind in (("initial_stop", "REAL"),     # stop at entry: 1R = entry - this
+                              ("best_price", "REAL"),       # best price since entry
+                              ("trail", "INTEGER DEFAULT 1")):
+                if col not in have:
+                    db.execute(f"ALTER TABLE trades ADD COLUMN {col} {kind}")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:

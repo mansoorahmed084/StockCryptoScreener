@@ -370,14 +370,22 @@ def cmd_trade(args: argparse.Namespace) -> int:
                 when = _time.strftime("%m-%d %H:%M:%S", _time.localtime(e["ts_ms"] / 1000))
                 print(f"{when} {'ok ' if e['ok'] else 'ERR'} {e['action']}: "
                       f"{e['request']} -> {e['response'][:200]}")
+        elif act in ("trail-on", "trail-off"):
+            pair = risk.to_pair(args.pair)
+            trade = mgr.store.latest_for_pair(pair)
+            if trade is None:
+                raise TradeError(f"no open {pair} trade opened by this tool")
+            mgr.store.update_trade(trade["id"], trail=int(act == "trail-on"))
+            print(f"{pair}: trailing stop {'on' if act == 'trail-on' else 'off'}")
         elif act in ("reconcile", "watch"):
-            if not mgr.live:
-                print("the watcher only runs in live mode")
-                return 0
-            print(f"watching CoinDCX positions every {args.every}s - Ctrl+C to stop", flush=True)
+            from backend.trading import trailing
+
+            trail = trailing.Settings.from_config(config.trading.get("trailing"))
+            print(f"[{banner}] watching CoinDCX positions every {args.every}s; trailing stop "
+                  f"{'on' if trail.enabled else 'off'} - Ctrl+C to stop", flush=True)
             while True:
                 try:
-                    for m in mgr.reconcile():
+                    for m in mgr.reconcile() + trailing.run(mgr, trail):
                         print(m, flush=True)
                 except Exception as exc:         # keep watching through a bad round
                     print(f"check failed: {exc}", flush=True)
@@ -461,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
                                      "tpsl, close, cancel, panic, resume, log, watch")
     t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
                                       "panic", "resume", "log", "reconcile", "watch",
-                                      "scan", "ideas", "take"])
+                                      "scan", "ideas", "take", "trail-on", "trail-off"])
     t.add_argument("pair", nargs="?", default="",
                    help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
     t.add_argument("side", nargs="?", choices=["long", "short"], default=None)

@@ -207,6 +207,7 @@ class TradeManager:
         trade_id = self.store.add_trade(
             mode=self.mode, pair=pair, side=req.side, entry_type=req.entry_type,
             entry=plan.entry, qty=plan.qty, leverage=req.leverage, stop_loss=plan.stop_loss,
+            initial_stop=plan.stop_loss,
             take_profit=plan.take_profit, risk_inr=plan.risk_inr, margin_inr=plan.margin_inr,
             status=PENDING, note="rules overridden" if req.override else "")
 
@@ -346,11 +347,23 @@ class TradeManager:
                         take_profit=take_profit)
         if stop_loss is not None:
             cancel(SL_TYPES)
-            try:
-                self._write("create_tpsl", self.client.create_tpsl, pos["id"],
-                            trade_id=trade_id, stop_loss=stop_loss)
-            except (CoinDcxError, UnknownOutcome) as exc:
-                log.warning("new stop loss refused on %s: %s", pair, exc)
+            # SL alone first; if it does not show, send it with the target too (CoinDCX
+            # sets the stop and only refuses the target leg when one already exists).
+            tries = [dict(stop_loss=stop_loss)]
+            tp_now = take_profit or old_tp
+            if tp_now:
+                tries.append(dict(stop_loss=stop_loss, take_profit=tp_now))
+            for legs in tries:
+                try:
+                    self._write("create_tpsl", self.client.create_tpsl, pos["id"],
+                                trade_id=trade_id, **legs)
+                except (CoinDcxError, UnknownOutcome) as exc:
+                    log.warning("new stop loss refused on %s: %s", pair, exc)
+                if not self.live:
+                    break
+                check = self.position(pair)
+                if check is None or _f(check.get("stop_loss_trigger")):
+                    break
         if not self.live:
             return pos
 

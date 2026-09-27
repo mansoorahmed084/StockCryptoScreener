@@ -133,6 +133,29 @@ def new_trade(m: TradeManager) -> None:
             st.success(f"Trade #{trade_id} done ({word}). See it below and in the log.")
 
 
+def trail_note(m: TradeManager, p: dict) -> None:
+    """Trailing-stop state of a position opened by this tool, with an on/off switch."""
+    from backend.trading import trailing
+
+    t = m.store.latest_for_pair(p["pair"], ("open",))
+    if t is None:
+        st.caption("Opened by hand: the trailing stop leaves it alone.")
+        return
+    s = trailing.Settings.from_config(load_config().trading.get("trailing"))
+    entry = float(p["avg_price"] or t["entry"])
+    initial = float(t["initial_stop"] or t["stop_loss"] or 0)
+    r = abs(entry - initial)
+    sign = 1 if float(p["active_pos"]) > 0 else -1
+    start = entry + sign * s.activate_r * r
+    on = st.toggle("Trailing stop", value=bool(t["trail"]), key=f"trail_{p['pair']}")
+    if on != bool(t["trail"]):
+        m.store.update_trade(t["id"], trail=int(on))
+    best = t["best_price"]
+    st.caption(f"1R = {r:g}. The stop moves to breakeven at {start:g}, then follows the best "
+               f"price {s.trail_r:g}R behind it. Best so far: {best or '—'}. Needs "
+               "`trade watch` running." if on else "Trailing is off for this trade.")
+
+
 def positions(m: TradeManager) -> None:
     st.subheader("Open positions")
     if not m.client.has_keys:
@@ -153,6 +176,7 @@ def positions(m: TradeManager) -> None:
                          f"{p['avg_price']} · SL {sl_now or 'NONE ⚠'} · "
                          f"TP {p.get('take_profit_trigger') or 'none'} · "
                          f"now {price(pair):g}", expanded=not sl_now):
+            trail_note(m, p)
             a, b, c = st.columns(3)
             new_sl = a.number_input("New stop loss", value=float(sl_now or 0) or None,
                                     format="%.6g", key=f"p_sl_{pair}")
