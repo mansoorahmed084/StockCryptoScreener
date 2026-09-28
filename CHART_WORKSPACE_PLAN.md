@@ -3,7 +3,12 @@
 Goal: a TradingView-style chart page inside the screener. You pick a symbol,
 draw on the chart, and keep coins in watchlists. Drawings can become alerts.
 
-Status: **agreed 2026-09-28 — see Decisions at the end.** Markets: crypto
+Status: **built 2026-09-28 (phases 1–6).** See PRODUCT.md §7 for what it does.
+Not done: stock alerts (the watcher and Alerts page read Binance perpetuals only),
+"open in Trade page" (a "copy trade plan" menu item instead), and screener-row
+links into the workspace.
+
+Original plan, agreed 2026-09-28 — see Decisions at the end. Markets: crypto
 (Binance) + stocks (NSE/BSE and US, via Yahoo).
 
 ---

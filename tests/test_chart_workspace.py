@@ -407,3 +407,19 @@ def test_chart_alerts_go_to_the_screener_store(md, tmp_path, monkeypatch):
     assert client.delete(f"/api/chart/alerts/{first}").status_code == 204
     assert len(svc.store.list()) == 1
     assert client.post("/api/chart/alerts/check").json() == {"fired": []}
+
+
+# --- layouts ------------------------------------------------------------------
+def test_layouts_save_load_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(chart_routes, "_store", ChartStore(tmp_path / "chart.db"))
+    client = TestClient(api.app)
+    state = {"layout": "2", "link": {"symbol": False}, "slots": [
+        {"symbol": "BINANCE:BTCUSDT.P", "tf": "4h", "studies": [{"type": "rsi", "inputs": {}}]},
+        {"symbol": "NSE:TCS", "tf": "1d", "studies": []}]}
+    assert client.put("/api/chart/layouts/Swing", json={"state": state}).json()["state"] == state
+    client.put("/api/chart/layouts/Swing", json={"state": {**state, "layout": "4"}})
+    assert [x["name"] for x in client.get("/api/chart/layouts").json()["layouts"]] == ["Swing"]
+    assert client.get("/api/chart/layouts/Swing").json()["state"]["layout"] == "4"
+    assert client.put("/api/chart/layouts/%20", json={"state": state}).status_code == 400
+    assert client.delete("/api/chart/layouts/Swing").status_code == 204
+    assert client.get("/api/chart/layouts/Swing").status_code == 404

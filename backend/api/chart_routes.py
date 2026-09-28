@@ -342,6 +342,31 @@ def delete_drawings(key: str, store: ChartStore = Depends(get_store)) -> dict:
     return {"deleted": store.delete_drawings(key)}
 
 
+# --- layouts ------------------------------------------------------------------
+class LayoutBody(BaseModel):
+    state: dict
+
+
+@router.get("/layouts")
+def layouts(store: ChartStore = Depends(get_store)) -> dict:
+    return {"layouts": store.layouts()}
+
+
+@router.get("/layouts/{name}")
+def get_layout(name: str, store: ChartStore = Depends(get_store)) -> dict:
+    return _store_call(store.layout, name)
+
+
+@router.put("/layouts/{name}")
+def save_layout(name: str, body: LayoutBody, store: ChartStore = Depends(get_store)) -> dict:
+    return _store_call(store.save_layout, name, body.state)
+
+
+@router.delete("/layouts/{name}", status_code=204)
+def delete_layout(name: str, store: ChartStore = Depends(get_store)) -> None:
+    store.delete_layout(name)
+
+
 def install(app: FastAPI) -> None:
     """Add the chart API, the page at /workspace and its static files."""
     app.include_router(router)

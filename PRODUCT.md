@@ -580,6 +580,25 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   (ETHBTC) cannot have alerts yet: the watcher and the Alerts page read
   Binance perpetual candles only.
 
+### Layouts, replay and extras
+- **Layout** (top right): one chart, two side by side, two stacked, or four.
+  Click a chart to select it (blue outline): the top bar, watchlist clicks
+  and indicators then act on that chart. New charts start as a copy of the
+  selected one.
+- Link charts: **same symbol on every chart**, and **crosshair follows
+  across charts** (on by default; it finds the same time on each chart).
+- **Saved layouts**: "Save layout as…" stores the grid, links, chart style
+  and each chart's symbol, timeframe and indicators under a name in
+  `chart.db`; pick it from the same menu to load it. The last grid is also
+  remembered in the browser.
+- **⏮ Replay**: click it, then click a candle. Candles after it disappear;
+  ▶ plays them back (1×, 3×, 10×), ⏭ or Shift+→ steps one, ✕ Exit goes back
+  to live data. Drawings and indicators follow along.
+- **☾ / ☀** switches dark and light theme. **📷** saves a PNG of the selected
+  chart with a title line (symbol, timeframe, time).
+- Long / short position → right-click → **Copy trade plan** copies
+  "LONG SOLUSDT.P (4h) entry … stop … target … R:R …".
+
 ## Data sources
 
 | Source | Used for | Key |
@@ -683,3 +702,17 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `aa946a6` | Best time to trade (IST) strip on the screener and Trade page: green = high-liquidity hour, white = no trade |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
+
+## Change log — 2026-09-28 (Chart workspace)
+
+| Commit | What |
+|---|---|
+| `3d4740f` | Plan: `CHART_WORKSPACE_PLAN.md` |
+| `7d228e9` | Phase 1: full-screen chart at `/workspace` on TradingView Lightweight Charts — Binance candles, live WebSocket, search, timeframes, legend, countdown, styles, ranges, IST clock |
+| `d67aabc` | Phase 1b: stocks from Yahoo (NSE, BSE, US; delayed; 2h/4h built from 1h) |
+| `6224797` | Phase 2: watchlists panel (sections, flags, live quotes, import/export), shared with BTC Strength and Pattern Scanner via `chart.db` |
+| `1116071` | Phase 3: drawing tools (lines, channel, rectangle, fib, text, long/short, measure), magnet, undo/redo, saved per symbol |
+| `0102027` | Phase 4: indicators (EMA … ATR, volume profile), the screener's VuManChu and auto-analysis layer |
+| `b001af4` | Phase 5: alerts from the chart into the screener's alert store |
+| (next) | Phase 6: multi-chart layouts, linked crosshair, saved layouts, bar replay, light theme, PNG, trade plan |
+

@@ -410,3 +410,21 @@ textarea.inp { height: 90px; padding: 6px 8px; resize: vertical; }
 .ind-row.added span { color: var(--up); }
 .legend-studies { margin-top: 2px; }
 .legend .study .st-vals b { margin-left: 4px; }
+
+/* ---- replay ---- */
+.replay-bar {
+  position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--accent); box-shadow: var(--shadow); white-space: nowrap;
+}
+.replay-bar button { height: 28px; min-width: 30px; padding: 0 8px; border-radius: 4px; }
+.replay-bar button:hover { background: var(--hover); }
+.replay-bar select { height: 28px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; }
+.rp-title { font-weight: 700; color: var(--accent); }
+.rp-when { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.chart-slot.replay-pick .chart-host, .chart-slot.replay-pick .chart-host * { cursor: col-resize !important; }
+#layout-btn svg { display: block; }
+@media (max-width: 700px) {
+  #tb-extra .tb-btn span:last-child, #layout-btn span { display: none; }
+  .rp-when { display: none; }
+}

@@ -9,6 +9,9 @@ import { initWatchlist } from './watchlist.js';
 import { initDrawings } from './drawings/index.js';
 import { initIndicators } from './indicators/index.js';
 import { initAlerts } from './alerts.js';
+import { initExtras } from './extras.js';
+import { initLayouts } from './layouts.js';
+import { initReplay } from './replay.js';
 import {
   FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, fitTf, isValidTf, tfLabel,
 } from './timeframes.js';
@@ -34,7 +37,15 @@ export const app = {
   get info() { return this.slot?.info; },
 
   on(event, fn) { (this.hooks[event] ||= []).push(fn); },
-  emit(event, ...args) { for (const f of this.hooks[event] || []) f(...args); },
+  // One feature failing must not stop the others.
+  emit(event, ...args) {
+    for (const f of this.hooks[event] || []) {
+      try {
+        const r = f(...args);
+        if (r && r.catch) r.catch(err => console.error(`${event} hook failed`, err));
+      } catch (err) { console.error(`${event} hook failed`, err); }
+    }
+  },
 
   save() {
     store.set('cw.state', { ...store.get('cw.state', {}), symbol: this.symbol, tf: this.tf, style: this.style });
@@ -44,11 +55,11 @@ export const app = {
     history.replaceState(null, '', url);
   },
 
-  async setSymbol(symbol, slot = this.slot) {
+  async setSymbol(symbol, slot = this.slot, tf = null) {
     symbol = symbol.toUpperCase();
     try {
       const info = await resolveSymbol(symbol);
-      await slot.load(info.symbol, fitTf(info, slot.tf || this.tf));
+      await slot.load(info.symbol, fitTf(info, tf || slot.tf || this.tf));
     } catch (err) {
       toast(`Cannot open ${symbol}: ${err.message}`, 'error');
       return false;
@@ -105,6 +116,7 @@ export const app = {
     slot.el.addEventListener('mousedown', () => this.focusSlot(slot), true);
     this.slots.push(slot);
     this.emit('slot', slot);
+    if (this.slots.length > 1) applyScale();
     return slot;
   },
 
@@ -234,7 +246,7 @@ document.addEventListener('keydown', e => {
 
 // Feature modules (watchlist, drawings, indicators, alerts, layouts). Each
 // exports init(app) and runs before the first symbol loads.
-const FEATURES = [initWatchlist, initDrawings, initIndicators, initAlerts];
+const FEATURES = [initWatchlist, initDrawings, initIndicators, initAlerts, initLayouts, initReplay, initExtras];
 
 async function start() {
   for (const init of FEATURES) await init(app);
@@ -244,6 +256,8 @@ async function start() {
   applyScale();
   const ok = await app.setSymbol(app.symbol);
   if (!ok && app.symbol !== 'BINANCE:BTCUSDT.P') await app.setSymbol('BINANCE:BTCUSDT.P');
+  applyScale();
+  app.emit('ready');
   applyScale();
 }
 

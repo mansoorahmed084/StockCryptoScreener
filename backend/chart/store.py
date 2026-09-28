@@ -8,6 +8,9 @@ Drawings: one row per drawing, keyed by the symbol's drawing key (the spot and
 perpetual USDT legs of a coin share one). Points are (time, price) pairs —
 UTC seconds, not pixels — so a drawing sits in the same place on every
 timeframe. The browser makes the ids, so saving is a plain upsert.
+
+Layouts: named snapshots of the workspace (grid, linking, and each chart's
+symbol, timeframe and indicators), stored as JSON.
 """
 from __future__ import annotations
 
@@ -51,6 +54,11 @@ CREATE TABLE IF NOT EXISTS drawings (
     updated_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS drawings_key ON drawings(symbol_key);
+CREATE TABLE IF NOT EXISTS layouts (
+    name TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
 """
 MAX_POINTS = 10
 
@@ -251,3 +259,36 @@ class ChartStore:
     def delete_drawings(self, key: str) -> int:
         with self._db() as db:
             return db.execute("DELETE FROM drawings WHERE symbol_key = ?", (key,)).rowcount
+
+    # --- layouts -------------------------------------------------------------
+    def layouts(self) -> list[dict]:
+        with self._db() as db:
+            rows = db.execute("SELECT name, updated_ms FROM layouts ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+    def layout(self, name: str) -> dict:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM layouts WHERE name = ?", (name,)).fetchone()
+        if not row:
+            raise LookupError("no such layout")
+        return {"name": row["name"], "state": json.loads(row["state"]),
+                "updated_ms": row["updated_ms"]}
+
+    def save_layout(self, name: str, state: dict) -> dict:
+        name = name.strip()
+        if not name or len(name) > 80:
+            raise ValueError("A layout needs a name (up to 80 characters).")
+        if not isinstance(state, dict):
+            raise ValueError("state must be an object")
+        blob = json.dumps(state)
+        if len(blob) > 200_000:
+            raise ValueError("layout too large")
+        with self._db() as db:
+            db.execute("INSERT INTO layouts(name, state, updated_ms) VALUES(?, ?, ?) "
+                       "ON CONFLICT(name) DO UPDATE SET state = excluded.state, "
+                       "updated_ms = excluded.updated_ms", (name, blob, _now_ms()))
+        return self.layout(name)
+
+    def delete_layout(self, name: str) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM layouts WHERE name = ?", (name,))
