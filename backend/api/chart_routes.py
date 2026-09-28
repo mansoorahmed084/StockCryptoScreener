@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import httpx
@@ -220,6 +221,103 @@ def analysis(symbol: str, tf: str, n: int = 300, order_blocks: bool = True,
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"data source error: {exc}") from exc
     return studies.analysis(studies.frame(bars), studies.frame(daily) if daily else None)
+
+
+# --- alerts -------------------------------------------------------------------
+# Chart alerts use the screener's alert store and watcher (backend/alerts),
+# which read Binance USDT perpetual candles. So a perpetual (or BTC.D, whose
+# candles are the BTCDOM contract) can have alerts, and so can a USDT/USDC
+# spot pair through its coin's perpetual. Other markets cannot yet.
+SPOT_VIA_PERP = ("USDT", "USDC", "FDUSD")
+
+
+def _service():
+    from backend.api.app import get_service   # late: app imports this module
+    return get_service()
+
+
+def alert_target(md: MarketData, sym) -> tuple[str, str] | None:
+    """(coin, Binance perpetual) that alerts for this chart symbol watch."""
+    if sym.market == "perp":
+        return sym.coin, sym.binance_symbol
+    if sym.market == "dominance":
+        return "BTC.D", sym.binance_symbol
+    if sym.market == "spot" and sym.pair[1] in SPOT_VIA_PERP:
+        perp = md.futures.perpetuals().get(sym.coin or "")
+        if perp:
+            return sym.coin, perp
+    return None
+
+
+def _alert_json(a) -> dict:
+    from dataclasses import asdict
+    return {**asdict(a), "text": a.describe()}
+
+
+class AlertBody(BaseModel):
+    symbol: str
+    kind: str
+    condition: str
+    level: float | None = None
+    t1: float | None = None          # line points: chart times (UTC seconds)
+    p1: float | None = None
+    t2: float | None = None
+    p2: float | None = None
+    low: float | None = None
+    high: float | None = None
+    timeframe: str = "1m"
+    note: str = ""
+
+
+@router.get("/alerts")
+def chart_alerts(symbol: str, md: MarketData = Depends(get_market)) -> dict:
+    from backend.alerts.price_alerts import ACTIVE, TRIGGERED
+    try:
+        target = alert_target(md, md.resolve(symbol))
+    except (ValueError, LookupError) as exc:
+        raise _bad_symbol(exc) from exc
+    if target is None:
+        return {"supported": False, "alerts": []}
+    store = _service().alerts()
+    week_ago = (time.time() - 7 * 86400) * 1000
+    alerts = [a for a in store.list() if a.symbol == target[1] and (
+        a.status == ACTIVE or (a.status == TRIGGERED and (a.triggered_ms or 0) > week_ago))]
+    return {"supported": True, "coin": target[0], "alerts": [_alert_json(a) for a in alerts]}
+
+
+@router.post("/alerts")
+def create_chart_alert(body: AlertBody, md: MarketData = Depends(get_market)) -> dict:
+    from backend.alerts.price_alerts import Alert
+    try:
+        target = alert_target(md, md.resolve(body.symbol))
+    except (ValueError, LookupError) as exc:
+        raise _bad_symbol(exc) from exc
+    if target is None:
+        raise HTTPException(400, "Alerts work on Binance perpetuals, BTC.D and USDT spot "
+                                 "pairs for now, not on this market.")
+    ms = lambda t: None if t is None else int(t * 1000)
+    try:
+        alert = Alert(coin=target[0], symbol=target[1], kind=body.kind,
+                      condition=body.condition, level=body.level, t1=ms(body.t1), p1=body.p1,
+                      t2=ms(body.t2), p2=body.p2, low=body.low, high=body.high,
+                      timeframe=body.timeframe, note=body.note.strip()[:200])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    store = _service().alerts()
+    alert.id = store.add(alert)
+    return _alert_json(alert)
+
+
+@router.delete("/alerts/{alert_id}", status_code=204)
+def delete_chart_alert(alert_id: int) -> None:
+    _service().alerts().delete(alert_id)
+
+
+@router.post("/alerts/check")
+def check_chart_alerts() -> dict:
+    """Check every active alert once (like an open dashboard page does)."""
+    fired = _service().check_alerts()
+    return {"fired": [_alert_json(a) for a in fired]}
 
 
 # --- drawings -----------------------------------------------------------------

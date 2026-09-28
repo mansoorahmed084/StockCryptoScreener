@@ -560,6 +560,26 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   a new candle or every 15 s). Each chart remembers its indicators. A
   first-time user starts with VuManChu.
 
+### Alerts from the chart
+- **🔔 Alert** in the top bar (Alt+A): create a price alert at the current
+  price, see this symbol's alerts (active orange, fired in the last 7 days
+  grey), remove one, or open the Alerts page.
+- On a drawing (right-click → 🔔 Add alert…, or the bell in its floating bar):
+  horizontal line / ray → price alert (goes above / below, touches, closes
+  above / below on a 1m–1D candle); trend line, ray, extended line →
+  trendline alert (touches, closes above / below the line); rectangle → zone
+  alert (enters); long / short position → two alerts, target and stop.
+- Alerts show on the chart as dashed orange lines with a 🔔 label, and on the
+  price axis.
+- They go into the same store as the Alerts page (`data_cache/alerts.db`), so
+  the watcher, the Windows pop-up and Telegram handle them. While the
+  workspace is open it checks all alerts every minute and shows a toast for
+  each one that fires.
+- **Limit:** alerts work on Binance perpetuals, BTC.D and USDT/USDC spot pairs
+  (watched through the coin's perpetual). Stocks and other spot pairs
+  (ETHBTC) cannot have alerts yet: the watcher and the Alerts page read
+  Binance perpetual candles only.
+
 ## Data sources
 
 | Source | Used for | Key |

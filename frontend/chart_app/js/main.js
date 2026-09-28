@@ -8,6 +8,7 @@ import { SymbolSearch } from './symbol-search.js';
 import { initWatchlist } from './watchlist.js';
 import { initDrawings } from './drawings/index.js';
 import { initIndicators } from './indicators/index.js';
+import { initAlerts } from './alerts.js';
 import {
   FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, fitTf, isValidTf, tfLabel,
 } from './timeframes.js';
@@ -233,7 +234,7 @@ document.addEventListener('keydown', e => {
 
 // Feature modules (watchlist, drawings, indicators, alerts, layouts). Each
 // exports init(app) and runs before the first symbol loads.
-const FEATURES = [initWatchlist, initDrawings, initIndicators];
+const FEATURES = [initWatchlist, initDrawings, initIndicators, initAlerts];
 
 async function start() {
   for (const init of FEATURES) await init(app);

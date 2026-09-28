@@ -364,3 +364,46 @@ def test_study_routes(md, monkeypatch):
     assert client.post("/api/chart/studies/vumanchu", json={"bars": [{"x": 1}]}).status_code == 400
     a = client.get("/api/chart/analysis", params={"symbol": "BTCUSDT.P", "tf": "1m", "n": 200})
     assert a.status_code == 200 and "order_blocks" in a.json()
+
+
+# --- alerts from the chart ----------------------------------------------------
+from backend.alerts import price_alerts as pa  # noqa: E402
+
+
+class FakeAlertService:
+    def __init__(self, path):
+        self.store = pa.AlertStore(path)
+
+    def alerts(self):
+        return self.store
+
+    def check_alerts(self):
+        return []
+
+
+def test_chart_alerts_go_to_the_screener_store(md, tmp_path, monkeypatch):
+    svc = FakeAlertService(tmp_path / "alerts.db")
+    monkeypatch.setattr(chart_routes, "_market", md)
+    monkeypatch.setattr(chart_routes, "_service", lambda: svc)
+    client = TestClient(api.app)
+    r = client.post("/api/chart/alerts", json={"symbol": "BINANCE:SOLUSDT.P", "kind": "price",
+                                              "condition": "above", "level": 150})
+    assert r.status_code == 200 and r.json()["symbol"] == "SOLUSDT" and r.json()["coin"] == "SOL"
+    # a USDT spot pair watches its coin's perpetual; line times arrive in seconds
+    r = client.post("/api/chart/alerts", json={
+        "symbol": "BINANCE:SOLUSDT", "kind": "line", "condition": "break_up", "timeframe": "15m",
+        "t1": 1_700_000_000, "p1": 100, "t2": 1_700_003_600, "p2": 110})
+    assert r.status_code == 200 and r.json()["t1"] == 1_700_000_000_000
+    assert r.json()["symbol"] == "SOLUSDT"
+    # other markets are refused, bad alerts too
+    assert client.post("/api/chart/alerts", json={"symbol": "BINANCE:ETHBTC", "kind": "price",
+                                                  "condition": "above", "level": 1}).status_code == 400
+    assert client.post("/api/chart/alerts", json={"symbol": "SOLUSDT.P", "kind": "price",
+                                                  "condition": "enter", "level": 1}).status_code == 400
+    listed = client.get("/api/chart/alerts", params={"symbol": "SOLUSDT.P"}).json()
+    assert listed["supported"] and len(listed["alerts"]) == 2
+    assert client.get("/api/chart/alerts", params={"symbol": "ETHBTC"}).json()["supported"] is False
+    first = listed["alerts"][0]["id"]
+    assert client.delete(f"/api/chart/alerts/{first}").status_code == 204
+    assert len(svc.store.list()) == 1
+    assert client.post("/api/chart/alerts/check").json() == {"fired": []}
