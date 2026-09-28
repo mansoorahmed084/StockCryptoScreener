@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chart Workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 12l4-5 3 3 6-8' stroke='%232962ff' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/workspace/static/css/app.css">
+</head>
+<body>
+  <header id="topbar">
+    <button id="symbol-btn" class="tb-btn symbol-btn" title="Symbol search (just start typing)">
+      <span class="symbol-text">…</span>
+    </button>
+    <span class="sep"></span>
+    <div id="tf-buttons" class="tf-buttons"></div>
+    <button id="tf-more" class="tb-btn caret" title="More timeframes">▾</button>
+    <span class="sep"></span>
+    <button id="style-btn" class="tb-btn" title="Chart style"></button>
+    <span class="sep"></span>
+    <div id="tb-extra" class="tb-group"></div>
+    <span class="spacer"></span>
+    <div id="tb-right" class="tb-group"></div>
+    <span id="feed-status" class="feed-status" title="Data status"></span>
+  </header>
+
+  <div id="workspace">
+    <nav id="leftbar" hidden></nav>
+    <main id="chart-area">
+      <div id="charts" class="layout-1"></div>
+    </main>
+    <div id="right-resizer" class="resizer" hidden></div>
+    <aside id="rightpanel" hidden></aside>
+  </div>
+
+  <footer id="bottombar">
+    <div id="ranges" class="ranges"></div>
+    <span class="spacer"></span>
+    <span id="clock" class="clock"></span>
+    <span class="sep"></span>
+    <button class="bb-btn" data-scale="percent" title="Percent scale">%</button>
+    <button class="bb-btn" data-scale="log" title="Log scale">log</button>
+    <button class="bb-btn" data-scale="auto" title="Auto-fit prices">auto</button>
+  </footer>
+
+  <div id="search-modal" class="modal" hidden></div>
+  <div id="dialog" class="modal" hidden></div>
+
+  <script type="module" src="/workspace/static/js/main.js"></script>
+</body>
+</html>

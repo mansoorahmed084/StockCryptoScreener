@@ -191,3 +191,9 @@ def journal(limit: int = 100) -> dict:
     df = j.to_frame(limit=limit)
     j.close()
     return {"signals": _clean(df.to_dict("records"))}
+
+
+# The TradingView-style chart workspace: /workspace and /api/chart/*.
+from backend.api import chart_routes  # noqa: E402
+
+chart_routes.install(app)

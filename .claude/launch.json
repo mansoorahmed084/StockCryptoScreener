@@ -34,6 +34,21 @@
         "false"
       ],
       "port": 8502
+    },
+    {
+      "name": "chart-api",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.api.app:app",
+        "--port",
+        "8010",
+        "--reload",
+        "--reload-dir",
+        "backend"
+      ],
+      "port": 8010
     }
   ]
 }

@@ -33,6 +33,7 @@ Then open http://localhost:8501 and pick a page in the sidebar.
 | Pattern Scanner | `/Pattern_Scanner` | Triangles, wedges and flags across many coins and timeframes |
 | Alerts | `/Alerts` | Price, trendline and zone alerts you set, checked every minute |
 | Trade | `/Trade` | Open, protect (SL + target) and close CoinDCX INR futures trades |
+| Chart Workspace | `/Chart_Workspace` → http://localhost:8000/workspace | TradingView-style chart: drawing tools, indicators, watchlists, crypto + stocks |
 
 ### Best time to trade (IST)
 The main screener and the Trade page show a strip of 24 hour boxes in IST.
@@ -437,6 +438,38 @@ asks you to type the pair (or `PANIC`) first.
   confirmation that places or closes a trade.
 
 ---
+
+## 7. Chart workspace
+
+**Question it answers:** what does this chart look like, with my own lines on
+it? A TradingView-style full-screen chart for crypto and stocks.
+
+Run the API, then open the page:
+
+```bash
+.venv/Scripts/python.exe -m uvicorn backend.api.app:app --port 8000
+```
+
+http://localhost:8000/workspace — or the **Chart Workspace** page in the
+Streamlit sidebar (a frame + an "Open full screen" button). A link like
+`/workspace?symbol=BINANCE:SOLUSDT.P&tf=4h` opens that chart.
+
+### Chart
+- Candles for Binance USDT perpetuals (`BINANCE:BTCUSDT.P`), Binance spot
+  (`BINANCE:ETHBTC`) and BTC dominance (`CRYPTOCAP:BTC.D`, Binance's BTCDOM
+  index contract). Live from Binance's WebSocket.
+- Timeframes 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, D, W, M. Favourites
+  in the top bar, the rest under ▾.
+- **Symbol search:** click the symbol, or just start typing on the chart.
+  Tabs: All, Crypto, India, US. Arrow keys + Enter.
+- Scroll left and older candles load by themselves.
+- Legend: O H L C, change and volume of the candle under the cursor.
+- Countdown to the candle close under the price label.
+- Chart styles: candles, Heikin Ashi, bars, line, area.
+- Bottom bar: 1D … All ranges (each picks a timeframe, like TradingView),
+  clock (click to change the time zone; IST by default), % / log / auto
+  price scale.
+- Symbol, timeframe and settings are remembered, and kept in the URL.
 
 ## Data sources
 

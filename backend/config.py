@@ -134,6 +134,20 @@ class Config:
         return dict(self.raw.get("trading", {}))
 
     @property
+    def chart(self) -> dict[str, Any]:
+        """Chart workspace settings (empty -> defaults)."""
+        return dict(self.raw.get("chart", {}))
+
+    @property
+    def chart_db(self) -> str:
+        return str(self.chart.get("db", "data_cache/chart.db"))
+
+    @property
+    def chart_workspace_url(self) -> str:
+        """Where the browser opens the chart workspace (served by the API)."""
+        return str(self.chart.get("workspace_url", "http://localhost:8000/workspace"))
+
+    @property
     def btc_strength(self) -> dict[str, Any]:
         """Settings for the coins-vs-BTC board (empty -> module defaults)."""
         return dict(self.raw.get("btc_strength", {}))

@@ -28,8 +28,9 @@ by the FastAPI app that already exists (`backend/api/app.py`, port 8000).
 | Stock data | `yfinance` (new dependency) behind a small adapter | Free, no key, NSE/BSE/US. Unofficial and rate-limited, so the server caches hard. |
 | Storage | SQLite `data_cache/chart.db` | Same pattern as `data_cache/alerts.db`. Survives Docker restarts (volume). |
 
-Open the page at `http://localhost:8000/chart`. The Streamlit sidebar gets a
-"Chart" link. Screener rows get a "open in chart" link (`/chart?symbol=SOLUSDT.P&tf=4h`).
+Open the page at `http://localhost:8000/workspace` (`/chart` is already an API
+route). The Streamlit sidebar gets a "Chart Workspace" page. Links like
+`/workspace?symbol=BINANCE:SOLUSDT.P&tf=4h` open a chart.
 
 Why not TradingView "Advanced Charts" (all drawing tools built in): TradingView
 does not give it for personal or private use. Only companies with a public
@@ -204,7 +205,7 @@ New routes in a new `backend/api/chart_routes.py`, added to `app.py`:
 
 | Route | Does |
 |---|---|
-| `GET /chart` | Serves the page (`frontend/chart_app/index.html`) |
+| `GET /workspace` | Serves the page (`frontend/chart_app/index.html`) |
 | `GET /api/chart/symbols?q=&market=` | Search Binance perps + spot (exchangeInfo, cached 1 h) and Yahoo (search endpoint, NSE/BSE/US only) |
 | `GET /api/chart/quotes?symbols=` | Last/chg/chg% for stock rows, batched, cached 30 s |
 | `GET /api/chart/candles?symbol=&tf=&end=&limit=` | Candles, with paging by `end` time. Special symbols: BTC.D, USDT.D, ratios |
@@ -289,7 +290,7 @@ frontend/chart_app/
 ## 8. Decisions (2026-09-28)
 
 1. Markets: crypto + stocks (NSE/BSE and US).
-2. Own full-screen page at `/chart`, linked from Streamlit.
+2. Own full-screen page at `/workspace`, linked from Streamlit.
 3. Lightweight Charts + our own drawing tools. (Advanced Charts is not
    licensed for private use.)
 4. SOLUSDT and SOLUSDT.P share drawings.
