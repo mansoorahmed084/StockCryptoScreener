@@ -105,8 +105,9 @@ the downloaded candles.
 Sidebar → **Edit my watchlists**: create, rename or delete named lists. Pick
 coins from every CoinDCX USDT coin, or paste symbols — TradingView tickers
 like `BINANCE:SOLUSDT`, `SOLUSDT.P`, `SOL/USDT` all work. Coins CoinDCX does
-not list are flagged. Lists are saved in `data_cache/watchlists.json`
-(gitignored, kept by Docker).
+not list are flagged. Lists are saved in `data_cache/chart.db` (gitignored,
+kept by Docker) and are the same lists as the Chart workspace's watchlist
+panel; this page sees only their coins (stocks stay in the list).
 
 ---
 
@@ -485,6 +486,29 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   D/W/M all. Yahoo's BSE history is short for some shares; NSE is better.
 - No countdown on stock candles.
 
+### Watchlists (right panel)
+- ☰ **Watchlist** in the top bar opens and closes the panel; drag its left
+  edge to resize.
+- Several named lists (▾ next to the name): create, rename, delete, clear,
+  **import** (paste `BINANCE:SOLUSDT.P, ETHUSDT.P, NSE:TCS, AAPL, PEPE …`;
+  bare tickers are guessed — a Binance coin becomes its perpetual, else an
+  exact stock match; `###NAME` starts a section) and **export** (TradingView's
+  comma format).
+- Sections: collapse with a click; add, rename or remove from the right-click
+  menu.
+- Columns Last, Chg, Chg%: crypto live from Binance (24h change), stocks
+  every 30 s (today's change, delayed). Prices flash green / red on a tick.
+- Click a row to open it; ↑ / ↓ walk the list. ＋ adds a symbol through the
+  search; **Alt+W** adds the chart's symbol.
+- Colour flags: click the thin bar at a row's left edge to cycle colours, or
+  right-click. ⚑ shows only one flag colour.
+- Drag rows (and sections) to reorder. Every change is saved at once.
+- Under the list: the chart symbol's name, price, change, 24h high / low /
+  volume (crypto), and whether it is live or delayed.
+- A first-time user starts with one list: dominance, five coins, NIFTY,
+  BANKNIFTY, RELIANCE, SPX, NDX, AAPL. The lists are shared with the BTC
+  Strength and Pattern Scanner pages.
+
 ## Data sources
 
 | Source | Used for | Key |
@@ -506,7 +530,9 @@ and futures data.
 | `btc_strength.workers`, `btc_strength.exclude` | Parallel downloads; stablecoins / wrapped tokens left out of top-N lists |
 | `classifier.per_timeframe.1M` | Classifier settings for the new 1-month timeframe |
 | `liquidation.leverages`, `maintenance_margin`, `bins` | Liquidation model |
-| `data.watchlists_file` | Where custom watchlists are saved |
+| `data.watchlists_file` | Old custom-watchlist file, copied into `chart.db` once |
+| `chart.db` | Chart workspace store: watchlists (default `data_cache/chart.db`) |
+| `chart.workspace_url` | Where the Chart Workspace page opens the chart (default `http://localhost:8000/workspace`) |
 | `alerts.db`, `check_seconds`, `desktop` | Alert store, how often open pages check, Windows pop-ups |
 | `trading.mode`, `trading.limits`, `close_unprotected` | Dry run or live; per-trade and daily risk limits; auto-close positions with no stop |
 

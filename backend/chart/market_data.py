@@ -7,6 +7,7 @@ pass ``end`` (exclusive, epoch seconds) to get the ``limit`` candles before it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -90,6 +91,32 @@ class MarketData:
         elif sym.market == "spot" and sym.binance_symbol not in self.spot_pairs():
             raise LookupError(f"no Binance spot pair {sym.full}")
         return sym
+
+    def resolve_loose(self, text: str) -> ChartSymbol | None:
+        """A symbol from pasted text, guessing the market of a bare ticker:
+        a Binance coin (SOL -> its USDT perpetual), else an exact Yahoo match
+        (AAPL -> NASDAQ:AAPL). None when nothing fits."""
+        try:
+            return self.resolve(text)
+        except (ValueError, LookupError, httpx.HTTPError):
+            pass
+        t = text.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9&_.-]{1,20}", t):
+            return None
+        try:
+            real = self.futures.perpetuals().get(t)
+            if real:
+                return ChartSymbol("BINANCE", f"{real}.P")
+        except httpx.HTTPError:
+            pass
+        if self.yahoo is not None:
+            try:
+                for row in self.yahoo.search(t, limit=10):
+                    if row["ticker"] == t:
+                        return parse(row["symbol"])
+            except httpx.HTTPError:
+                pass
+        return None
 
     def describe(self, sym: ChartSymbol) -> str:
         """Long name for the chart legend."""

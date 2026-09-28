@@ -1,17 +1,20 @@
-"""Named custom watchlists, kept in a small JSON file.
+"""Named custom watchlists, shared with the chart workspace.
 
-The file lives at ``data.watchlists_file`` in config.yaml (default
-``data_cache/watchlists.json``). data_cache/ is gitignored, and Docker mounts it
-as a volume, so the lists survive restarts. Shape: ``{"name": ["SOL", "ETH"]}``.
+The lists live in the chart workspace's SQLite store (``chart.db`` in
+config.yaml, default ``data_cache/chart.db``), where each row is a full
+``EXCHANGE:TICKER`` symbol. This module is the coin-only view the BTC Strength
+and Pattern Scanner pages use: ``{"name": ["SOL", "ETH"]}``. Stocks and
+section rows in a list are left alone. Lists from the old
+``data.watchlists_file`` JSON are copied in once.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 
+from backend.chart.store import SECTION, ChartStore
+from backend.chart.symbols import try_parse
 from backend.config import Config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -50,40 +53,65 @@ def parse_symbols(text: str) -> list[str]:
 
 class WatchlistStore:
     def __init__(self, path: str | Path):
-        self.path = Path(path)
+        self.chart = ChartStore(path)
 
     @classmethod
     def from_config(cls, config: Config) -> "WatchlistStore":
-        path = Path(config.watchlists_file)
-        return cls(path if path.is_absolute() else REPO_ROOT / path)
+        def at_root(p: str) -> Path:
+            path = Path(p)
+            return path if path.is_absolute() else REPO_ROOT / path
+        store = cls(at_root(config.chart_db))
+        store.import_legacy(at_root(config.watchlists_file))
+        return store
+
+    def import_legacy(self, json_path: Path) -> None:
+        """Copy the lists of the old JSON file in, once."""
+        if self.chart.get_meta("legacy_watchlists_imported"):
+            return
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            data = {}
+        for name, coins in data.items():
+            if self.chart.list_id(str(name)) is None:
+                self.save(str(name), [str(c) for c in coins])
+        self.chart.set_meta("legacy_watchlists_imported", "1")
 
     def load(self) -> dict[str, list[str]]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        return {str(k): [str(c).upper() for c in v] for k, v in data.items()}
+        out: dict[str, list[str]] = {}
+        for lst in self.chart.lists():
+            coins: list[str] = []
+            for it in self.chart.get_list(lst["id"])["items"]:
+                sym = try_parse(it["symbol"])
+                if sym and sym.coin and sym.coin not in coins:
+                    coins.append(sym.coin)
+            out[lst["name"]] = coins
+        return out
 
     def save(self, name: str, coins: list[str]) -> list[str]:
-        """Create or replace list ``name``; returns the coins stored."""
+        """Create or replace the coins of list ``name``; returns the coins
+        stored. Crypto rows for coins still wanted keep their place, new coins
+        are added as USDT perpetuals, and stock / section rows stay."""
         name = name.strip()
         if not name:
             raise ValueError("A watchlist needs a name.")
         coins = list(dict.fromkeys(c.strip().upper() for c in coins if c.strip()))
-        lists = self.load()
-        lists[name] = coins
-        self._write(lists)
+        list_id = self.chart.list_id(name)
+        if list_id is None:
+            list_id = self.chart.create_list(name)
+        kept, have = [], set()
+        for it in self.chart.get_list(list_id)["items"]:
+            sym = None if it["symbol"].startswith(SECTION) else try_parse(it["symbol"])
+            if sym is not None and sym.coin:
+                if sym.coin not in coins:
+                    continue
+                have.add(sym.coin)
+            kept.append(it)
+        kept += [{"symbol": f"BINANCE:{c}USDT.P"} for c in coins if c not in have]
+        self.chart.set_items(list_id, kept)
         return coins
 
     def delete(self, name: str) -> None:
-        lists = self.load()
-        if lists.pop(name, None) is not None:
-            self._write(lists)
-
-    def _write(self, lists: dict[str, list[str]]) -> None:
-        # Write a temp file, then swap it in: a crash never leaves half a file.
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(dict(sorted(lists.items())), fh, indent=2)
-        os.replace(tmp, self.path)
+        list_id = self.chart.list_id(name)
+        if list_id is not None:
+            self.chart.delete_list(list_id)

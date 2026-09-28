@@ -5,6 +5,7 @@ import { $, $$, esc, popupMenu, store, toast, typingInField } from './dom.js';
 import { setTimeZone, timeZone, zoneLabel } from './format.js';
 import { ChartSlot, resolveSymbol } from './slot.js';
 import { SymbolSearch } from './symbol-search.js';
+import { initWatchlist } from './watchlist.js';
 import {
   FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, fitTf, isValidTf, tfLabel,
 } from './timeframes.js';
@@ -157,7 +158,7 @@ $('#style-btn').onclick = e => popupMenu(e.currentTarget,
 function setStatus(s) {
   const el = $('#feed-status');
   el.className = `feed-status ${s}`;
-  el.textContent = { live: 'Live', delayed: 'Delayed ~15 min', reconnecting: 'Reconnecting…' }[s] || s;
+  el.textContent = { live: 'Live', delayed: 'Delayed ~15 min', connecting: 'Connecting…', reconnecting: 'Reconnecting…' }[s] || s;
 }
 
 // ---- bottom bar ----
@@ -230,7 +231,7 @@ document.addEventListener('keydown', e => {
 
 // Feature modules (watchlist, drawings, indicators, alerts, layouts). Each
 // exports init(app) and runs before the first symbol loads.
-const FEATURES = [];
+const FEATURES = [initWatchlist];
 
 async function start() {
   for (const init of FEATURES) await init(app);

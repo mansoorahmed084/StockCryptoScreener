@@ -214,3 +214,68 @@ def test_stock_candles_and_quotes_through_market_data():
     assert m.describe(m.resolve("NSE:TCS")) == "Tata Consultancy Services"
     q = m.quotes(["NSE:TCS"])["NSE:TCS"]
     assert q["last"] == 5 and q["change"] == 4 and q["change_pct"] == 400
+
+
+# --- watchlists -------------------------------------------------------------
+from backend.chart.store import ChartStore  # noqa: E402
+from backend.watchlists import WatchlistStore  # noqa: E402
+
+
+def test_chart_store_lists_items_sections_and_flags(tmp_path):
+    store = ChartStore(tmp_path / "chart.db")
+    lid = store.create_list("Alts", ["BINANCE:SOLUSDT.P", "nse:tcs", "BINANCE:SOLUSDT.P"])
+    assert [i["symbol"] for i in store.get_list(lid)["items"]] == ["BINANCE:SOLUSDT.P", "NSE:TCS"]
+    with pytest.raises(ValueError):
+        store.create_list("Alts")
+    got = store.set_items(lid, [{"symbol": "###Majors"}, {"symbol": "NSE:TCS", "flag": "red"},
+                                {"symbol": "BINANCE:ETHBTC", "flag": "nope"}, {"symbol": "###"}])
+    assert [(i["symbol"], i["flag"]) for i in got["items"]] == [
+        ("###Majors", None), ("NSE:TCS", "red"), ("BINANCE:ETHBTC", None)]
+    assert store.lists() == [{"id": lid, "name": "Alts", "count": 2}]
+    store.rename_list(lid, "Majors")
+    assert store.get_list(lid)["name"] == "Majors"
+    store.delete_list(lid)
+    assert store.lists() == []
+    store.ensure_default()
+    assert store.lists()[0]["name"] == "Watchlist"
+
+
+def test_coin_view_keeps_stocks_and_sections(tmp_path):
+    wl = WatchlistStore(tmp_path / "chart.db")
+    lid = wl.chart.create_list("Mixed", ["###A", "BINANCE:SOLUSDT", "NSE:TCS",
+                                         "BINANCE:ETHUSDT.P"])
+    assert wl.load() == {"Mixed": ["SOL", "ETH"]}
+    wl.save("Mixed", ["eth", "DOGE"])
+    assert [i["symbol"] for i in wl.chart.get_list(lid)["items"]] == [
+        "###A", "NSE:TCS", "BINANCE:ETHUSDT.P", "BINANCE:DOGEUSDT.P"]
+
+
+def test_old_json_lists_are_copied_in_once(tmp_path):
+    old = tmp_path / "watchlists.json"
+    old.write_text('{"Memes": ["PEPE", "WIF"]}', encoding="utf-8")
+    wl = WatchlistStore(tmp_path / "chart.db")
+    wl.import_legacy(old)
+    assert wl.load() == {"Memes": ["PEPE", "WIF"]}
+    wl.delete("Memes")
+    wl.import_legacy(old)                     # not again
+    assert wl.load() == {}
+
+
+def test_watchlist_routes_and_import(md, tmp_path, monkeypatch):
+    monkeypatch.setattr(chart_routes, "_market", md)
+    monkeypatch.setattr(chart_routes, "_store", ChartStore(tmp_path / "chart.db"))
+    client = TestClient(api.app)
+    lst = client.post("/api/chart/watchlists", json={"name": "Scalps"}).json()
+    assert client.post("/api/chart/watchlists", json={"name": "Scalps"}).status_code == 400
+    res = client.post(f"/api/chart/watchlists/{lst['id']}/import", json={
+        "text": "###MAJORS, BINANCE:SOLUSDT.P, pepe\nETHBTC nothing!"}).json()
+    assert [i["symbol"] for i in res["items"]] == [
+        "###MAJORS", "BINANCE:SOLUSDT.P", "BINANCE:1000PEPEUSDT.P", "BINANCE:ETHBTC"]
+    assert res["skipped"] == ["nothing!"]
+    items = res["items"][::-1]
+    got = client.put(f"/api/chart/watchlists/{lst['id']}/items", json={"items": items}).json()
+    assert got["items"][0]["symbol"] == "BINANCE:ETHBTC"
+    client.put(f"/api/chart/watchlists/{lst['id']}/active")
+    assert client.get("/api/chart/watchlists").json()["active"] == lst["id"]
+    assert client.delete(f"/api/chart/watchlists/{lst['id']}").status_code == 204
+    assert client.get(f"/api/chart/watchlists/{lst['id']}").status_code == 404

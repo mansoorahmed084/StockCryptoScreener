@@ -6,7 +6,9 @@
 
 import { api } from './api.js';
 
-const FUTURES_WS = 'wss://fstream.binance.com/ws';
+// Binance serves USD-M futures market streams under /market (the old paths
+// still accept connections but send nothing).
+const FUTURES_WS = 'wss://fstream.binance.com/market/ws';
 const SPOT_WS = 'wss://stream.binance.com:9443/ws';
 const STOCK_POLL_MS = 30_000;
 
@@ -75,17 +77,27 @@ export class Datafeed {
     const ws = new WebSocket(`${base}/${this.info.binance.toLowerCase()}@kline_${this.tf}`);
     this.ws = ws;
     ws.onopen = () => {
-      this.onStatus('live');
+      this.onStatus('connecting');
       delay = 1000;
       this._catchUp();
     };
+    // "Live" only once data flows; a silent socket is dropped and reopened.
+    let lastMsg = Date.now();
+    clearInterval(this.watchdog);
+    this.watchdog = setInterval(() => {
+      if (Date.now() - lastMsg > 60_000) ws.close();
+    }, 15_000);
     ws.onmessage = ev => {
+      if (Date.now() - lastMsg > 5000 || !this.flowing) { this.flowing = true; this.onStatus('live'); }
+      lastMsg = Date.now();
       const k = JSON.parse(ev.data).k;
       if (!k) return;
       this._merge({ time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l,
                     close: +k.c, volume: +k.v });
     };
     ws.onclose = () => {
+      clearInterval(this.watchdog);
+      this.flowing = false;
       if (this.closed) return;
       this.onStatus('reconnecting');
       this.retry = setTimeout(() => this._connect(Math.min(delay * 2, 30_000)), delay);
@@ -117,6 +129,7 @@ export class Datafeed {
     this.closed = true;
     clearTimeout(this.retry);
     clearTimeout(this.timer);
+    clearInterval(this.watchdog);
     if (this.ws) this.ws.close();
   }
 }

@@ -46,7 +46,8 @@ BTC (BTC/USDT) and of BTC.D.
   `BTCDOMUSDT`; the live % comes from CoinGecko).
 - **Coins:** the top 25-500 by CoinGecko market cap that CoinDCX lists (500
   coins take about a minute), your own saved watchlists, or the config list.
-  Watchlists are saved to `data_cache/watchlists.json`; you can paste
+  Watchlists are saved to `data_cache/chart.db` (shared with the Chart
+  workspace); you can paste
   TradingView tickers such as `BINANCE:SOLUSDT`.
 
 Settings are under `btc_strength` in `config.yaml`.

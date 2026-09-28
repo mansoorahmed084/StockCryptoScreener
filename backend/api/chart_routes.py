@@ -1,15 +1,20 @@
 """Routes for the chart workspace (frontend/chart_app), opened at /workspace."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from backend.chart.market_data import TIMEFRAMES, MarketData
+from backend.chart.store import SECTION, ChartStore
+from backend.config import load_config
 from backend.data.yahoo import Yahoo
+from backend.watchlists import WatchlistStore
 
 APP_DIR = Path(__file__).resolve().parents[2] / "frontend" / "chart_app"
 
@@ -23,6 +28,20 @@ def get_market() -> MarketData:
     if _market is None:
         _market = MarketData(yahoo=Yahoo())
     return _market
+
+
+_store: ChartStore | None = None
+
+
+def get_store() -> ChartStore:
+    """The chart store, with the old JSON watchlists copied in and a starter
+    list for a first-time user."""
+    global _store
+    if _store is None:
+        wl = WatchlistStore.from_config(load_config())
+        wl.chart.ensure_default()
+        _store = wl.chart
+    return _store
 
 
 def _bad_symbol(exc: Exception) -> HTTPException:
@@ -73,6 +92,98 @@ def quotes(symbols: str, md: MarketData = Depends(get_market)) -> dict:
         return {"quotes": md.quotes(wanted)}
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"data source error: {exc}") from exc
+
+
+# --- watchlists ---------------------------------------------------------------
+class ListBody(BaseModel):
+    name: str
+
+
+class ItemsBody(BaseModel):
+    items: list[dict]
+
+
+class ImportBody(BaseModel):
+    text: str
+
+
+def _store_call(fn, *args):
+    try:
+        return fn(*args)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/watchlists")
+def watchlists(store: ChartStore = Depends(get_store)) -> dict:
+    lists = store.lists()
+    active = store.get_meta("active_watchlist")
+    ids = {w["id"] for w in lists}
+    active_id = int(active) if active and int(active) in ids else (lists[0]["id"] if lists else None)
+    return {"lists": lists, "active": active_id}
+
+
+@router.post("/watchlists")
+def create_watchlist(body: ListBody, store: ChartStore = Depends(get_store)) -> dict:
+    list_id = _store_call(store.create_list, body.name)
+    store.set_meta("active_watchlist", str(list_id))
+    return store.get_list(list_id)
+
+
+@router.get("/watchlists/{list_id}")
+def get_watchlist(list_id: int, store: ChartStore = Depends(get_store)) -> dict:
+    return _store_call(store.get_list, list_id)
+
+
+@router.put("/watchlists/{list_id}")
+def rename_watchlist(list_id: int, body: ListBody,
+                     store: ChartStore = Depends(get_store)) -> dict:
+    _store_call(store.rename_list, list_id, body.name)
+    return store.get_list(list_id)
+
+
+@router.delete("/watchlists/{list_id}", status_code=204)
+def delete_watchlist(list_id: int, store: ChartStore = Depends(get_store)) -> None:
+    store.delete_list(list_id)
+
+
+@router.put("/watchlists/{list_id}/items")
+def set_watchlist_items(list_id: int, body: ItemsBody,
+                        store: ChartStore = Depends(get_store)) -> dict:
+    return _store_call(store.set_items, list_id, body.items)
+
+
+@router.put("/watchlists/{list_id}/active", status_code=204)
+def set_active_watchlist(list_id: int, store: ChartStore = Depends(get_store)) -> None:
+    _store_call(store.get_list, list_id)
+    store.set_meta("active_watchlist", str(list_id))
+
+
+@router.post("/watchlists/{list_id}/import")
+def import_watchlist(list_id: int, body: ImportBody,
+                     store: ChartStore = Depends(get_store),
+                     md: MarketData = Depends(get_market)) -> dict:
+    """Append pasted symbols (commas, spaces or new lines; ###NAME makes a
+    section, as in TradingView's export). Bare tickers are guessed."""
+    current = _store_call(store.get_list, list_id)["items"]
+    added, skipped = [], []
+    for chunk in re.split(r"[,;\n]+", body.text):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith(SECTION):
+            added.append({"symbol": chunk})
+            continue
+        for token in chunk.split():
+            sym = md.resolve_loose(token)
+            if sym is None:
+                skipped.append(token)
+            else:
+                added.append({"symbol": sym.full})
+    result = store.set_items(list_id, current + added)
+    return {**result, "skipped": skipped}
 
 
 def install(app: FastAPI) -> None:
