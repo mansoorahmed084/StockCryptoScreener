@@ -714,5 +714,5 @@ Tests: 89 at the start of the day, 129 at the end, all passing.
 | `1116071` | Phase 3: drawing tools (lines, channel, rectangle, fib, text, long/short, measure), magnet, undo/redo, saved per symbol |
 | `0102027` | Phase 4: indicators (EMA … ATR, volume profile), the screener's VuManChu and auto-analysis layer |
 | `b001af4` | Phase 5: alerts from the chart into the screener's alert store |
-| (next) | Phase 6: multi-chart layouts, linked crosshair, saved layouts, bar replay, light theme, PNG, trade plan |
+| `339b57e` | Phase 6: multi-chart layouts, linked crosshair, saved layouts, bar replay, light theme, PNG, trade plan |
 
