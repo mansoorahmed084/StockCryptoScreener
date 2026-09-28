@@ -471,6 +471,20 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   price scale.
 - Symbol, timeframe and settings are remembered, and kept in the URL.
 
+### Stocks
+- India: `NSE:RELIANCE`, `BSE:RELIANCE`; US: `NASDAQ:AAPL`, `NYSE:JPM`,
+  `AMEX:SPY`; indices `NSE:NIFTY`, `NSE:BANKNIFTY`, `BSE:SENSEX`, `SP:SPX`,
+  `NASDAQ:NDX`, `DJ:DJI`. Pick them in the India or US search tab.
+- Data from Yahoo Finance (free, no key). **Delayed about 15 minutes**; the
+  top bar says "Delayed" and the newest candles are re-read every 30 s.
+- Timeframes: 1m, 5m, 15m, 30m, 1h, 2h, 4h, D, W, M. Yahoo has no 2h/4h, so
+  they are built from 1h candles counted from the session open (NSE 4h
+  candles open at 09:15 and 13:15 IST, like TradingView). 3m, 6h and 12h are
+  greyed out; a crypto chart on 3m opens a stock on 5m.
+- History: 1m only ~7 days back (one page), 5m–30m 60 days, 1h 2 years,
+  D/W/M all. Yahoo's BSE history is short for some shares; NSE is better.
+- No countdown on stock candles.
+
 ## Data sources
 
 | Source | Used for | Key |

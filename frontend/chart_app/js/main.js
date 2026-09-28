@@ -3,10 +3,10 @@
 
 import { $, $$, esc, popupMenu, store, toast, typingInField } from './dom.js';
 import { setTimeZone, timeZone, zoneLabel } from './format.js';
-import { ChartSlot } from './slot.js';
+import { ChartSlot, resolveSymbol } from './slot.js';
 import { SymbolSearch } from './symbol-search.js';
 import {
-  FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, isValidTf, tfLabel,
+  FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, fitTf, isValidTf, tfLabel,
 } from './timeframes.js';
 
 const STYLES = [
@@ -43,13 +43,15 @@ export const app = {
   async setSymbol(symbol, slot = this.slot) {
     symbol = symbol.toUpperCase();
     try {
-      await slot.load(symbol, slot.tf || this.tf);
+      const info = await resolveSymbol(symbol);
+      await slot.load(info.symbol, fitTf(info, slot.tf || this.tf));
     } catch (err) {
       toast(`Cannot open ${symbol}: ${err.message}`, 'error');
       return false;
     }
     if (slot === this.slot) {
       this.symbol = slot.info.symbol;
+      this.tf = slot.tf;
       this._afterChange();
     }
     return true;

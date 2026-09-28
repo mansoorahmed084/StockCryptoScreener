@@ -156,6 +156,8 @@ export class ChartView {
     this.info = info;
     this.tf = tf;
     this.bars = bars;
+    // Stock candles are delayed and sessions end early: no countdown.
+    this.showCountdown = info.market !== 'stock';
     this.precision = precisionOf(bars);
     const minMove = Math.pow(10, -this.precision);
     this.series.applyOptions({ priceFormat: { type: 'price', precision: this.precision, minMove } });

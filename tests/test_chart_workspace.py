@@ -132,3 +132,85 @@ def test_routes(md, monkeypatch):
     page = client.get("/workspace")
     assert page.status_code == 200 and "Chart Workspace" in page.text
     assert client.get("/workspace/static/js/main.js").status_code == 200
+
+
+# --- stocks (Yahoo) ---------------------------------------------------------
+from backend.data import yahoo as yh  # noqa: E402
+
+IST = 19800
+D0 = 1790467200          # 2026-09-27 00:00 UTC (a Sunday)
+
+
+def _yahoo_chart(ts, closes, gmtoffset=IST, first_trade=0):
+    return {"chart": {"result": [{
+        "meta": {"gmtoffset": gmtoffset, "longName": "Tata Consultancy Services",
+                 "firstTradeDate": first_trade, "regularMarketPrice": closes[-1],
+                 "chartPreviousClose": closes[0]},
+        "timestamp": ts,
+        "indicators": {"quote": [{"open": closes, "high": [c + 1 for c in closes],
+                                  "low": [c - 1 for c in closes], "close": closes,
+                                  "volume": [10] * len(ts)}]}}]}}
+
+
+def test_yahoo_builds_4h_from_hourly_candles_per_session():
+    # Monday NSE 60m candles: 09:15 .. 15:15 IST, then the 15:30 close print.
+    mon = D0 + 86400 + 3 * 3600 + 45 * 60                   # 09:15 IST in UTC
+    ts = [mon + i * 3600 for i in range(7)] + [mon + 6 * 3600 + 900]
+    closes = [100, 101, 102, 103, 104, 105, 106, 107]
+    raw = _yahoo_chart(ts, closes)["chart"]["result"][0]
+    bars = yh.Yahoo._bars(raw, "4h", 4)
+    assert [b["time"] for b in bars] == [mon, mon + 4 * 3600]
+    assert bars[0]["close"] == 103 and bars[0]["volume"] == 40
+    # the off-grid 15:30 print folds into the last candle
+    assert bars[1]["close"] == 107 and bars[1]["high"] == 108 and bars[1]["volume"] == 40
+
+
+def test_yahoo_daily_candles_sit_on_the_exchange_date():
+    mon_open = D0 + 86400 + 3 * 3600 + 45 * 60
+    raw = _yahoo_chart([mon_open, mon_open + 86400], [10, 11])["chart"]["result"][0]
+    assert [b["time"] for b in yh.Yahoo._bars(raw, "1d", 1)] == [D0 + 86400, D0 + 2 * 86400]
+    # A US close stamped after midnight UTC still lands on its New York date.
+    ny = yh.Yahoo._bars(_yahoo_chart([D0 + 86400 + 13 * 3600 + 1800], [5],
+                                     gmtoffset=-14400)["chart"]["result"][0], "1d", 1)
+    assert ny[0]["time"] == D0 + 86400
+    monthly = yh.Yahoo._bars(_yahoo_chart([D0], [5])["chart"]["result"][0], "1M", 1)
+    assert monthly[0]["time"] == 1788220800          # 2026-09-01
+
+
+def test_yahoo_search_keeps_india_and_us_listings():
+    quotes = [
+        {"symbol": "TCS.NS", "exchange": "NSI", "quoteType": "EQUITY", "longname": "TCS"},
+        {"symbol": "TCS.BO", "exchange": "BSE", "quoteType": "EQUITY", "shortname": "TCS"},
+        {"symbol": "TCS", "exchange": "NYQ", "quoteType": "EQUITY", "shortname": "Container"},
+        {"symbol": "TCS.DE", "exchange": "GER", "quoteType": "EQUITY", "shortname": "x"},
+        {"symbol": "TCSX", "exchange": "NMS", "quoteType": "OPTION", "shortname": "x"},
+    ]
+
+    def handler(request):
+        return httpx.Response(200, json={"quotes": quotes})
+    y = yh.Yahoo(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert [r["symbol"] for r in y.search("tcs")] == ["NSE:TCS", "BSE:TCS", "NYSE:TCS"]
+    assert [r["symbol"] for r in y.search("tcs", market="us")] == ["NYSE:TCS"]
+    assert [r["symbol"] for r in y.search("tcs", market="india")] == ["NSE:TCS", "BSE:TCS"]
+
+
+def test_stock_candles_and_quotes_through_market_data():
+    now = int(__import__("time").time())
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        ts = [now - 86400 * i for i in range(5, 0, -1)]
+        return httpx.Response(200, json=_yahoo_chart(ts, [1, 2, 3, 4, 5], first_trade=1))
+    y = yh.Yahoo(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    m = MarketData(client=httpx.Client(transport=httpx.MockTransport(binance_handler([]))),
+                   futures=FakeFutures(), yahoo=y)
+    c = m.candles("NSE:TCS", "1d", limit=3)
+    assert c.delayed and len(c.bars) == 3 and c.more
+    assert seen[-1].url.path == "/v8/finance/chart/TCS.NS"
+    assert seen[-1].url.params["interval"] == "1d"
+    with pytest.raises(ValueError):
+        m.candles("NSE:TCS", "3m")
+    assert m.describe(m.resolve("NSE:TCS")) == "Tata Consultancy Services"
+    q = m.quotes(["NSE:TCS"])["NSE:TCS"]
+    assert q["last"] == 5 and q["change"] == 4 and q["change_pct"] == 400

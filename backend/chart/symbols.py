@@ -4,7 +4,7 @@
   BINANCE:ETHBTC        Binance spot
   CRYPTOCAP:BTC.D       BTC dominance (Binance's BTCDOMUSDT index contract)
   NSE:RELIANCE          India, Yahoo RELIANCE.NS
-  BSE:500325            India, Yahoo 500325.BO
+  BSE:RELIANCE          India, Yahoo RELIANCE.BO
   NASDAQ:AAPL, NYSE:JPM, AMEX:SPY   US, Yahoo AAPL / JPM / SPY
   NSE:NIFTY, SP:SPX ... indices with a TradingView name (INDEX_ALIASES)
   YAHOO:^N225           anything else Yahoo has

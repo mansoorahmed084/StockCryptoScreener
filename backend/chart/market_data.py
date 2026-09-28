@@ -142,6 +142,10 @@ class MarketData:
                 rows += self.yahoo.search(q, market=market, limit=limit)
             except httpx.HTTPError as exc:
                 log.warning("stock symbol search failed: %s", exc)
+        # Exact tickers first (AAPL the stock before AAPLBUSDT the token).
+        want = q.strip().upper()
+        rows.sort(key=lambda r: r["ticker"].removesuffix(".P") != want
+                  and r["ticker"].removesuffix(".P").removesuffix("USDT") != want)
         return rows[:limit] if market != "all" else rows[:limit * 2]
 
     # --- candles -------------------------------------------------------------

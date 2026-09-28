@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.chart.market_data import TIMEFRAMES, MarketData
+from backend.data.yahoo import Yahoo
 
 APP_DIR = Path(__file__).resolve().parents[2] / "frontend" / "chart_app"
 
@@ -20,7 +21,7 @@ _market: MarketData | None = None
 def get_market() -> MarketData:
     global _market
     if _market is None:
-        _market = MarketData()
+        _market = MarketData(yahoo=Yahoo())
     return _market
 
 

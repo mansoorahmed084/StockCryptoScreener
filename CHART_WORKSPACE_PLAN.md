@@ -84,7 +84,7 @@ Each phase ends with something you can use.
 | `BINANCE:BTCUSDT.P` | Binance USDT perpetual | Binance futures REST + WebSocket |
 | `BINANCE:ETHBTC` | Binance spot | Binance spot REST + WebSocket |
 | `CRYPTOCAP:BTC.D`, `CRYPTOCAP:USDT.D` | Dominance | `backend/data/dominance.py` |
-| `NSE:RELIANCE`, `BSE:500325` | India stocks | Yahoo `RELIANCE.NS`, `500325.BO` |
+| `NSE:RELIANCE`, `BSE:RELIANCE` | India stocks | Yahoo `RELIANCE.NS`, `RELIANCE.BO` |
 | `NASDAQ:AAPL`, `NYSE:JPM` | US stocks | Yahoo `AAPL`, `JPM` |
 
 Stock data limits (Yahoo, free):

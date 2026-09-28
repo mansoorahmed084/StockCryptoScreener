@@ -24,6 +24,11 @@ export const STOCK_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d
 
 const BY_ID = Object.fromEntries(TIMEFRAMES.map(t => [t.id, t]));
 
+// A timeframe the symbol can show: stocks swap 3m/6h/12h for the nearest one.
+const STOCK_SWAP = { '3m': '5m', '6h': '4h', '12h': '1d' };
+export const fitTf = (info, tf) =>
+  (info.market === 'stock' && !STOCK_TIMEFRAMES.includes(tf) ? STOCK_SWAP[tf] || '1d' : tf);
+
 export const tfSeconds = id => BY_ID[id]?.sec ?? 3600;
 export const tfLabel = id => BY_ID[id]?.label ?? id;
 export const isIntraday = id => tfSeconds(id) < 86400;
