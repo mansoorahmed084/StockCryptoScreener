@@ -539,6 +539,27 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   sit in the same place on every timeframe and after a reload.
   `SOLUSDT` and `SOLUSDT.P` share drawings; `SOLBTC` and stocks have their own.
 
+### Indicators
+**Indicators** in the top bar (or press `/`) opens the list; click to add.
+
+| Group | Indicators |
+|---|---|
+| Screener | **VuManChu Cipher B** — the screener's own code (WT1 light-blue area, WT2 line, money-flow area, ±53 levels, buy/sell dots and divergence arrows; no dots on the forming candle). **Auto analysis** — the Chart Patterns page's trendlines, S/R levels, Fibonacci, pattern + targets, HH/HL/LH/LL swings and daily order blocks (purple), read-only; ⧉ in its legend row copies them into your drawings |
+| Trend | EMA, SMA, WMA, VWAP (day / week / month, in your time zone), Bollinger Bands |
+| Oscillators | RSI (70/50/30), MACD (coloured histogram), Stochastic (80/20), ATR |
+| Volume | Visible-range volume profile: up/down volume per price row, value area (70%) brighter, yellow POC line; follows scrolling and zooming |
+
+- Maths follows TradingView's built-ins (EMA seeded with an SMA, RSI with
+  Wilder's smoothing).
+- Oscillators get their own pane under the chart; removing the last one in a
+  pane removes the pane.
+- The legend lists each indicator with its values under the cursor; hover a
+  row for 👁 hide, ⚙ settings (lengths, source, colours, levels), ✕ remove.
+  Clicking the name opens settings.
+- They follow live candles (at most 2.5 recalculations a second; VuManChu on
+  a new candle or every 15 s). Each chart remembers its indicators. A
+  first-time user starts with VuManChu.
+
 ## Data sources
 
 | Source | Used for | Key |

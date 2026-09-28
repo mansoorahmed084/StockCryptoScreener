@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.chart.market_data import TIMEFRAMES, MarketData
+from backend.chart import studies
 from backend.chart.store import SECTION, ChartStore
 from backend.config import load_config
 from backend.data.yahoo import Yahoo
@@ -184,6 +185,41 @@ def import_watchlist(list_id: int, body: ImportBody,
                 added.append({"symbol": sym.full})
     result = store.set_items(list_id, current + added)
     return {**result, "skipped": skipped}
+
+
+# --- studies ------------------------------------------------------------------
+class BarsBody(BaseModel):
+    bars: list[dict]
+    params: dict = {}
+
+
+VUMANCHU_PARAMS = {"channel_len", "average_len", "ma_len", "overbought", "oversold",
+                   "mfi_period", "mfi_mult", "pivot_lookback"}
+
+
+@router.post("/studies/vumanchu")
+def vumanchu(body: BarsBody) -> dict:
+    """VuManChu Cipher B on the candles the chart has (the screener's code)."""
+    params = {k: v for k, v in body.params.items() if k in VUMANCHU_PARAMS}
+    try:
+        return studies.vumanchu(body.bars[-5000:], **params)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"bad candles or settings: {exc}") from exc
+
+
+@router.get("/analysis")
+def analysis(symbol: str, tf: str, n: int = 300, order_blocks: bool = True,
+             md: MarketData = Depends(get_market)) -> dict:
+    """Auto trendlines, levels, Fibonacci, patterns, swings and daily order
+    blocks — what the Chart Patterns page finds — as shapes to draw."""
+    try:
+        bars = md.candles(symbol, tf, limit=max(60, min(n, 1000))).bars
+        daily = md.candles(symbol, "1d", limit=500).bars if order_blocks else []
+    except (ValueError, LookupError) as exc:
+        raise _bad_symbol(exc) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"data source error: {exc}") from exc
+    return studies.analysis(studies.frame(bars), studies.frame(daily) if daily else None)
 
 
 # --- drawings -----------------------------------------------------------------

@@ -84,8 +84,10 @@ export function formDialog({ title, fields, values, ok = 'Apply' }) {
       case 'check':
         return `<label class="check"><input type="checkbox" data-key="${f.key}"${v ? ' checked' : ''}> ${esc(f.label)}</label>`;
       case 'select':
-        return `<select class="inp" data-key="${f.key}">${f.options.map(o =>
-          `<option value="${esc(o[0] ?? o)}"${String(o[0] ?? o) === String(v) ? ' selected' : ''}>${esc(o[1] ?? o)}</option>`).join('')}</select>`;
+        return `<select class="inp" data-key="${f.key}">${f.options.map(o => {
+          const [val, text] = Array.isArray(o) ? o : [o, o];   // [value, label] or a plain value
+          return `<option value="${esc(val)}"${String(val) === String(v) ? ' selected' : ''}>${esc(text)}</option>`;
+        }).join('')}</select>`;
       case 'color':
         return `<input class="inp" type="color" data-key="${f.key}" value="${esc(toHex(v))}" style="padding:2px;height:32px">`;
       case 'number':

@@ -312,3 +312,55 @@ def test_drawing_routes(tmp_path, monkeypatch):
     assert len(client.get("/api/chart/drawings", params={"key": "NSE:TCS"}).json()["drawings"]) == 1
     assert client.delete("/api/chart/drawings/r1").status_code == 204
     assert client.delete("/api/chart/drawings", params={"key": "NSE:TCS"}).json() == {"deleted": 0}
+
+
+# --- studies ----------------------------------------------------------------
+import math  # noqa: E402
+
+from backend.chart import studies as cs  # noqa: E402
+
+
+def _wave_bars(n=400, start=1_780_000_000, step=3600):
+    bars = []
+    for i in range(n):
+        c = 100 + 10 * math.sin(i / 15) + i * 0.02
+        bars.append({"time": start + i * step, "open": c - 0.3, "high": c + 1,
+                     "low": c - 1, "close": c, "volume": 100 + i % 7})
+    return bars
+
+
+def test_vumanchu_study_matches_the_screener_indicator():
+    from backend.indicators.vumanchu import VuManChuCipherB
+    bars = _wave_bars()
+    out = cs.vumanchu(bars)
+    ref = VuManChuCipherB().compute(cs.frame(bars))
+    wt2 = ref.panes["wt2"].dropna()
+    assert len(out["wt2"]) == len(wt2)
+    assert out["wt2"][-1]["value"] == pytest.approx(float(wt2.iloc[-1]))
+    assert out["wt1"][0]["time"] >= bars[0]["time"]
+    assert all(m["time"] != bars[-1]["time"] for m in out["markers"])   # forming candle
+    assert {m["kind"] for m in out["markers"]} <= {"buy", "sell", "bull_div", "bear_div"}
+
+
+def test_analysis_shapes_use_times_not_indexes():
+    bars = _wave_bars()
+    daily = _wave_bars(120, step=86400)
+    out = cs.analysis(cs.frame(bars), cs.frame(daily))
+    times = {b["time"] for b in bars}
+    assert set(out) == {"lines", "levels", "fib", "patterns", "swings", "order_blocks"}
+    for ln in out["lines"]:
+        assert ln["t0"] in times and ln["kind"] in ("support", "resistance")
+    for s in out["swings"]:
+        assert s["time"] in times and s["label"] in ("HH", "HL", "LH", "LL")
+    assert cs.analysis(cs.frame(bars[:10]))["lines"] == []
+
+
+def test_study_routes(md, monkeypatch):
+    monkeypatch.setattr(chart_routes, "_market", md)
+    client = TestClient(api.app)
+    r = client.post("/api/chart/studies/vumanchu", json={"bars": _wave_bars(),
+                                                           "params": {"average_len": 10, "bogus": 1}})
+    assert r.status_code == 200 and r.json()["wt1"]
+    assert client.post("/api/chart/studies/vumanchu", json={"bars": [{"x": 1}]}).status_code == 400
+    a = client.get("/api/chart/analysis", params={"symbol": "BTCUSDT.P", "tf": "1m", "n": 200})
+    assert a.status_code == 200 and "order_blocks" in a.json()

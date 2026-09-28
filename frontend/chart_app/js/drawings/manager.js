@@ -504,6 +504,20 @@ export class DrawingManager {
     return hidden.length;
   }
 
+  // Add several drawings at once (one undo step). items: [{tool, points, style, text}]
+  addMany(items) {
+    this.checkpoint();
+    const now = Date.now();
+    items.forEach((it, k) => {
+      const d = { id: newId(), key: this.key, text: '', locked: false, hidden: false,
+                  created_ms: now + k, ...clone(it) };
+      this.drawings.push(d);
+      this._save(d);
+    });
+    this.update();
+    this._emit('change');
+  }
+
   cloneDrawing(d) {
     const v = this.view;
     const c = { ...clone(d), id: newId(), created_ms: Date.now(), locked: false };
