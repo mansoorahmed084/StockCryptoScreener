@@ -509,6 +509,36 @@ Streamlit sidebar (a frame + an "Open full screen" button). A link like
   BANKNIFTY, RELIANCE, SPX, NDX, AAPL. The lists are shared with the BTC
   Strength and Pattern Scanner pages.
 
+### Drawing tools (left bar)
+| Tool | How | Shortcut |
+|---|---|---|
+| Trend line, ray, extended line | click + click, or drag | Alt+T |
+| Horizontal line / horizontal ray | one click; price shown on the axis | Alt+H / Alt+J |
+| Vertical line | one click | Alt+V |
+| Parallel channel | click, click, then click the width | Alt+C |
+| Rectangle (zones, order blocks; purple by default) | drag or two clicks | Alt+Shift+R |
+| Fib retracement (0 at the 2nd point, 1 at the 1st) | drag or two clicks | Alt+F |
+| Text | one click, then type | — |
+| Long / short position (target, stop, R:R) | one click; drag its handles | — |
+| Measure (price %, bars, time; not saved) | drag, or Shift + drag with the cross | — |
+
+- Small › next to a group button opens the rest of the group.
+- Click a drawing to select it: drag its body to move it, a handle to reshape.
+  A floating bar gives colour, width, line style, extend left/right, text,
+  settings (⚙), lock, clone and remove. Double-click opens settings (text
+  for a text drawing). Right-click: settings, clone, lock, hide, order,
+  remove.
+- Delete removes the selected drawing; Esc cancels / deselects; Ctrl+Z /
+  Ctrl+Y undo and redo (100 steps).
+- **Magnet**: off, weak (snaps to open/high/low/close within 18 px) or strong
+  (always). Hold Ctrl to flip it while drawing. Points always sit on a candle.
+- Left bar also has: stay in drawing mode, lock all, hide all, and remove
+  (all drawings on this symbol, or show hidden ones).
+- New drawings use the last style you picked for that tool.
+- Drawings are stored as (time, price) in `data_cache/chart.db`, so they
+  sit in the same place on every timeframe and after a reload.
+  `SOLUSDT` and `SOLUSDT.P` share drawings; `SOLBTC` and stocks have their own.
+
 ## Data sources
 
 | Source | Used for | Key |

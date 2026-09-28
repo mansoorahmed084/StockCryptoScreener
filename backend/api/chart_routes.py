@@ -186,6 +186,28 @@ def import_watchlist(list_id: int, body: ImportBody,
     return {**result, "skipped": skipped}
 
 
+# --- drawings -----------------------------------------------------------------
+@router.get("/drawings")
+def drawings(key: str, store: ChartStore = Depends(get_store)) -> dict:
+    return {"drawings": store.drawings(key)}
+
+
+@router.put("/drawings/{drawing_id}")
+def save_drawing(drawing_id: str, body: dict,
+                 store: ChartStore = Depends(get_store)) -> dict:
+    return _store_call(store.save_drawing, drawing_id, body)
+
+
+@router.delete("/drawings/{drawing_id}", status_code=204)
+def delete_drawing(drawing_id: str, store: ChartStore = Depends(get_store)) -> None:
+    store.delete_drawing(drawing_id)
+
+
+@router.delete("/drawings")
+def delete_drawings(key: str, store: ChartStore = Depends(get_store)) -> dict:
+    return {"deleted": store.delete_drawings(key)}
+
+
 def install(app: FastAPI) -> None:
     """Add the chart API, the page at /workspace and its static files."""
     app.include_router(router)

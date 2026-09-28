@@ -3,9 +3,15 @@
 Watchlists: named lists of ``EXCHANGE:TICKER`` symbols, in order. A row whose
 symbol starts with ``###`` is a section header (TradingView's export format
 uses the same marker), e.g. ``###ALTS``. Each row can carry a colour flag.
+
+Drawings: one row per drawing, keyed by the symbol's drawing key (the spot and
+perpetual USDT legs of a coin share one). Points are (time, price) pairs —
+UTC seconds, not pixels — so a drawing sits in the same place on every
+timeframe. The browser makes the ids, so saving is a plain upsert.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -32,7 +38,21 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
 );
 CREATE INDEX IF NOT EXISTS watchlist_items_list ON watchlist_items(list_id, position);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS drawings (
+    id TEXT PRIMARY KEY,
+    symbol_key TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    points TEXT NOT NULL,
+    style TEXT NOT NULL DEFAULT '{}',
+    text TEXT NOT NULL DEFAULT '',
+    locked INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS drawings_key ON drawings(symbol_key);
 """
+MAX_POINTS = 10
 
 DEFAULT_LIST = "Watchlist"
 DEFAULT_ITEMS = [
@@ -168,3 +188,66 @@ class ChartStore:
         """A first-time user gets one list with a few symbols of each market."""
         if not self.lists():
             self.create_list(DEFAULT_LIST, DEFAULT_ITEMS)
+
+    # --- drawings ------------------------------------------------------------
+    @staticmethod
+    def _drawing(row: sqlite3.Row) -> dict:
+        return {"id": row["id"], "key": row["symbol_key"], "tool": row["tool"],
+                "points": json.loads(row["points"]), "style": json.loads(row["style"]),
+                "text": row["text"], "locked": bool(row["locked"]),
+                "hidden": bool(row["hidden"]), "created_ms": row["created_ms"],
+                "updated_ms": row["updated_ms"]}
+
+    def drawings(self, key: str) -> list[dict]:
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM drawings WHERE symbol_key = ? "
+                              "ORDER BY created_ms, id", (key,)).fetchall()
+        return [self._drawing(r) for r in rows]
+
+    def drawing(self, drawing_id: str) -> dict:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
+        if not row:
+            raise LookupError("no such drawing")
+        return self._drawing(row)
+
+    def save_drawing(self, drawing_id: str, d: dict) -> dict:
+        """Create or replace one drawing."""
+        if not drawing_id or len(drawing_id) > 64:
+            raise ValueError("bad drawing id")
+        key, tool = str(d.get("key", "")).strip(), str(d.get("tool", "")).strip()
+        if not key or not tool:
+            raise ValueError("a drawing needs a symbol key and a tool")
+        points = d.get("points") or []
+        if not isinstance(points, list) or not 1 <= len(points) <= MAX_POINTS:
+            raise ValueError(f"a drawing has 1 to {MAX_POINTS} points")
+        try:
+            points = [{"t": float(pt["t"]), "p": float(pt["p"])} for pt in points]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("points must be {t, p} numbers") from exc
+        style = d.get("style") or {}
+        if not isinstance(style, dict):
+            raise ValueError("style must be an object")
+        now = _now_ms()
+        with self._db() as db:
+            db.execute("""
+                INSERT INTO drawings(id, symbol_key, tool, points, style, text, locked,
+                                     hidden, created_ms, updated_ms)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET symbol_key = excluded.symbol_key,
+                    tool = excluded.tool, points = excluded.points,
+                    style = excluded.style, text = excluded.text,
+                    locked = excluded.locked, hidden = excluded.hidden,
+                    updated_ms = excluded.updated_ms""",
+                (drawing_id, key, tool, json.dumps(points), json.dumps(style),
+                 str(d.get("text", ""))[:2000], int(bool(d.get("locked"))),
+                 int(bool(d.get("hidden"))), int(d.get("created_ms") or now), now))
+        return self.drawing(drawing_id)
+
+    def delete_drawing(self, drawing_id: str) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM drawings WHERE id = ?", (drawing_id,))
+
+    def delete_drawings(self, key: str) -> int:
+        with self._db() as db:
+            return db.execute("DELETE FROM drawings WHERE symbol_key = ?", (key,)).rowcount

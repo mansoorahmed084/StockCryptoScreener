@@ -48,8 +48,13 @@ export function popupMenu(anchor, items, onPick, { className = '' } = {}) {
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
   const w = menu.offsetWidth, h = menu.offsetHeight;
-  menu.style.left = Math.max(4, Math.min(r.left, innerWidth - w - 4)) + 'px';
-  menu.style.top = (r.bottom + h + 4 > innerHeight ? Math.max(4, r.top - h - 4) : r.bottom + 4) + 'px';
+  if (className.includes('side')) {          // open to the right (left toolbar)
+    menu.style.left = Math.min(r.right + 4, innerWidth - w - 4) + 'px';
+    menu.style.top = Math.max(4, Math.min(r.top, innerHeight - h - 4)) + 'px';
+  } else {
+    menu.style.left = Math.max(4, Math.min(r.left, innerWidth - w - 4)) + 'px';
+    menu.style.top = (r.bottom + h + 4 > innerHeight ? Math.max(4, r.top - h - 4) : r.bottom + 4) + 'px';
+  }
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
   function outside(e) { if (!menu.contains(e.target)) closeMenus(); }
   menu._cleanup = () => document.removeEventListener('mousedown', outside);

@@ -6,6 +6,7 @@ import { setTimeZone, timeZone, zoneLabel } from './format.js';
 import { ChartSlot, resolveSymbol } from './slot.js';
 import { SymbolSearch } from './symbol-search.js';
 import { initWatchlist } from './watchlist.js';
+import { initDrawings } from './drawings/index.js';
 import {
   FAVOURITES, RANGES, STOCK_TIMEFRAMES, TIMEFRAMES, fitTf, isValidTf, tfLabel,
 } from './timeframes.js';
@@ -30,8 +31,8 @@ export const app = {
   get slot() { return this.slots[this.active]; },
   get info() { return this.slot?.info; },
 
-  on(event, fn) { this.hooks[event].push(fn); },
-  emit(event, ...args) { for (const f of this.hooks[event]) f(...args); },
+  on(event, fn) { (this.hooks[event] ||= []).push(fn); },
+  emit(event, ...args) { for (const f of this.hooks[event] || []) f(...args); },
 
   save() {
     store.set('cw.state', { ...store.get('cw.state', {}), symbol: this.symbol, tf: this.tf, style: this.style });
@@ -231,7 +232,7 @@ document.addEventListener('keydown', e => {
 
 // Feature modules (watchlist, drawings, indicators, alerts, layouts). Each
 // exports init(app) and runs before the first symbol loads.
-const FEATURES = [initWatchlist];
+const FEATURES = [initWatchlist, initDrawings];
 
 async function start() {
   for (const init of FEATURES) await init(app);

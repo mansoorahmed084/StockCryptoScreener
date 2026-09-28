@@ -279,3 +279,36 @@ def test_watchlist_routes_and_import(md, tmp_path, monkeypatch):
     assert client.get("/api/chart/watchlists").json()["active"] == lst["id"]
     assert client.delete(f"/api/chart/watchlists/{lst['id']}").status_code == 204
     assert client.get(f"/api/chart/watchlists/{lst['id']}").status_code == 404
+
+
+# --- drawings ---------------------------------------------------------------
+def test_drawings_are_saved_per_symbol_key(tmp_path):
+    store = ChartStore(tmp_path / "chart.db")
+    d = {"key": "BINANCE:SOLUSDT", "tool": "trendline",
+         "points": [{"t": 1, "p": 100}, {"t": 2, "p": 110.5}],
+         "style": {"color": "#fff", "width": 2}, "text": "", "created_ms": 5}
+    saved = store.save_drawing("a1", d)
+    assert saved["points"][1] == {"t": 2.0, "p": 110.5} and saved["created_ms"] == 5
+    store.save_drawing("a1", {**d, "locked": True, "text": "neckline"})
+    got = store.drawings("BINANCE:SOLUSDT")
+    assert len(got) == 1 and got[0]["locked"] and got[0]["text"] == "neckline"
+    assert store.drawings("BINANCE:ETHUSDT") == []
+    for bad in ({**d, "points": []}, {**d, "points": [{"t": "x"}]}, {**d, "key": ""},
+                {**d, "points": [{"t": 1, "p": 1}] * 11}):
+        with pytest.raises(ValueError):
+            store.save_drawing("a2", bad)
+    store.save_drawing("a3", {**d, "tool": "hline", "points": [{"t": 1, "p": 90}]})
+    store.delete_drawing("a1")
+    assert [x["id"] for x in store.drawings("BINANCE:SOLUSDT")] == ["a3"]
+    assert store.delete_drawings("BINANCE:SOLUSDT") == 1
+
+
+def test_drawing_routes(tmp_path, monkeypatch):
+    monkeypatch.setattr(chart_routes, "_store", ChartStore(tmp_path / "chart.db"))
+    client = TestClient(api.app)
+    body = {"key": "NSE:TCS", "tool": "rect", "points": [{"t": 1, "p": 2}, {"t": 3, "p": 4}]}
+    assert client.put("/api/chart/drawings/r1", json=body).json()["tool"] == "rect"
+    assert client.put("/api/chart/drawings/r2", json={**body, "tool": ""}).status_code == 400
+    assert len(client.get("/api/chart/drawings", params={"key": "NSE:TCS"}).json()["drawings"]) == 1
+    assert client.delete("/api/chart/drawings/r1").status_code == 204
+    assert client.delete("/api/chart/drawings", params={"key": "NSE:TCS"}).json() == {"deleted": 0}

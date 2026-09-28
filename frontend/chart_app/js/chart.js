@@ -148,6 +148,7 @@ export class ChartView {
   }
 
   get intraday() { return isIntraday(this.tf); }
+  fmt(p) { return fmtPrice(p, this.precision ?? 2); }
   toChart(utc) { return toChartTime(utc, this.intraday); }
   fromChart(t) { return fromChartTime(t, this.intraday); }
 

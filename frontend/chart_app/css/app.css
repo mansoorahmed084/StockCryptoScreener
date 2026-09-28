@@ -347,3 +347,53 @@ textarea.inp { height: 90px; padding: 6px 8px; resize: vertical; }
   #right-resizer { display: none !important; }
   #wl-toggle span { display: none; }
 }
+
+/* ---- left toolbar (drawing tools) ---- */
+#leftbar {
+  width: 48px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; overflow-y: auto;
+  scrollbar-width: none;
+}
+.lb-group { position: relative; display: flex; align-items: center; }
+.lb-btn {
+  position: relative; width: 38px; height: 38px; border-radius: 5px; color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.lb-btn:hover { background: var(--hover); }
+.lb-btn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.lb-btn svg { width: 26px; height: 26px; }
+.lb-more {
+  position: absolute; right: -4px; top: 11px; width: 10px; height: 16px; font-size: 12px; line-height: 16px;
+  color: var(--text-muted); opacity: 0; border-radius: 2px;
+}
+.lb-group:hover .lb-more { opacity: 1; }
+.lb-more:hover { background: var(--hover); color: var(--text); }
+.lb-sep { width: 28px; height: 1px; background: var(--border); margin: 6px 0; }
+.lb-badge { position: absolute; right: 4px; bottom: 3px; font-size: 9px; }
+.mi-icon { display: inline-flex; width: 22px; height: 22px; }
+.mi-icon svg { width: 22px; height: 22px; }
+.chart-slot.drawing-mode .chart-host, .chart-slot.drawing-mode .chart-host * { cursor: crosshair !important; }
+
+/* ---- floating drawing toolbar ---- */
+.draw-toolbar {
+  position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; gap: 1px; padding: 3px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.dt-btn {
+  height: 30px; min-width: 30px; padding: 0 6px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 12px;
+}
+.dt-btn:hover { background: var(--hover); }
+.dt-btn.on { color: var(--accent); }
+.dt-btn svg { width: 22px; height: 22px; }
+.swatch { width: 16px; height: 16px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
+.wbar { display: inline-block; width: 16px; background: currentColor; border-radius: 1px; }
+.popup-menu.palette { display: grid; grid-template-columns: repeat(2, auto); min-width: 0; }
+.popup-menu.palette .menu-item { padding: 6px 10px; font-size: 11px; font-family: monospace; }
+
+@media (max-width: 700px) {
+  #leftbar { width: 40px; }
+  .lb-btn { width: 34px; height: 34px; }
+  .draw-toolbar { max-width: calc(100% - 16px); overflow-x: auto; }
+}
