@@ -73,6 +73,14 @@ class TradeStore:
                               ("adds", "INTEGER DEFAULT 0")):  # adds made to a winning trade
                 if col not in have:
                     db.execute(f"ALTER TABLE trades ADD COLUMN {col} {kind}")
+            have = {r["name"] for r in db.execute("PRAGMA table_info(ideas)")}
+            for col, kind in (("side", "TEXT"),             # long | short (scan: long)
+                              ("risk_inr", "REAL"),         # set: size by this risk
+                              ("leverage", "INTEGER"),
+                              ("limit_price", "REAL"),      # set: limit entry
+                              ("tg_message_id", "INTEGER")):  # its Telegram message
+                if col not in have:
+                    db.execute(f"ALTER TABLE ideas ADD COLUMN {col} {kind}")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:

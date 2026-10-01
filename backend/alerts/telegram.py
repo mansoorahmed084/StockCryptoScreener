@@ -43,6 +43,51 @@ class TelegramNotifier(Notifier):
             return False
 
 
+    # -- buttons (the trade bot) -------------------------------------------------
+    def _call(self, method: str, **body) -> dict | None:
+        try:
+            resp = self._client.post(f"https://api.telegram.org/bot{self.token}/{method}",
+                                     json=body, timeout=body.get("timeout", 0) + 15)
+            resp.raise_for_status()
+            return resp.json().get("result")
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("Telegram %s failed: %s", method, exc)
+            return None
+
+    @staticmethod
+    def _keyboard(buttons: list[tuple[str, str]]) -> dict:
+        return {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]}
+
+    def send_buttons(self, text: str, buttons: list[tuple[str, str]]) -> int | None:
+        """Send plain text with one row of (label, callback data) buttons; the message id."""
+        res = self._call("sendMessage", chat_id=self.chat_id, text=text,
+                         reply_markup=self._keyboard(buttons))
+        return res.get("message_id") if res else None
+
+    def edit(self, message_id: int, text: str,
+             buttons: list[tuple[str, str]] | None = None) -> None:
+        body = {"chat_id": self.chat_id, "message_id": message_id, "text": text}
+        if buttons:
+            body["reply_markup"] = self._keyboard(buttons)
+        self._call("editMessageText", **body)
+
+    def answer(self, callback_id: str, text: str = "") -> None:
+        self._call("answerCallbackQuery", callback_query_id=callback_id, text=text)
+
+    def updates(self, offset: int | None, timeout: int = 20) -> list[dict]:
+        body = {"timeout": timeout, "allowed_updates": ["callback_query"]}
+        if offset is not None:
+            body["offset"] = offset
+        return self._call("getUpdates", **body) or []
+
+
+def telegram_from_env() -> TelegramNotifier | None:
+    load_dotenv()
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    return TelegramNotifier(token, chat) if token and chat else None
+
+
 class DesktopNotifier(Notifier):
     """A Windows toast, through PowerShell's built-in WinRT classes (no extra
     package). Best-effort: it does nothing on other systems or if it fails."""

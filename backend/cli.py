@@ -267,6 +267,76 @@ def _request(args: argparse.Namespace):
         margin_inr=args.margin, override=args.override)
 
 
+def _ledger_coins(config, account: str) -> list[str]:
+    """The active coins of an account's recovery ledger ([] when it has none)."""
+    from pathlib import Path
+
+    from backend.trading import recovery
+
+    path = recovery.ledger_path(
+        str(Path(config.trading.get("db", "data_cache/trading.db")).parent), account)
+    return [r.coin for r in recovery.load(path) if r.status == recovery.ACTIVE]
+
+
+def _run_bot(config, mgrs, scan_accounts, args) -> int:
+    """Watch every account, scan the given ones every ``--every-min`` minutes and
+    handle Telegram button taps until Ctrl+C. Places nothing by itself."""
+    import threading
+    import time as _time
+
+    from backend.service import ScreenerService
+    from backend.trading import ideas, tgbot, trailing
+
+    trail = trailing.Settings.from_config(config.trading.get("trailing"))
+    settings = ideas.Settings.from_config(config.trading.get("setups"))
+    by_name = {m.account: m for m in mgrs}
+    every_min = args.every_min or 15
+    listener = tgbot.Listener(by_name, settings) if tgbot.telegram_from_env() else None
+    print(f"[{'LIVE' if mgrs[0].live else 'DRY RUN (nothing is sent)'}] bot: watching "
+          f"{', '.join(by_name)} every {args.every}s; scanning "
+          f"{', '.join(scan_accounts) or 'nothing'} every {every_min} min; Telegram buttons "
+          f"{'on' if listener else 'OFF (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)'}"
+          " - Ctrl+C to stop", flush=True)
+
+    def taps() -> None:
+        while True:
+            try:
+                for line in listener.poll(timeout=20):
+                    print(f"telegram: {line}", flush=True)
+            except Exception as exc:                 # keep listening through a bad round
+                print(f"telegram: listen failed: {exc}", flush=True)
+                _time.sleep(5)
+
+    if listener:
+        threading.Thread(target=taps, name="telegram-taps", daemon=True).start()
+    svc, next_scan = None, 0.0
+    while True:
+        for one in mgrs:
+            tag = "" if len(mgrs) == 1 else f"[{one.account}] "
+            try:
+                with one.lock:
+                    for m in one.reconcile() + trailing.run(one, trail):
+                        print(tag + m, flush=True)
+            except Exception as exc:
+                print(f"{tag}check failed: {exc}", flush=True)
+        if scan_accounts and _time.time() >= next_scan:
+            next_scan = _time.time() + every_min * 60
+            svc = svc or ScreenerService(config, refresh=False)
+            for name in scan_accounts:
+                one = by_name[name]
+                coins = _ledger_coins(config, name) or None
+                try:
+                    with one.lock:
+                        new = ideas.scan(one, ideas.find_setups(svc, settings.top, coins),
+                                         settings)
+                    ready = [i for i in new if i["status"] == ideas.READY]
+                    print(f"[{name}] scan: {len(new)} new setup(s), {len(ready)} ready"
+                          + (" - sent to Telegram" if ready and listener else ""), flush=True)
+                except Exception as exc:
+                    print(f"[{name}] scan failed: {exc}", flush=True)
+        _time.sleep(args.every)
+
+
 def _print_ledger(lines, path) -> None:
     """The spot-loss recovery ledger, one coin a line, closest to breakeven first."""
     active = sorted((x for x in lines if x.status == "active"), key=lambda x: x.to_go_inr)
@@ -372,10 +442,13 @@ def cmd_trade(args: argparse.Namespace) -> int:
 
             settings = ideas.Settings.from_config(config.trading.get("setups"))
             svc = ScreenerService(config, refresh=False)
+            coins = _ledger_coins(config, account) or None
+            what = (f"the {len(coins)} recovery-ledger coins" if coins
+                    else f"the top {settings.top} coins")
             while True:
-                print(f"scanning the top {settings.top} coins (places no orders)...", flush=True)
+                print(f"scanning {what} (places no orders)...", flush=True)
                 try:
-                    new = ideas.scan(mgr, ideas.find_setups(svc, settings.top), settings)
+                    new = ideas.scan(mgr, ideas.find_setups(svc, settings.top, coins), settings)
                     for i in new:
                         print(f"#{i['id']} {i['coin']} {i['timeframe']} {i['pattern']}: "
                               f"{i['status'].upper()} - {i['reason']}", flush=True)
@@ -419,6 +492,24 @@ def cmd_trade(args: argparse.Namespace) -> int:
             trade_id = ideas.place(mgr, idea["id"], settings, margin_inr=args.margin or None,
                                    override=args.override)
             print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
+        elif act == "propose":
+            from backend.trading import ideas
+
+            settings = ideas.Settings.from_config(config.trading.get("setups"))
+            idea = ideas.propose(mgr, _request(args), timeframe=args.tf,
+                                 why=args.why or "given by hand", settings=settings)
+            print(f"[{banner}] setup #{idea['id']} {idea['coin']} {idea['side']}: "
+                  f"{idea['status'].upper()} - {idea['reason']}")
+            if idea["status"] == ideas.READY:
+                print("sent to Telegram with a Place button (needs `trade bot` running), "
+                      f"or: python -m backend.cli trade take {idea['id']} --account {account}")
+            return 0 if idea["status"] == ideas.READY else 1
+        elif act == "bot":
+            known_ledgers = [a for a in known if _ledger_coins(config, a)]
+            mgrs = ([mgr] if args.account else
+                    [TradeManager.from_config(config, force_dry_run=args.dry_run, account=a)
+                     for a in known])
+            return _run_bot(config, mgrs, [account] if args.account else known_ledgers, args)
         elif act == "add":
             pair = risk.to_pair(args.pair)
             plan, trade, _ = mgr.preview_add(pair, risk_inr=args.risk, margin_inr=args.margin,
@@ -614,12 +705,12 @@ def main(argv: list[str] | None = None) -> int:
 
     t = sub.add_parser("trade", help="CoinDCX INR futures: status, preview, open, add, "
                                      "tpsl, close, cancel, panic, resume, log, watch, "
-                                     "recovery")
+                                     "recovery, propose, bot")
     t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
                                       "panic", "resume", "log", "reconcile", "watch",
                                       "scan", "ideas", "take", "trail-on", "trail-off",
                                       "adopt", "trail-set", "add", "recovery",
-                                      "recovery-init"])
+                                      "recovery-init", "propose", "bot"])
     t.add_argument("pair", nargs="?", default="",
                    help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
     t.add_argument("side", nargs="?", choices=["long", "short"], default=None)
@@ -646,10 +737,17 @@ def main(argv: list[str] | None = None) -> int:
                    help="adopt / trail-set: keep the stop a notch under the last closed "
                         "CoinDCX candle of this size")
     t.add_argument("--every-min", type=int, default=0,
-                   help="scan: repeat every N minutes (0 = once)")
+                   help="scan: repeat every N minutes (0 = once); bot: scan every N "
+                        "minutes (default 15)")
+    t.add_argument("--tf", default="15m", help="propose: the setup's timeframe")
+    t.add_argument("--why", default="", help="propose: the reason, shown in Telegram")
     t.set_defaults(func=cmd_trade)
 
     args = parser.parse_args(argv)
+    if getattr(args, "action", None) == "propose" and not (
+            args.pair and args.side and args.sl and args.tp and (args.risk or args.margin)):
+        parser.error("propose needs: PAIR long|short --sl PRICE --tp PRICE --risk INR "
+                     "[--lev] [--limit] [--tf 15m] [--why TEXT]")
     if getattr(args, "action", None) in ("preview", "open") and not (
             args.pair and args.side and args.sl and (args.risk or args.margin)):
         parser.error("preview/open need: PAIR long|short --sl PRICE --risk INR|--margin INR [--tp] "

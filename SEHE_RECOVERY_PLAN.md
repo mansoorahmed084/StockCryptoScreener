@@ -213,20 +213,24 @@ With 3% risk on A+ trades, ~10% a month needs the average trade to make about
 4. Mark the coin **done** in the ledger. Its futures profit stays in the wallet
    and works for the next coin.
 
-ARB is already above cost: you may sell it now and drop it from the list.
+(With the app's real costs, ARB is far below cost too; it is in the ledger.)
 
 ## 7. The daily routine
 
-1. **Scan** (best IST hours from PRODUCT.md): BTC regime, then the open coins,
-   then the rest of the ledger for the best 2–3 setups.
-2. **Call the setup**: coin, setup type, direction, entry, stop, targets, R,
-   size, and why (BTC + coin + LTF). Logged in `journal/trades.csv`.
-3. **Preview first**:
-   `.venv/Scripts/python.exe -m backend.cli trade preview COIN long --sl X --tp Y --risk R --lev L --account sehe`
-4. **You place it**: same command with `open`; you type the pair to confirm.
-   Claude never places or closes a trade.
-5. **Watcher runs** (`trade watch`): stop on the exchange, trailing, breakeven.
-6. **End of day**: journal updated, ledger updated, any coin at breakeven flagged.
+The **trade bot** runs all day (`deploy/trade_bot_sehe.bat`). No commands.
+
+1. **The bot scans** the ledger coins every 15 minutes with the scanner's rules
+   and sends each ready setup to Telegram with a **Place** button.
+2. **Claude scans** on request (best IST hours from PRODUCT.md): BTC regime,
+   the open coins, then the rest of the ledger for the best 2–3 top-down setups
+   (section 4). Each one goes to Telegram the same way, with its reason:
+   `trade propose COIN long --sl X --tp Y --risk R --tf 15m --why "..." --account sehe`.
+   Logged in `journal/trades.csv`.
+3. **You tap Place**: the bot re-checks at the current price and shows the
+   fresh size, stop, target and R. **Confirm** (within 2 minutes) places it with
+   its stop and target; **Skip** drops it. Claude never places or closes a trade.
+4. **The bot watches**: stop on the exchange, trailing, breakeven.
+5. **End of day**: journal updated, ledger updated, any coin at breakeven flagged.
 
 ## 8. Rules that do not bend
 
@@ -248,6 +252,8 @@ ARB is already above cost: you may sell it now and drop it from the list.
    the stop is at or past the average price; max 2 adds; the stop is re-sent
    on the whole position.
 4. **Spot coins** on the Trade page, for each account (the ledger, once started).
+5. **Telegram trade bot**: `trade bot --account sehe` / `deploy/trade_bot_sehe.bat`
+   — watch + scan + Place/Confirm buttons; `trade propose` for setups found in chat.
 
 ## 10. Before the first trade
 

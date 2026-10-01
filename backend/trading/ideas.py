@@ -27,6 +27,7 @@ from backend.trading import risk
 from backend.trading.manager import TradeError, TradeManager
 
 SOURCE = "scan"
+PROPOSED = "proposed"           # a setup given by hand (`trade propose`), not by the scan
 READY, WAITING, BLOCKED, PLACED, EXPIRED, FAILED = (
     "ready", "waiting", "blocked", "placed", "expired", "failed")
 HOUR_MS = 3_600_000
@@ -46,13 +47,19 @@ class Settings:
         return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
 
 
-def find_setups(svc, top: int) -> pd.DataFrame:
-    """The scanner's buy setups that pass its fixed rules, best first."""
+def find_setups(svc, top: int, coins: list[str] | None = None) -> pd.DataFrame:
+    """The scanner's buy setups that pass its fixed rules, best first: over the
+    ``top`` coins by market cap, or over ``coins`` when given (e.g. a recovery ledger)."""
     from backend.screener import buy_setups as bs
     from backend.screener import pattern_scan as ps
 
     fut = svc.futures()
-    scan = ps.scan(fut.klines, svc.liquidation_coins(top), ["15m", "1h", "4h", "1d"],
+    if coins:
+        perps = fut.perpetuals()
+        universe = {c: perps[c] for c in coins if c in perps}
+    else:
+        universe = svc.liquidation_coins(top)
+    scan = ps.scan(fut.klines, universe, ["15m", "1h", "4h", "1d"],
                    patterns=ps.BULLISH + ps.BEARISH)
     trends = {}
     for sym in scan["symbol"].unique():
@@ -75,10 +82,17 @@ def rr_error(plan: risk.Plan) -> str | None:
 
 
 def request_for(idea: dict, free_inr: float, settings: Settings) -> risk.TradeRequest:
-    return risk.TradeRequest(pair=idea["pair"], side=risk.LONG, stop_loss=idea["stop"],
-                             take_profit=idea["target"], risk_inr=0.0,
-                             leverage=settings.leverage,
-                             margin_inr=risk.margin_budget(free_inr))
+    """The trade a setup makes. A scan setup: LONG at market, sized at the 5% margin
+    budget. A proposed one carries its own side, risk, leverage and limit price."""
+    limit = idea.get("limit_price")
+    return risk.TradeRequest(pair=idea["pair"], side=idea.get("side") or risk.LONG,
+                             stop_loss=idea["stop"], take_profit=idea["target"],
+                             risk_inr=idea.get("risk_inr") or 0.0,
+                             leverage=idea.get("leverage") or settings.leverage,
+                             entry_type=risk.LIMIT if limit else risk.MARKET,
+                             limit_price=limit or None,
+                             margin_inr=0.0 if idea.get("risk_inr")
+                             else risk.margin_budget(free_inr))
 
 
 def _gate(mgr: TradeManager, pair: str, timeframe: str, pattern: str,
@@ -133,9 +147,44 @@ def scan(mgr: TradeManager, setups: pd.DataFrame, settings: Settings) -> list[di
         idea["id"] = mgr.store.add_idea(**idea)
         new.append(idea)
         if status == READY:
-            mgr.notify(f"setup ready: {r.coin} {r.timeframe} {r.pattern}, SL {idea['stop']:g}"
-                       f" TP {idea['target']:g}. Tap Place on the Trade page.")
+            _offer(mgr, idea, f"setup ready: {r.coin} {r.timeframe} {r.pattern}, "
+                              f"SL {idea['stop']:g} TP {idea['target']:g}")
     return new
+
+
+def _offer(mgr: TradeManager, idea: dict, text: str) -> None:
+    """Send a ready setup to Telegram with a Place button (plain message without one)."""
+    from backend.trading import tgbot
+
+    if not tgbot.offer(mgr, idea, text):
+        mgr.notify(f"{text}. Tap Place on the Trade page.")
+
+
+def propose(mgr: TradeManager, req: risk.TradeRequest, *, timeframe: str, why: str,
+            settings: Settings) -> dict:
+    """Record a setup found by hand (or by Claude in chat) and offer it with a Place
+    button. Places nothing: only the owner's tap or `trade take ID` places it."""
+    req.pair = risk.to_pair(req.pair)
+    now = int(time.time() * 1000)
+    plan = mgr.preview(req)
+    errors = plan.errors + ([rr] if (rr := rr_error(plan)) else [])
+    gate = _gate(mgr, req.pair, timeframe, "", settings, now)
+    errors += [gate] if gate else []
+    idea = dict(source=PROPOSED, coin=req.pair.removeprefix("B-").removesuffix("_USDT"),
+                pair=req.pair, timeframe=timeframe, pattern=f"{PROPOSED}-{now}",
+                kind="now", price=plan.entry, stop=plan.stop_loss,
+                target=plan.take_profit or 0.0, rr=plan.rr or 0.0, score=0.0,
+                side=req.side, risk_inr=req.risk_inr or None, leverage=req.leverage,
+                limit_price=req.limit_price if req.entry_type == risk.LIMIT else None,
+                status=BLOCKED if errors else READY,
+                reason="; ".join(errors) if errors else why)
+    idea["id"] = mgr.store.add_idea(**idea)
+    if not errors:
+        entry = f"limit {plan.entry:g}" if idea["limit_price"] else f"market ~{plan.entry:g}"
+        _offer(mgr, idea, f"{req.side.upper()} {idea['coin']} ({timeframe}) {entry}, "
+                          f"SL {plan.stop_loss:g} TP {plan.take_profit:g}, {plan.rr:.1f}R, "
+                          f"risk ~Rs {plan.risk_inr:,.0f}\nWhy: {why}")
+    return idea
 
 
 def place(mgr: TradeManager, idea_id: int, settings: Settings, *,

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -95,6 +96,8 @@ class TradeManager:
         self.close_unprotected = close_unprotected
         self.account = account
         self._sleep = sleep
+        # The bot handles button taps on one thread and watches on another: one at a time.
+        self.lock = threading.RLock()
         self._instruments: dict[str, risk.Instrument] = {}
         self._warned_unprotected: set[str] = set()
 

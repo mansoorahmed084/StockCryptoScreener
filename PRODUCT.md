@@ -453,6 +453,26 @@ like a new trade (gold-standard rules, your limits). After the fill the stop
 and target are sent again so they cover the whole, bigger position. An add
 lifts the average price, so the next add waits until the stop follows it.
 
+### Telegram trade bot (tap to place)
+`trade bot --account sehe` (or double-click `deploy/trade_bot_sehe.bat`) is one
+program that does everything a trading day needs:
+- watches the account every 30 s (fills, stops, targets, trailing stop);
+- scans every 15 min (`--every-min`): the account's **recovery-ledger coins**
+  when it has a ledger, else the top 50 coins;
+- sends each **ready** setup to your Telegram chat with a **Place** button;
+- on **Place** it re-checks the trade at the current price and shows the fresh
+  plan with **Confirm** and **Skip**; **Confirm** (within 2 minutes) places it
+  with its stop and target — the same checks as the Trade page.
+
+Nothing is placed without your two taps. Taps from any chat other than
+`TELEGRAM_CHAT_ID` are ignored. With no `--account` the bot watches every
+account and scans every account that has a recovery ledger.
+
+`trade propose COIN long|short --sl X --tp Y --risk R [--limit P] [--lev L]
+[--tf 15m] --why "..." --account sehe` records a setup given by hand (Claude
+uses it for setups found in chat) and sends it to Telegram the same way. It must
+pay at least 2R; it places nothing itself.
+
 ### Spot loss recovery ledger
 For winning back a spot loss with futures on the same coins
 (SEHE_RECOVERY_PLAN.md). Reads only; it never places or sells anything.
@@ -485,8 +505,9 @@ For winning back a spot loss with futures on the same coins
 - CoinDCX has **no read-only keys**: bind the key to the IP of the machine
   that trades, and keep only trading money in that account (a sub-account
   has its own keys).
-- Claude can preview trades, read status and prepare commands; you type the
-  confirmation that places or closes a trade.
+- Claude can preview trades, read status, prepare commands and send setups to
+  Telegram (`trade propose`); you type the confirmation, or tap Place and
+  Confirm, that places a trade.
 
 ---
 
