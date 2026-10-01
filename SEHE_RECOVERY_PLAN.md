@@ -125,6 +125,37 @@ Every trade needs all four steps to agree. If one step says no, there is no trad
 Only setups with **reward ≥ 2R** to the first target. A+ means all four steps
 agree, BTC is risk-on (for a long) and the target is ≥ 3R away.
 
+### Real costs (CoinDCX app, 2026-10-01)
+
+The app's Coins P&L page shows Sehe invested **$8,782**, worth $1,054 now
+(−$7,728). With the app's "Invested" per coin in the ledger (buys under $50
+left out), **25 coins** are active and the gap is **≈ ₹7.36 lakh** — almost
+4x the first estimate. The tables above are now too low; `trade recovery
+--account sehe` is the live number.
+
+- **S (Sonic) alone is ₹1.79 lakh** (invested $1,866, now $80) — a quarter of
+  the whole gap.
+- Next: GMT ₹61k, ARB ₹61k, INJ ₹43k, OP ₹40k, ORDI ₹37k.
+- Smallest (quick wins first): BEAMX ₹4.6k, GMX ₹5.8k, XTZ ₹5.9k, KSM ₹6.4k,
+  PROM ₹6.6k, MOVR ₹7k.
+- SEI was not in the screenshots; its cost is still from the trade history.
+
+**What this means for ₹1 lakh:** winning back ₹7.36 lakh in 6 months is +636%,
+about **39% a month** compounded. That is not a realistic target. So:
+
+| Way | Capital | Monthly return needed | Note |
+|---|---|---|---|
+| Full recovery, ₹1 lakh | ₹1 lakh | ≈ 39% | not realistic |
+| Full recovery, more capital | ≈ ₹3.7 lakh | ≈ 20% | very aggressive |
+| Full recovery, more capital | ≈ ₹9.5 lakh | ≈ 10% | hard |
+| **Partial recovery, ₹1 lakh** | ₹1 lakh | ≈ 20% | close the small coins one by one |
+
+The plan now runs as **partial recovery**: each coin is closed on its own as
+soon as its ledger reaches breakeven, smallest gaps first among coins with a
+good setup. Every coin closed by 2027-03-31 is a real result even if the whole
+gap is not won back. Capital may be added at the 2-month milestone if the
+results earn it. (If the 30% tax applies, every target is ~1.43x higher.)
+
 ## 5. Size and risk
 
 Capital ₹1,00,000. Big moves are real, so A+ setups get real size; the hard
