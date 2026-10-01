@@ -20,10 +20,11 @@ import datetime as dt
 import logging
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from backend.trading import risk
-from backend.trading.client import CoinDcxError, FuturesClient, UnknownOutcome
+from backend.trading.client import MAIN, CoinDcxError, FuturesClient, UnknownOutcome
 from backend.trading.store import CLOSED, FAILED, OPEN, PENDING, TradeStore
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,14 @@ def _f(x: Any) -> float:
 TRAIL_CANDLES = ("1m", "5m", "15m", "1h")
 
 
+def account_db(path: str, account: str) -> str:
+    """Each account keeps its own records: trading.db for main, trading_<name>.db else."""
+    if account == MAIN:
+        return path
+    p = Path(path)
+    return str(p.with_name(f"{p.stem}_{account}{p.suffix}"))
+
+
 def check_trail(trail_pct: float, trail_candle: str | None) -> None:
     if bool(trail_pct) == bool(trail_candle):
         raise TradeError("give one trail: a percent (--trail-pct) or a candle (--trail-candle)")
@@ -66,7 +75,7 @@ class TradeManager:
                  mode: str = DRY_RUN, notify: Callable[[str], Any] | None = None,
                  fill_timeout_s: float = 20.0, poll_s: float = 1.0,
                  close_unprotected: bool = False,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, account: str = MAIN):
         if mode not in (LIVE, DRY_RUN):
             raise ValueError(f"trading.mode must be {LIVE!r} or {DRY_RUN!r}")
         self.client = client
@@ -77,21 +86,25 @@ class TradeManager:
         self.fill_timeout_s = fill_timeout_s
         self.poll_s = poll_s
         self.close_unprotected = close_unprotected
+        self.account = account
         self._sleep = sleep
         self._instruments: dict[str, risk.Instrument] = {}
         self._warned_unprotected: set[str] = set()
 
     @classmethod
-    def from_config(cls, config, *, force_dry_run: bool = False) -> "TradeManager":
+    def from_config(cls, config, *, force_dry_run: bool = False,
+                    account: str = MAIN) -> "TradeManager":
         from backend.alerts.telegram import notifier_from_env
 
         t = config.trading
-        return cls(FuturesClient.from_env(), TradeStore(t.get("db", "data_cache/trading.db")),
+        return cls(FuturesClient.from_env(account),
+                   TradeStore(account_db(t.get("db", "data_cache/trading.db"), account)),
                    risk.Limits.from_config(t.get("limits")),
                    mode=DRY_RUN if force_dry_run else str(t.get("mode", DRY_RUN)),
                    notify=notifier_from_env().send,
                    fill_timeout_s=float(t.get("fill_timeout_s", 20)),
-                   close_unprotected=bool(t.get("close_unprotected", False)))
+                   close_unprotected=bool(t.get("close_unprotected", False)),
+                   account=account)
 
     @property
     def live(self) -> bool:
@@ -104,7 +117,7 @@ class TradeManager:
     def notify(self, text: str) -> None:
         log.info(text)
         try:
-            self._notify(f"[CoinDCX] {text}")
+            self._notify(f"[CoinDCX{'' if self.account == MAIN else ' ' + self.account}] {text}")
         except Exception as exc:              # a failed message must not stop trading logic
             log.warning("notify failed: %s", exc)
 

@@ -666,3 +666,44 @@ def test_setups_under_2r_are_never_suggested_or_placed(tmp_path):
         ideas.place(m, ok["id"], s, override=True)         # the override does not lift it
     assert ex.writes == []
     assert m.store.idea(ok["id"])["status"] == ideas.BLOCKED
+
+
+# -- more than one CoinDCX account ----------------------------------------------------
+
+from backend.trading import client as client_mod  # noqa: E402
+from backend.trading.manager import account_db  # noqa: E402
+
+
+def test_account_key_names_and_discovery(monkeypatch):
+    monkeypatch.setattr("backend.alerts.telegram.load_dotenv", lambda *a, **k: None)
+    for k in [k for k in client_mod.os.environ if k.startswith("COINDCX_API_")]:
+        monkeypatch.delenv(k)
+    assert client_mod.env_names("main") == ("COINDCX_API_KEY", "COINDCX_API_SECRET")
+    assert client_mod.env_names("second") == ("COINDCX_API_KEY_SECOND",
+                                              "COINDCX_API_SECRET_SECOND")
+    with pytest.raises(ValueError):
+        client_mod.env_names("bad name!")
+    monkeypatch.setenv("COINDCX_API_KEY", "k1")
+    monkeypatch.setenv("COINDCX_API_KEY_SECOND", "k2")
+    monkeypatch.setenv("COINDCX_API_SECRET_SECOND", "s2")
+    monkeypatch.setenv("COINDCX_API_KEY_EMPTY", "  ")
+    assert client_mod.accounts() == ["main", "second"]
+    c = client_mod.FuturesClient.from_env("second")
+    assert c.has_keys and c._key == "k2"
+    assert not client_mod.FuturesClient.from_env("main").has_keys   # no main secret
+
+
+def test_each_account_keeps_its_own_records(tmp_path, monkeypatch):
+    assert account_db("data_cache/trading.db", "main") == "data_cache/trading.db"
+    assert account_db("data_cache/trading.db", "second").replace("\\", "/") == \
+        "data_cache/trading_second.db"
+    sent = []
+    a = manager(tmp_path, FakeExchange())
+    b = TradeManager(FakeExchange(), TradeStore(account_db(str(tmp_path / "t.db"), "second")),
+                     LIMITS, mode=LIVE, account="second", notify=sent.append,
+                     fill_timeout_s=0.01, poll_s=0.001, sleep=lambda s: None)
+    a.open(req(), confirm=PAIR)
+    assert b.store.trades() == [] and len(a.store.trades()) == 1
+    b.panic("PANIC")
+    assert b.halted and not a.halted
+    assert sent and sent[-1].startswith("[CoinDCX second]")

@@ -272,12 +272,24 @@ def cmd_trade(args: argparse.Namespace) -> int:
     import time as _time
 
     from backend.trading import risk
+    from backend.trading.client import MAIN, accounts, env_names
     from backend.trading.manager import TradeError, TradeManager
 
     config = load_config(args.config)
-    mgr = TradeManager.from_config(config, force_dry_run=args.dry_run)
     act = args.action
-    banner = "LIVE" if mgr.live else "DRY RUN (nothing is sent)"
+    known = accounts()
+    account = (args.account or MAIN).lower()
+    if account not in known:
+        try:
+            key, secret = env_names(account)
+            print(f"no account {account!r}: put {key} and {secret} in .env "
+                  f"(accounts found: {', '.join(known)})")
+        except ValueError as exc:
+            print(exc)
+        return 1
+    mgr = TradeManager.from_config(config, force_dry_run=args.dry_run, account=account)
+    banner = (("LIVE" if mgr.live else "DRY RUN (nothing is sent)")
+              + ("" if len(known) == 1 else f" · account {account}"))
     try:
         if act == "status":
             s = mgr.status()
@@ -450,14 +462,21 @@ def cmd_trade(args: argparse.Namespace) -> int:
             from backend.trading import trailing
 
             trail = trailing.Settings.from_config(config.trading.get("trailing"))
-            print(f"[{banner}] watching CoinDCX positions every {args.every}s; trailing stop "
+            # With no --account the watcher looks after every account in .env.
+            mgrs = ([mgr] if args.account else
+                    [TradeManager.from_config(config, force_dry_run=args.dry_run, account=a)
+                     for a in known])
+            print(f"[{'LIVE' if mgr.live else 'DRY RUN (nothing is sent)'}] watching "
+                  f"{', '.join(m.account for m in mgrs)} every {args.every}s; trailing stop "
                   f"{'on' if trail.enabled else 'off'} - Ctrl+C to stop", flush=True)
             while True:
-                try:
-                    for m in mgr.reconcile() + trailing.run(mgr, trail):
-                        print(m, flush=True)
-                except Exception as exc:         # keep watching through a bad round
-                    print(f"check failed: {exc}", flush=True)
+                for one in mgrs:
+                    tag = "" if len(mgrs) == 1 else f"[{one.account}] "
+                    try:                         # one account failing never stops the others
+                        for m in one.reconcile() + trailing.run(one, trail):
+                            print(tag + m, flush=True)
+                    except Exception as exc:     # keep watching through a bad round
+                        print(f"{tag}check failed: {exc}", flush=True)
                 if act == "reconcile":
                     return 0
                 _time.sleep(args.every)
@@ -556,6 +575,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--override", action="store_true",
                    help="break the gold-standard rules (10%% stop, 5%% margin, 5x) for "
                         "this one trade")
+    t.add_argument("--account", default=None,
+                   help="which CoinDCX account (default main; watch: all accounts)")
     t.add_argument("--dry-run", action="store_true",
                    help="send nothing, whatever trading.mode says")
     t.add_argument("--trail-pct", type=float, default=0.0,

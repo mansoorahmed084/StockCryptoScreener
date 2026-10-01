@@ -15,6 +15,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -28,6 +29,31 @@ FUTURES = "/exchange/v1/derivatives/futures"
 PRICES_URL = "https://public.coindcx.com/market_data/v3/current_prices/futures/rt"
 MARGIN = "INR"
 MIN_GAP_S = 0.07          # CoinDCX allows 16 requests/s; stay under it
+
+
+MAIN = "main"
+KEY_PREFIX = "COINDCX_API_KEY"
+ACCOUNT_NAME = re.compile(r"^[a-z0-9_]{1,32}$")
+
+
+def env_names(account: str) -> tuple[str, str]:
+    """.env names of an account's key and secret. ``main`` is COINDCX_API_KEY /
+    COINDCX_API_SECRET; any other account adds its name: COINDCX_API_KEY_SECOND."""
+    if account == MAIN:
+        return KEY_PREFIX, "COINDCX_API_SECRET"
+    if not ACCOUNT_NAME.match(account):
+        raise ValueError(f"account names use a-z, 0-9 and _ only: {account!r}")
+    return f"{KEY_PREFIX}_{account.upper()}", f"COINDCX_API_SECRET_{account.upper()}"
+
+
+def accounts() -> list[str]:
+    """``main`` plus every account that has a key in .env, e.g. COINDCX_API_KEY_SECOND."""
+    from backend.alerts.telegram import load_dotenv
+    load_dotenv()
+    extra = sorted(k[len(KEY_PREFIX) + 1:].lower() for k, v in os.environ.items()
+                   if k.startswith(KEY_PREFIX + "_") and v.strip()
+                   and ACCOUNT_NAME.match(k[len(KEY_PREFIX) + 1:].lower()))
+    return [MAIN, *extra]
 
 
 class CoinDcxError(Exception):
@@ -54,11 +80,11 @@ class FuturesClient:
         self._last = 0.0
 
     @classmethod
-    def from_env(cls, **kw) -> "FuturesClient":
+    def from_env(cls, account: str = MAIN, **kw) -> "FuturesClient":
         from backend.alerts.telegram import load_dotenv
         load_dotenv()
-        return cls(os.environ.get("COINDCX_API_KEY", "").strip(),
-                   os.environ.get("COINDCX_API_SECRET", "").strip(), **kw)
+        key, secret = env_names(account)
+        return cls(os.environ.get(key, "").strip(), os.environ.get(secret, "").strip(), **kw)
 
     @property
     def has_keys(self) -> bool:

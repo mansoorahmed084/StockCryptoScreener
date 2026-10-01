@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from backend.config import load_config  # noqa: E402
 from backend.trading import ideas, risk  # noqa: E402
+from backend.trading.client import MAIN, accounts, env_names  # noqa: E402
 from backend.trading.manager import TradeError, TradeManager  # noqa: E402
 from frontend import trade_hours_view  # noqa: E402
 
@@ -23,8 +24,17 @@ st.set_page_config(page_title="Trade", layout="wide")
 
 
 @st.cache_resource(show_spinner=False)
-def manager() -> TradeManager:
-    return TradeManager.from_config(load_config())
+def manager(account: str = MAIN) -> TradeManager:
+    return TradeManager.from_config(load_config(), account=account)
+
+
+def pick_account() -> str:
+    """Sidebar picker when .env has more than one CoinDCX account."""
+    names = accounts()
+    if len(names) == 1:
+        return MAIN
+    return st.sidebar.selectbox("CoinDCX account", names, key="account",
+                                help="Each account has its own trades, setups and limits.")
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -49,7 +59,8 @@ def header(m: TradeManager) -> None:
         st.info("**DRY RUN** — orders are checked and logged, nothing is sent. "
                 "Set `trading.mode: live` in config.yaml to trade.")
     if not m.client.has_keys:
-        st.warning("No API keys. Put `COINDCX_API_KEY` and `COINDCX_API_SECRET` in `.env`. "
+        key, secret = env_names(m.account)
+        st.warning(f"No API keys. Put `{key}` and `{secret}` in `.env`. "
                    "Previews still work, sized with the spot USDT/INR price.")
     if m.halted:
         st.error("Trading is **halted** (panic). New trades are blocked.")
@@ -322,8 +333,10 @@ def setups(m: TradeManager) -> None:
 
 
 def main() -> None:
-    m = manager()
+    m = manager(pick_account())
     header(m)
+    if m.account != MAIN:
+        st.caption(f"Account: **{m.account}**")
     trade_hours_view.render()
     setups(m)
     st.divider()

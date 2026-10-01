@@ -427,6 +427,17 @@ target orders sit on CoinDCX, so they work even when the watcher is off.
 Add `--limit PRICE` for a limit entry. Every command that sends something
 asks you to type the pair (or `PANIC`) first.
 
+### More than one CoinDCX account
+- `.env`: the first account is `COINDCX_API_KEY` / `COINDCX_API_SECRET`
+  (**main**). Add another with a name after the key names, e.g.
+  `COINDCX_API_KEY_SECOND` / `COINDCX_API_SECRET_SECOND` (**second**).
+- Each account has its own trades, setups, log, panic switch and daily-loss
+  count (`data_cache/trading_<name>.db`); the rules and `trading.limits`
+  apply to each one on its own free balance.
+- Terminal: add `--account second` to any `trade` command (default main).
+  `trade watch` with no `--account` looks after every account in `.env`.
+- Trade page: an account picker appears in the sidebar.
+
 ### Safety set-up
 - `trading.mode: dry_run` (the default) checks and logs every order and sends
   nothing. Switch to `live` only after a dry run looks right.
