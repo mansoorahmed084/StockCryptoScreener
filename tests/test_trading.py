@@ -707,3 +707,84 @@ def test_each_account_keeps_its_own_records(tmp_path, monkeypatch):
     b.panic("PANIC")
     assert b.halted and not a.halted
     assert sent and sent[-1].startswith("[CoinDCX second]")
+
+
+# -- per-account limits and adds to a winner ------------------------------------------
+
+from backend.trading.manager import MAX_ADDS, account_limits  # noqa: E402
+
+
+def test_an_account_can_have_its_own_limits():
+    t = {"limits": {"max_risk_inr": 500, "max_margin_inr": 5000, "max_open_positions": 10},
+         "accounts": {"sehe": {"limits": {"max_risk_inr": 3000, "max_open_positions": 3}}}}
+    main, sehe = account_limits(t, "main"), account_limits(t, "sehe")
+    assert (main.max_risk_inr, main.max_open_positions) == (500, 10)
+    assert (sehe.max_risk_inr, sehe.max_open_positions) == (3000, 3)
+    assert sehe.max_margin_inr == 5000                     # not set for sehe: shared value
+    assert account_limits({}, "sehe") == risk.Limits()
+
+
+class GrowingExchange(FakeExchange):
+    """A market order on a pair already held adds to the position."""
+
+    def fill(self, pair, qty):
+        if pair in self.pos:
+            p = self.pos[pair]
+            p["avg_price"] = (p["avg_price"] * p["active_pos"] + self.px * qty) / (
+                p["active_pos"] + qty)
+            p["active_pos"] += qty
+        else:
+            super().fill(pair, qty)
+            self.pos[pair]["leverage"] = 5
+
+
+def test_adding_needs_the_stop_at_breakeven(tmp_path):
+    ex = GrowingExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    ex.px = 105.0
+    with pytest.raises(TradeError, match="not at breakeven"):
+        m.preview_add(PAIR, risk_inr=500.0)
+    with pytest.raises(TradeError, match="opened by this tool"):
+        m.preview_add("B-ETH_USDT", risk_inr=500.0)
+
+
+def test_add_to_a_winner_moves_the_stop_onto_the_whole_position(tmp_path):
+    ex = GrowingExchange()
+    m = manager(tmp_path, ex)
+    m.open(req(), confirm=PAIR)
+    first = ex.pos[PAIR]["active_pos"]
+    ex.pos[PAIR]["stop_loss_trigger"] = 100.0           # trailed to breakeven
+    ex.px = 105.0
+    with pytest.raises(TradeError, match="not confirmed"):
+        m.add(PAIR, "yes", risk_inr=500.0)
+    ex.writes.clear()
+    plan = m.add(PAIR, PAIR, risk_inr=500.0)
+    assert plan.ok and plan.request.stop_loss == 100.0 and plan.request.take_profit == 110.0
+    order = next(w[1] for w in ex.writes if w[0] == "create_order")
+    assert order["side"] == "buy" and order["total_quantity"] == plan.qty
+    assert [w[0] for w in ex.writes][-1] == "create_tpsl"   # stop re-sent last
+    assert ex.pos[PAIR]["stop_loss_trigger"] == 100.0
+    assert ex.pos[PAIR]["active_pos"] == pytest.approx(first + plan.qty)
+    t = m.store.trades()[0]
+    assert t["adds"] == 1 and t["qty"] == pytest.approx(first + plan.qty)
+    assert "add 1" in t["note"]
+    # The add lifted the average above the stop: no second add until the stop follows.
+    with pytest.raises(TradeError, match="not at breakeven"):
+        m.preview_add(PAIR, risk_inr=300.0)
+    ex.pos[PAIR]["stop_loss_trigger"] = 103.0
+    m.add(PAIR, PAIR, risk_inr=150.0)
+    with pytest.raises(TradeError, match=f"{MAX_ADDS} adds"):
+        m.preview_add(PAIR, risk_inr=150.0)
+
+
+def test_add_in_dry_run_sends_nothing(tmp_path):
+    ex = GrowingExchange()
+    live = manager(tmp_path, ex)
+    live.open(req(), confirm=PAIR)
+    ex.pos[PAIR]["stop_loss_trigger"] = 100.0
+    ex.px = 105.0
+    ex.writes.clear()
+    dry = manager(tmp_path, ex, mode=DRY_RUN)
+    assert dry.add(PAIR, PAIR, risk_inr=500.0).ok
+    assert ex.writes == [] and dry.store.trades()[0]["adds"] == 0

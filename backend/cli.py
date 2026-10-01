@@ -267,6 +267,32 @@ def _request(args: argparse.Namespace):
         margin_inr=args.margin, override=args.override)
 
 
+def _print_ledger(lines, path) -> None:
+    """The spot-loss recovery ledger, one coin a line, closest to breakeven first."""
+    active = sorted((x for x in lines if x.status == "active"), key=lambda x: x.to_go_inr)
+    print(f"{'coin':8} {'paid':>9} {'spot now':>9} {'spot P&L':>9} {'futures':>9} "
+          f"{'ledger':>9} {'to go':>8}  (Rs; futures = closed + open since start)")
+    for x in active:
+        flag = ("  << BREAKEVEN: close futures and sell spot" if x.ready
+                else "" if x.has_futures else "  (no INR futures pair)")
+        print(f"{x.coin:8} {x.paid_inr:9,.0f} {x.spot_now_inr:9,.0f} {x.spot_pnl_inr:9,.0f} "
+              f"{x.futures_closed_inr + x.futures_open_inr:9,.0f} {x.total_inr:9,.0f} "
+              f"{x.to_go_inr:8,.0f}{flag}")
+        if x.note:
+            print(f"{'':9}note: {x.note}")
+    if active:
+        print(f"{'TOTAL':8} {sum(x.paid_inr for x in active):9,.0f} "
+              f"{sum(x.spot_now_inr for x in active):9,.0f} "
+              f"{sum(x.spot_pnl_inr for x in active):9,.0f} "
+              f"{sum(x.futures_closed_inr + x.futures_open_inr for x in active):9,.0f} "
+              f"{sum(x.total_inr for x in active):9,.0f} {sum(x.to_go_inr for x in active):8,.0f}")
+    for st in ("done", "skip"):
+        names = [x.coin for x in lines if x.status == st]
+        if names:
+            print(f"{st}: {', '.join(names)}")
+    print(f"ledger file: {path}")
+
+
 def cmd_trade(args: argparse.Namespace) -> int:
     """CoinDCX INR futures: status, preview, open, move SL/TP, close, panic."""
     import time as _time
@@ -393,6 +419,39 @@ def cmd_trade(args: argparse.Namespace) -> int:
             trade_id = ideas.place(mgr, idea["id"], settings, margin_inr=args.margin or None,
                                    override=args.override)
             print(f"done: trade #{trade_id}. Check it with: python -m backend.cli trade status")
+        elif act == "add":
+            pair = risk.to_pair(args.pair)
+            plan, trade, _ = mgr.preview_add(pair, risk_inr=args.risk, margin_inr=args.margin,
+                                             override=args.override)
+            print(f"[{banner}] add {(trade['adds'] or 0) + 1} to trade #{trade['id']}\n"
+                  f"{plan.summary()}")
+            if not plan.ok:
+                return 1
+            mgr.add(pair, _yes(pair, f"\nAdd this {banner} size to"), risk_inr=args.risk,
+                    margin_inr=args.margin, override=args.override)
+            print("done. Check it with: python -m backend.cli trade status")
+        elif act in ("recovery", "recovery-init"):
+            from pathlib import Path
+
+            from backend.trading import recovery
+
+            rc = config.trading.get("recovery") or {}
+            path = recovery.ledger_path(
+                str(Path(config.trading.get("db", "data_cache/trading.db")).parent), account)
+            if act == "recovery-init":
+                if path.exists():
+                    raise TradeError(f"{path} already exists; edit it, or delete it to start over")
+                print("reading the full spot trade history (reads only)...", flush=True)
+                rows = recovery.seed(mgr.client, min_paid_usd=float(rc.get("min_paid_usd", 50)))
+                recovery.save(path, rows)
+                print(f"wrote {path}: {sum(r.status == 'active' for r in rows)} coins active, "
+                      f"{sum(r.status == 'skip' for r in rows)} skipped (no buy found). "
+                      "Edit paid_inr for coins bought elsewhere.")
+            rows = recovery.load(path)
+            if not rows:
+                raise TradeError(f"no ledger yet: run `trade recovery-init --account {account}`")
+            _print_ledger(recovery.ledger(mgr.client, rows,
+                                          float(rc.get("cushion_pct", 1.5))), path)
         elif act == "resume":
             mgr.resume()
             print("new trades allowed again")
@@ -553,12 +612,14 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--horizon", type=int, default=10)
     b.set_defaults(func=cmd_backtest)
 
-    t = sub.add_parser("trade", help="CoinDCX INR futures: status, preview, open, "
-                                     "tpsl, close, cancel, panic, resume, log, watch")
+    t = sub.add_parser("trade", help="CoinDCX INR futures: status, preview, open, add, "
+                                     "tpsl, close, cancel, panic, resume, log, watch, "
+                                     "recovery")
     t.add_argument("action", choices=["status", "preview", "open", "tpsl", "close", "cancel",
                                       "panic", "resume", "log", "reconcile", "watch",
                                       "scan", "ideas", "take", "trail-on", "trail-off",
-                                      "adopt", "trail-set"])
+                                      "adopt", "trail-set", "add", "recovery",
+                                      "recovery-init"])
     t.add_argument("pair", nargs="?", default="",
                    help="coin or pair (BTC, B-BTC_USDT); order id for cancel")
     t.add_argument("side", nargs="?", choices=["long", "short"], default=None)
@@ -593,6 +654,8 @@ def main(argv: list[str] | None = None) -> int:
             args.pair and args.side and args.sl and (args.risk or args.margin)):
         parser.error("preview/open need: PAIR long|short --sl PRICE --risk INR|--margin INR [--tp] "
                      "[--lev] [--limit]")
+    if getattr(args, "action", None) == "add" and not (args.pair and (args.risk or args.margin)):
+        parser.error("add needs: PAIR --risk INR|--margin INR (same stop and target as the trade)")
     try:  # ensure non-ASCII output never crashes on Windows consoles
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):

@@ -419,6 +419,8 @@ target orders sit on CoinDCX, so they work even when the watcher is off.
 .venv/Scripts/python.exe -m backend.cli trade status
 .venv/Scripts/python.exe -m backend.cli trade preview SOL long --sl 115 --tp 135 --risk 300 --lev 3
 .venv/Scripts/python.exe -m backend.cli trade open SOL long --sl 115 --tp 135 --risk 300 --lev 3
+.venv/Scripts/python.exe -m backend.cli trade add SOL --risk 300
+.venv/Scripts/python.exe -m backend.cli trade recovery --account sehe
 .venv/Scripts/python.exe -m backend.cli trade tpsl SOL --sl 118
 .venv/Scripts/python.exe -m backend.cli trade close SOL
 .venv/Scripts/python.exe -m backend.cli trade panic
@@ -437,6 +439,43 @@ asks you to type the pair (or `PANIC`) first.
 - Terminal: add `--account second` to any `trade` command (default main).
   `trade watch` with no `--account` looks after every account in `.env`.
 - Trade page: an account picker appears in the sidebar.
+- **Own limits:** `trading.accounts.<name>.limits` in config.yaml replaces the
+  matching `trading.limits` values for that account only (e.g. `sehe` risks up
+  to Rs 3,000 a trade, 3 positions, Rs 6,000 daily loss). The gold-standard
+  rules stay the same for every account.
+
+### Adding to a winner
+`trade add PAIR --risk INR` (or `--margin INR`) buys more of an open trade this
+tool opened, at market, with the **same stop and target**. It is allowed only
+when the stop is at or past the position's average price — the trade can no
+longer lose — and at most **2 adds** per trade. The add is sized and checked
+like a new trade (gold-standard rules, your limits). After the fill the stop
+and target are sent again so they cover the whole, bigger position. An add
+lifts the average price, so the next add waits until the stop follows it.
+
+### Spot loss recovery ledger
+For winning back a spot loss with futures on the same coins
+(SEHE_RECOVERY_PLAN.md). Reads only; it never places or sells anything.
+- `trade recovery-init --account NAME` reads the whole spot trade history and
+  writes `data_cache/recovery_<name>.csv` (git-ignored): each coin held, its
+  quantity, what it cost (average cost of the coins still held, USDT buys at
+  that day's USDT/INR rate), the start day and a status. Coins bought for under
+  `trading.recovery.min_paid_usd` ($50) are left out.
+- Coins with **no buy in the history** (deposited from another exchange, or
+  bought in the app's simple Buy screen) are costed at today's value and noted;
+  a coin with none at all comes in as `skip`. Put the real cost in `paid_inr`
+  (the app's "Invested" figure) and set `status` to `active`.
+- `trade recovery --account NAME` prints, per coin: cost, spot value now, spot
+  P&L, futures P&L on its pair since the start day (closed trades, funding and
+  fees, plus the open position at mark), the ledger and what is still to go.
+  A coin is at **breakeven** once its ledger beats the cushion
+  (`trading.recovery.cushion_pct`, 1.5% of spot value: 1% TDS + fee on the
+  final spot sell). Then close the futures trade and sell the spot coin; set
+  its status to `done`.
+- If fewer coins are held than the ledger lists, only their share of the cost
+  counts.
+- Trade page: the **Spot coins and loss recovery** section shows the ledger, or
+  the account's spot coins when no ledger exists yet.
 
 ### Safety set-up
 - `trading.mode: dry_run` (the default) checks and logs every order and sends

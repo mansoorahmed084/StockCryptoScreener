@@ -105,6 +105,17 @@ trading:
     max_daily_loss_inr: 1500   # no new trades after losing this much today (UTC)
     min_stop_pct: 0.3      # refuse a stop closer than this % to entry
     allowed_pairs: []      # e.g. [BTC, ETH, SOL]; empty = any active INR pair
+  accounts:                # per account: these replace the matching trading.limits
+    sehe:                  # spot-loss recovery account (SEHE_RECOVERY_PLAN.md), Rs 1 lakh
+      limits:
+        max_risk_inr: 3000
+        max_margin_inr: 20000
+        max_leverage: 10   # above 5x still needs --override (gold-standard rule)
+        max_open_positions: 3
+        max_daily_loss_inr: 6000
+  recovery:                # `trade recovery`: spot-loss ledger, data_cache/recovery_<account>.csv
+    cushion_pct: 1.5       # ledger must beat this % of spot value (1% TDS + fee) to close
+    min_paid_usd: 50       # recovery-init leaves out coins bought for less than this
 
 # Index base construction.
 index:

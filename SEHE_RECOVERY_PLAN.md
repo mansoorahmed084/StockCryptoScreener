@@ -62,6 +62,16 @@ left out.
 All 18 coins have an INR futures pair. The gap moves every day with the spot
 price; the live ledger (section 9, tool 1) recomputes it.
 
+**Update 2026-10-01 (live ledger):** with costs in INR at each trade day's
+USDT/INR rate, 17 coins are active and the ledger needs **≈ ₹1.91 lakh**. But
+most coins hold coins with **no buy in the CoinDCX trade history** (e.g. 334 of
+516 ARB): bought on another exchange or in the app's simple Buy screen. They
+are costed at today's value for now, so the real loss is higher (you see
+**over $7,000** across both accounts in the app). Put each coin's real cost
+(the app's "Invested") into `data_cache/recovery_sehe.csv`; the targets in
+section 5 then grow with it. Six coins have no buy at all and are skipped until
+their cost is set: JOE, KSM, MOVR, PROM, S, XTZ.
+
 **A coin's ledger** = futures profit taken on that pair (after fees and funding)
 + (spot value now − paid). It is closed when the ledger is ≥ 0 plus the cushion.
 
@@ -183,24 +193,26 @@ ARB is already above cost: you may sell it now and drop it from the list.
 - No trade in the 30 minutes before big US data (CPI, FOMC, NFP).
 - Funding rate above 0.1% per 8h against us → skip or shorten the hold.
 
-## 9. Tools to build (in this order)
+## 9. Tools (built 2026-10-01; details in PRODUCT.md, Trade page)
 
 1. **Recovery ledger**: `trade recovery --account sehe` — per coin: paid, spot
-   value now, futures profit on that pair, ledger, cushion, status. Also on the
-   Trade page.
-2. **Per-account limits**: `trading.limits` is shared today (₹500 risk, ₹5,000
-   margin, ₹1,500 daily loss — too small for this plan). Let Sehe have its own:
-   risk ₹3,000, margin ₹20,000, daily loss ₹6,000.
-3. **Adds to a winner**: today a second order on a coin we already hold is
-   refused. Allow an add when the first trade's stop is at breakeven.
-4. **Spot balances** on the Trade page, for each account.
+   value now, futures P&L on that pair, ledger, what is still to go, and a
+   BREAKEVEN flag. Costs live in `data_cache/recovery_sehe.csv`.
+2. **Per-account limits**: `trading.accounts.sehe.limits` — risk ₹3,000,
+   margin ₹20,000, leverage 10x (above 5x still needs `--override`),
+   3 positions, daily loss ₹6,000. Main keeps its own limits.
+3. **Adds to a winner**: `trade add COIN --risk R --account sehe` — only once
+   the stop is at or past the average price; max 2 adds; the stop is re-sent
+   on the whole position.
+4. **Spot coins** on the Trade page, for each account (the ledger, once started).
 
 ## 10. Before the first trade
 
 - [ ] CA confirms the tax case (section 2).
 - [ ] ₹1,00,000 moved into the Sehe **INR futures** wallet (it has none yet).
 - [ ] Sehe API key bound to the trading machine's IP.
-- [ ] Tools 1 and 2 built and tested.
+- [x] Tools 1–4 built and tested.
+- [ ] Real costs typed into `data_cache/recovery_sehe.csv` for coins bought elsewhere.
 - [ ] One `trade preview --account sehe` checked end to end.
 
 ## Account name

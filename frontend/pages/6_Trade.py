@@ -78,7 +78,9 @@ def header(m: TradeManager) -> None:
     st.caption(f"Your limits: risk ≤ Rs {lim.max_risk_inr:,.0f} a trade · margin ≤ "
                f"Rs {lim.max_margin_inr:,.0f} · leverage ≤ {lim.max_leverage}x · "
                f"{lim.max_open_positions} positions · stop after Rs "
-               f"{lim.max_daily_loss_inr:,.0f} lost in a day (`trading.limits`).")
+               f"{lim.max_daily_loss_inr:,.0f} lost in a day (`trading.limits`"
+               + ("" if m.account == MAIN else f", `trading.accounts.{m.account}.limits`")
+               + ").")
 
 
 def new_trade(m: TradeManager) -> None:
@@ -332,6 +334,83 @@ def setups(m: TradeManager) -> None:
             hide_index=True, width="stretch")
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def spot_rows(account: str) -> list[dict]:
+    from backend.trading import recovery
+
+    c = manager(account).client
+    ticker = recovery.spot_ticker(c)
+    out = []
+    for name, qty in recovery.spot_balances(c).items():
+        p = recovery.inr_price(name, ticker)
+        out.append({"Coin": name, "Qty": qty, "Value (Rs)": round(qty * p) if p else None})
+    return sorted(out, key=lambda r: -(r["Value (Rs)"] or 0))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def ledger_lines(account: str, path: str, mtime: float) -> list:
+    from backend.trading import recovery
+
+    rc = load_config().trading.get("recovery") or {}
+    return recovery.ledger(manager(account).client, recovery.load(Path(path)),
+                           float(rc.get("cushion_pct", 1.5)))
+
+
+def spot_and_recovery(m: TradeManager) -> None:
+    """Spot coins of the account and, once started, the spot-loss recovery ledger."""
+    from backend.trading import recovery
+
+    st.subheader("Spot coins and loss recovery")
+    if not m.client.has_keys:
+        st.caption("Needs API keys.")
+        return
+    t = load_config().trading
+    path = recovery.ledger_path(str(Path(t.get("db", "data_cache/trading.db")).parent),
+                                m.account)
+    if path.exists():
+        try:
+            lines = ledger_lines(m.account, str(path), path.stat().st_mtime)
+        except Exception as exc:
+            st.error(f"Could not build the ledger: {exc}")
+            return
+        active = sorted((x for x in lines if x.status == recovery.ACTIVE),
+                        key=lambda x: x.to_go_inr)
+        need = sum(x.to_go_inr for x in active)
+        ready = [x.coin for x in active if x.ready]
+        a, b, c = st.columns(3)
+        a.metric("Spot loss (active coins)", f"Rs {-sum(x.spot_pnl_inr for x in active):,.0f}")
+        b.metric("Futures P&L on them", f"Rs {sum(x.futures_closed_inr + x.futures_open_inr
+                                                    for x in active):,.0f}")
+        c.metric("Still to win back", f"Rs {need:,.0f}")
+        if ready:
+            st.success(f"At breakeven: **{', '.join(ready)}** — close the futures trade and "
+                       "sell the spot coin.")
+        st.dataframe(pd.DataFrame([{
+            "Coin": x.coin, "Paid": round(x.paid_inr), "Spot now": round(x.spot_now_inr),
+            "Spot P&L": round(x.spot_pnl_inr),
+            "Futures closed": round(x.futures_closed_inr),
+            "Futures open": round(x.futures_open_inr), "Ledger": round(x.total_inr),
+            "To go": round(x.to_go_inr),
+            "State": "BREAKEVEN" if x.ready else "" if x.has_futures else "no futures pair",
+            "Note": x.note} for x in active]), hide_index=True, width="stretch")
+        rest = [f"{x.coin} ({x.status})" for x in lines if x.status != recovery.ACTIVE]
+        st.caption(f"Rs. Ledger = spot P&L + futures P&L on that coin since its start day; "
+                   f"breakeven once it beats the cushion (TDS + fee on the spot sell). "
+                   f"Edit `{path}` to set costs or mark a coin done."
+                   + (f" Not counted: {', '.join(rest)}." if rest else ""))
+        return
+    try:
+        rows = spot_rows(m.account)
+    except Exception as exc:
+        st.error(f"Could not read spot balances: {exc}")
+        return
+    big = [r for r in rows if (r["Value (Rs)"] or 0) >= 100]
+    st.caption(f"{len(rows)} coins held, {len(big)} worth Rs 100 or more.")
+    st.dataframe(pd.DataFrame(big), hide_index=True, width="stretch")
+    st.caption("Start a recovery ledger from the terminal (reads the whole spot history): "
+               f"`python -m backend.cli trade recovery-init --account {m.account}`")
+
+
 def main() -> None:
     m = manager(pick_account())
     header(m)
@@ -344,6 +423,8 @@ def main() -> None:
     st.divider()
     positions(m)
     orders(m)
+    st.divider()
+    spot_and_recovery(m)
     panic(m)
     log(m)
 

@@ -69,7 +69,8 @@ class TradeStore:
                               ("best_price", "REAL"),       # best price since entry
                               ("trail", "INTEGER DEFAULT 1"),
                               ("trail_pct", "REAL"),        # set: trail this % behind best
-                              ("trail_candle", "TEXT")):    # set: stop under last closed candle
+                              ("trail_candle", "TEXT"),     # set: stop under last closed candle
+                              ("adds", "INTEGER DEFAULT 0")):  # adds made to a winning trade
                 if col not in have:
                     db.execute(f"ALTER TABLE trades ADD COLUMN {col} {kind}")
 

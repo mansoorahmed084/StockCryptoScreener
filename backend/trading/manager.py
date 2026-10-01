@@ -33,6 +33,7 @@ LIVE, DRY_RUN = "live", "dry_run"
 HALT_FLAG = "halted"
 SL_TYPES = ("stop_market", "stop_limit")
 TP_TYPES = ("take_profit_market", "take_profit_limit")
+MAX_ADDS = 2            # adds to one winning trade
 
 
 class TradeError(Exception):
@@ -55,6 +56,12 @@ def account_db(path: str, account: str) -> str:
         return path
     p = Path(path)
     return str(p.with_name(f"{p.stem}_{account}{p.suffix}"))
+
+
+def account_limits(trading: dict, account: str = MAIN) -> risk.Limits:
+    """``trading.limits``, with any ``trading.accounts.<name>.limits`` laid over it."""
+    own = ((trading.get("accounts") or {}).get(account) or {}).get("limits") or {}
+    return risk.Limits.from_config({**(trading.get("limits") or {}), **own})
 
 
 def check_trail(trail_pct: float, trail_candle: str | None) -> None:
@@ -99,7 +106,7 @@ class TradeManager:
         t = config.trading
         return cls(FuturesClient.from_env(account),
                    TradeStore(account_db(t.get("db", "data_cache/trading.db"), account)),
-                   risk.Limits.from_config(t.get("limits")),
+                   account_limits(t, account),
                    mode=DRY_RUN if force_dry_run else str(t.get("mode", DRY_RUN)),
                    notify=notifier_from_env().send,
                    fill_timeout_s=float(t.get("fill_timeout_s", 20)),
@@ -277,6 +284,88 @@ class TradeManager:
             else:
                 self._protect(trade_id, pos, plan.stop_loss, plan.take_profit)
         return plan, trade_id
+
+    # -- add to a winner ---------------------------------------------------------------
+    def preview_add(self, pair: str, *, risk_inr: float = 0.0, margin_inr: float = 0.0,
+                    override: bool = False) -> tuple[risk.Plan, dict, dict]:
+        """Plan an add to an open trade of this tool. Allowed only once its stop is at
+        or past the position's average price, so the old part can no longer lose; the
+        add is sized and checked like a new trade, at the same stop and target."""
+        pair = risk.to_pair(pair)
+        trade = self.store.latest_for_pair(pair, (OPEN,))
+        if trade is None:
+            raise TradeError(f"no open {pair} trade opened by this tool")
+        if (trade["adds"] or 0) >= MAX_ADDS:
+            raise TradeError(f"{pair} already has {MAX_ADDS} adds")
+        pos = self.position(pair)
+        if pos is None:
+            raise TradeError(f"no open {pair} position")
+        side = position_side(pos)
+        avg, sl = _f(pos.get("avg_price")), _f(pos.get("stop_loss_trigger"))
+        if not sl:
+            raise TradeError(f"{pair} has no stop loss on the exchange")
+        if side == risk.LONG and sl < avg or side == risk.SHORT and sl > avg:
+            raise TradeError(f"the stop ({sl:g}) is not at breakeven yet (average {avg:g}); "
+                             "add only once the trade cannot lose")
+        req = risk.TradeRequest(pair=pair, side=side, stop_loss=sl, risk_inr=risk_inr,
+                                leverage=int(_f(pos.get("leverage"))) or 1,
+                                take_profit=_f(pos.get("take_profit_trigger")) or None,
+                                margin_inr=margin_inr, override=override)
+        inst = self.instrument(pair)
+        rate, _ = self.rate()
+        held = self.positions()
+        plan = risk.build_plan(
+            req, inst, last_price=self.last_price(pair), rate=rate, limits=self.limits,
+            open_positions=len(held) - 1, loss_today_inr=self.loss_today_inr(),
+            free_inr=self.free_inr())
+        if self.halted:
+            plan.errors.append("trading is halted (panic); run `trade resume` first")
+        return plan, trade, pos
+
+    def add(self, pair: str, confirm: str, *, risk_inr: float = 0.0, margin_inr: float = 0.0,
+            override: bool = False) -> risk.Plan:
+        """Add to a winning trade at market, then put the stop (and target) back on the
+        whole, bigger position."""
+        plan, trade, pos = self.preview_add(pair, risk_inr=risk_inr, margin_inr=margin_inr,
+                                            override=override)
+        pair = plan.request.pair
+        if confirm.strip().upper() != pair:
+            raise TradeError(f"not confirmed: type {pair} to add to this trade")
+        if not plan.ok:
+            raise TradeError("; ".join(plan.errors))
+        before = abs(_f(pos.get("active_pos")))
+        order = {"side": plan.order_side, "pair": pair, "total_quantity": plan.qty,
+                 "leverage": plan.request.leverage, "order_type": "market_order",
+                 "notification": "email_notification"}
+        try:
+            self._write("create_order", self.client.create_order, order, trade_id=trade["id"])
+        except UnknownOutcome:
+            pass                                 # re-read below; never sent twice
+        except CoinDcxError as exc:
+            raise TradeError(f"CoinDCX refused the add: {exc.message}") from exc
+        if not self.live:
+            return plan
+        deadline = time.monotonic() + self.fill_timeout_s
+        while True:
+            now = self.position(pair)
+            if now is None or abs(_f(now.get("active_pos"))) > before + 1e-12:
+                break
+            if time.monotonic() >= deadline:
+                self.notify(f"{pair}: add sent but no fill seen after {self.fill_timeout_s:.0f}s;"
+                            " the stop stays as it was. Check `trade status`.")
+                return plan
+            self._sleep(self.poll_s)
+        if now is None:
+            return plan
+        n = (trade["adds"] or 0) + 1
+        self.store.update_trade(trade["id"], adds=n, qty=abs(_f(now.get("active_pos"))),
+                                note=f"{trade['note'] or ''}; add {n}: +{plan.qty:g} @ "
+                                     f"{plan.entry:g}".lstrip("; "))
+        # Put the stop and target on the whole position again.
+        self.set_tpsl(pair, stop_loss=plan.stop_loss, take_profit=plan.take_profit)
+        self.notify(f"{pair}: added {plan.qty:g} (add {n}); stop {plan.stop_loss:g} "
+                    "now covers the whole position")
+        return plan
 
     def _find_entry(self, pair: str) -> dict | None:
         pos = self.position(pair)
