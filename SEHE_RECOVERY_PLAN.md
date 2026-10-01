@@ -1,6 +1,7 @@
 # Sehe account — spot loss recovery plan
 
-Written 2026-10-01. Deadline: 2027-03-31 (end of the financial year).
+Written 2026-10-01. Review point: 2027-03-31 (end of the financial year);
+working target 12 months (see "Decision 2026-10-01" in section 4).
 
 ## 1. The goal
 
@@ -13,7 +14,8 @@ spot holding of that coin. Then that coin is done.
 - Spot is sold **once per coin**, at the end, when its ledger reaches breakeven.
 - We trade **2–3 coins at a time**: the ones with the best setup now, not the
   ones with the biggest loss.
-- Starting capital: **₹1,00,000** in the Sehe INR futures wallet.
+- Capital: **≈ ₹3.7 lakh** in the Sehe INR futures wallet, in two parts
+  (₹1 lakh now, ₹2.7 lakh after the first 20 trades pass).
 
 ## 2. Read this first: tax
 
@@ -150,45 +152,55 @@ about **39% a month** compounded. That is not a realistic target. So:
 | Full recovery, more capital | ≈ ₹9.5 lakh | ≈ 10% | hard |
 | **Partial recovery, ₹1 lakh** | ₹1 lakh | ≈ 20% | close the small coins one by one |
 
-The plan now runs as **partial recovery**: each coin is closed on its own as
-soon as its ledger reaches breakeven, smallest gaps first among coins with a
-good setup. Every coin closed by 2027-03-31 is a real result even if the whole
-gap is not won back. Capital may be added at the 2-month milestone if the
-results earn it. (If the 30% tax applies, every target is ~1.43x higher.)
+### Decision 2026-10-01: full recovery, more capital, more time
+
+The owner chose **full recovery** with **≈ ₹3.7 lakh** of futures capital, and
+the deadline may move past 2027-03-31. Coins are still closed one by one as
+each reaches breakeven, smallest gaps with a good setup first. 2027-03-31 is
+now a **review point**: coins closed before it fall in FY 2026-27, the rest in
+FY 2027-28. (If the 30% tax applies, every target is ~1.43x higher.)
+
+₹3.7 lakh must grow to cover ₹7.36 lakh, i.e. about **3x the capital**:
+
+| Time | Return needed per month (compounded) |
+|---|---|
+| 6 months (2027-03-31) | ≈ 20% |
+| 9 months (2027-06-30) | ≈ 13% |
+| 12 months (2027-09-30) | ≈ 10% |
+
+Working target: **12 months at ~10% a month**, faster when the market gives it.
+
+**Capital in two parts (recommended):**
+1. **₹1 lakh now.** Limits stay as set for ₹1 lakh (section 9, tool 2).
+2. **₹2.7 lakh after the first 20 trades pass** the milestone below. Then the
+   `trading.accounts.sehe.limits` numbers are raised to the ₹3.7 lakh column.
+
+This way a bad start costs part of ₹1 lakh, not part of ₹3.7 lakh.
 
 ## 5. Size and risk
 
-Capital ₹1,00,000. Big moves are real, so A+ setups get real size; the hard
-limits below stop one bad week from ending the plan.
+Big moves are real, so A+ setups get real size; the hard limits below stop one
+bad week from ending the plan. All sizes are % of the wallet, so they grow with
+profit and shrink with loss.
 
-| Item | Rule |
-|---|---|
-| Risk per A+ trade | 3% of the wallet (₹3,000 at start) |
-| Risk per normal trade | 1.5% (₹1,500) |
-| Leverage | up to 5x; up to 10x only on A+ with `--override`, stop ≤ 5% |
-| Open at the same time | 2–3 coins, never more than 3 positions |
-| Adding to a winner | allowed once the stop is at breakeven; max 2 adds, each half the first size |
-| Daily loss stop | −6% of the wallet → no new trades that day |
-| Weekly loss stop | −15% → stop for the week and review |
-| Hard stop for the plan | wallet −35% from its high (₹65,000 from ₹1 lakh) → stop everything and review |
+| Item | Rule | at ₹1 lakh | at ₹3.7 lakh |
+|---|---|---|---|
+| Risk per A+ trade | 3% of the wallet | ₹3,000 | ₹11,100 |
+| Risk per normal trade | 1.5% | ₹1,500 | ₹5,550 |
+| Leverage | up to 5x; up to 10x only on A+ with `--override`, stop ≤ 5% | | |
+| Open at the same time | 2–3 coins, never more than 3 positions | | |
+| Adding to a winner | stop at breakeven first; max 2 adds, each half the first size | | |
+| Daily loss stop | −6% of the wallet → no new trades that day | ₹6,000 | ₹22,200 |
+| Weekly loss stop | −15% → stop for the week and review | ₹15,000 | ₹55,500 |
+| Hard stop for the plan | wallet −35% from its high → stop everything and review | ₹65,000 left | ₹2.4 lakh left |
 
-Risk scales with the wallet: profits grow the size, losses shrink it.
-
-### What ₹1,00,000 has to do
-
-| Target | Return needed in 6 months | Per month (compounded) |
-|---|---|---|
-| ₹1.93 lakh (loss can be set off) | +193% | ≈ 20% |
-| ₹2.76 lakh (30% tax on profit) | +276% | ≈ 25% |
-
-This is a very high target. With 3% risk on A+ trades it is possible only if
-the average trade makes more than +0.5R over many trades. We check the real
-number at each milestone:
+With 3% risk on A+ trades, ~10% a month needs the average trade to make about
++0.25R over ~20 trades a month. We check the real number at each milestone:
 
 | Milestone | Pass | Then |
 |---|---|---|
-| After 20 trades | expectancy ≥ +0.3R, wallet not below ₹85,000 | keep size |
-| After 40 trades / ~2 months | wallet ≥ ₹1.4 lakh | you may add capital |
+| After 20 trades | expectancy ≥ +0.25R, wallet not below ₹85,000 | add the ₹2.7 lakh; raise the limits |
+| Every month | on pace for ~10% a month (ledger "to go" falling) | keep going |
 | Any time | hard stop hit | stop, review, no new money until the review is done |
 
 ## 6. Closing a coin at breakeven
@@ -240,7 +252,8 @@ ARB is already above cost: you may sell it now and drop it from the list.
 ## 10. Before the first trade
 
 - [ ] CA confirms the tax case (section 2).
-- [ ] ₹1,00,000 moved into the Sehe **INR futures** wallet (it has none yet).
+- [ ] ₹1,00,000 moved into the Sehe **INR futures** wallet (it has none yet);
+      ₹2.7 lakh more after the 20-trade milestone.
 - [ ] Sehe API key bound to the trading machine's IP.
 - [x] Tools 1–4 built and tested.
 - [ ] Real costs typed into `data_cache/recovery_sehe.csv` for coins bought elsewhere.
