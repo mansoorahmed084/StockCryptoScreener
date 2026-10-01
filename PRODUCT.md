@@ -710,6 +710,7 @@ Hugging Face (US servers, which Binance blocks; no custom domain).
 | `b7f807e` | Candle trail waits 60 s for a closed candle to settle and skips moves under 0.1%; trail-set fixes the trade's note. AR's 15m trail took it out at 4.843 for +Rs 306 net |
 | `c5effd9` | An expired ready setup is offered again by the next scan that still finds it (was hidden for up to 6 hours) |
 | `b2fc950` | Setups suggested only at 2R or more (CoinDCX price, fees in); `trade take --margin --override` for bigger setup trades; y/n confirmations |
+| `d206fd7` | More than one CoinDCX account: named keys in `.env`, separate records per account, `--account`, one watcher for all, account picker on the Trade page |
 | `aa946a6` | Best time to trade (IST) strip on the screener and Trade page: green = high-liquidity hour, white = no trade |
 
 Tests: 89 at the start of the day, 129 at the end, all passing.
