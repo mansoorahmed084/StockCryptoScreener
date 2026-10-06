@@ -58,6 +58,10 @@ def test_candles_before_the_alert_was_set_are_ignored():
     a = _alert(kind="price", condition="above", level=105, created_ms=T0 + MIN + 5000)
     assert pa.evaluate(a, c, NOW) is None
     assert pa.already_met(_alert(kind="price", condition="above", level=105), 106)
+    # A close alert waits for its candle to close, so it may be set while
+    # price is already past the level.
+    assert not pa.already_met(_alert(kind="price", condition="close_above", level=105,
+                                     timeframe="4h"), 106)
 
 
 def test_close_above_waits_for_a_closed_candle_of_its_timeframe():
@@ -109,6 +113,13 @@ def test_check_all_fetches_each_timeframe_and_old_dbs_upgrade(tmp_path):
     fired = pa.check_all(store, fetch, now_ms=T0 + 30 * MIN)
     assert sorted(asked) == ["15m", "1m"]
     assert [a.timeframe for a in fired] == ["15m"]
+    # A close alert is stamped when its candle closed (T0 + 15 min), not when
+    # it opened, and the message says so.
+    assert fired[0].triggered_ms == T0 + 15 * MIN
+    assert store.fired_since(T0 + 15 * MIN)[0].id == fired[0].id
+    text = pa.message(fired[0])
+    assert "the 15m candle closed at 106" in text and "Sep 22 10:15 UTC" in text
+    assert "local)" in text
 
 
 def test_store_check_all_fires_once_and_rearms(tmp_path):

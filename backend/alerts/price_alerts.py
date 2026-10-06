@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -165,12 +166,18 @@ def evaluate(alert: Alert, candles: pd.DataFrame,
 
 
 def already_met(alert: Alert, price: float) -> bool:
-    """True if the alert would fire at once at ``price`` (warn when setting it)."""
+    """True if the alert would fire at once at ``price`` (warn when setting it).
+
+    A close alert never fires at once: it waits for its candle to close, so
+    setting one while price is already past the level (to confirm a break at
+    the close) is allowed."""
+    if alert.condition in CLOSES:
+        return False
     target = alert.target_now()
     if alert.kind == ZONE:
         return alert.low <= price <= alert.high
-    return (alert.condition in ("above", "close_above", "break_up") and price >= target) or \
-           (alert.condition in ("below", "close_below", "break_down") and price <= target)
+    return (alert.condition == "above" and price >= target) or \
+           (alert.condition == "below" and price <= target)
 
 
 # -- storage --------------------------------------------------------------------
@@ -294,7 +301,10 @@ def check_all(store: AlertStore, fetch: Callable[[str, str, int], pd.DataFrame],
                 store.mark_checked(a.id, now_ms)
                 continue
             ts, price = hit
-            when = ts.value // 1_000_000
+            # A close alert is met when its candle closes, not when it opens:
+            # a 4h close shown at the open time looks four hours late, and
+            # would be too old for the dashboard's "recent hits".
+            when = ts.value // 1_000_000 + (a.bar_ms if a.condition in CLOSES else 0)
             if store.claim(a.id, when, price):
                 a.status, a.triggered_ms, a.trigger_price = TRIGGERED, when, price
                 fired.append(a)
@@ -307,6 +317,13 @@ def check_all(store: AlertStore, fetch: Callable[[str, str, int], pd.DataFrame],
 
 
 def message(a: Alert) -> str:
-    when = pd.Timestamp(a.triggered_ms, unit="ms", tz="UTC").strftime("%b %d %H:%M UTC") \
-        if a.triggered_ms else ""
-    return f"🔔 {a.describe()} — hit {_fmt(a.trigger_price)} at {when}"
+    """One line for the pop-up / Telegram: what hit, at what price, and when
+    (UTC and this machine's local time)."""
+    when = ""
+    if a.triggered_ms:
+        utc = pd.Timestamp(a.triggered_ms, unit="ms", tz="UTC")
+        local = datetime.fromtimestamp(a.triggered_ms / 1000).astimezone()
+        when = f" at {utc:%b %d %H:%M} UTC ({local:%H:%M} local)"
+    what = (f"the {a.timeframe} candle closed at {_fmt(a.trigger_price)}"
+            if a.condition in CLOSES else f"hit {_fmt(a.trigger_price)}")
+    return f"🔔 {a.describe()} — {what}{when}"
