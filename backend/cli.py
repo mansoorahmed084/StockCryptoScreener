@@ -224,6 +224,38 @@ def cmd_setups(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scalp(args: argparse.Namespace) -> int:
+    """Exhaustion scalps: big movers whose momentum is fading (see SCALP.md)."""
+    from backend.screener import scalp as sc
+    from backend.service import ScreenerService
+
+    svc = ScreenerService(load_config(args.config), refresh=False)
+    fut = svc.futures()
+    coins = svc.liquidation_coins(args.top)
+    try:
+        funding = fut.funding_rates()
+    except Exception:
+        funding = {}
+
+    def oi_24h(sym: str) -> float:
+        oi = fut.open_interest(sym, "1h", 25)["oi_value"]
+        return (float(oi.iloc[-1]) / float(oi.iloc[0]) - 1) * 100
+
+    p = sc.Params(min_move_pct=args.min_move, min_score=args.min_score)
+    found = sc.scan(fut.klines, coins, tf=args.tf, funding=funding, open_interest=oi_24h, p=p)
+    print(f"{len(coins)} coins on {args.tf}: {len(found)} exhaustion scalp(s), "
+          f"score >= {args.min_score} of {len(sc.CHECKS)}\n")
+    if not found:
+        return 0
+    rows = [{"coin": s.coin, "side": s.side, "status": s.status, "score": s.score,
+             "price": s.price, "move24h%": s.move_pct, "vwapATR": s.ext_atr,
+             "trigger": s.trigger, "stop": s.stop, "T1": s.t1, "T2": s.t2, "rr1": s.rr1,
+             "rr2": s.rr2, "rsi": s.rsi, "fund%": s.funding_pct, "oi24h%": s.oi_24h_pct,
+             "checks": " ".join(s.checks)} for s in found]
+    print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.5g}"))
+    return 0
+
+
 def cmd_backtest(args: argparse.Namespace) -> int:
     from backend.service import ScreenerService
     from backend.signals.backtest import backtest_signal
@@ -694,6 +726,13 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--skip-days", type=int, default=3,
                    help="skip a coin/timeframe/pattern journaled this many days back")
     u.set_defaults(func=cmd_setups)
+
+    sp = sub.add_parser("scalp", help="exhaustion scalps: big movers with fading momentum")
+    sp.add_argument("--top", type=int, default=100, help="coins by market cap")
+    sp.add_argument("--tf", default="15m", choices=["5m", "15m", "1h"])
+    sp.add_argument("--min-move", type=float, default=8.0, help="24h move in %%")
+    sp.add_argument("--min-score", type=int, default=3, help="confluence points needed")
+    sp.set_defaults(func=cmd_scalp)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)

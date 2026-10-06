@@ -115,6 +115,16 @@ daily supply, and reward at least 2× risk.
 .venv/Scripts/python.exe -m backend.cli setups --journal  # add them to trades.csv
 ```
 
+An **exhaustion scalp** scanner looks for quick counter-moves. It finds coins
+that moved a lot (up or down) whose momentum is fading while price still sits
+near the extreme. It scores RSI, WaveTrend and MACD divergences, volume and CVD
+fade, overbought or oversold readings, and funding. Then it gives each setup a
+trigger, a stop and targets. See [SCALP.md](SCALP.md).
+
+```bash
+.venv/Scripts/python.exe -m backend.cli scalp --top 300 --tf 15m
+```
+
 Run the API (Phase 4):
 
 ```bash
