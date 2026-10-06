@@ -90,6 +90,22 @@ A setup needs **3 points or more** (`--min-score`) to show.
 6. **Mind the time.** On 15m candles, a scalp that has not reached T1 within about
    2 hours is losing its reason to exist.
 
+## Scalp journal
+
+Every call can be tracked as a paper trade in [journal/SCALP_JOURNAL.md](journal/SCALP_JOURNAL.md),
+scored in R (1R is the risk to the stop). It follows the plan above: wait for
+the trigger, take half at T1, move the stop to break-even, run the rest to T2,
+and use the time stop.
+
+```bash
+.venv/Scripts/python.exe -m backend.cli scalp --top 300 --journal   # add a scan's calls
+.venv/Scripts/python.exe -m backend.cli scalp-journal               # replay all calls, refresh the tables
+```
+
+The calls are rows in `journal/scalps.csv`. The same coin and side is skipped
+if it was called in the last 4 hours (`--skip-hours`). The replay code is in
+`backend/scalp_journal.py`.
+
 ## Limits
 
 - Divergences can repeat: a third higher high with a third weaker RSI happens

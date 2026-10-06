@@ -253,6 +253,43 @@ def cmd_scalp(args: argparse.Namespace) -> int:
              "rr2": s.rr2, "rsi": s.rsi, "fund%": s.funding_pct, "oi24h%": s.oi_24h_pct,
              "checks": " ".join(s.checks)} for s in found]
     print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.5g}"))
+    if args.journal:
+        from pathlib import Path
+
+        from backend import scalp_journal as sj
+
+        path = Path(args.csv)
+        old = pd.read_csv(path) if path.exists() and path.stat().st_size else \
+            pd.DataFrame(columns=sj.COLUMNS)
+        now = pd.Timestamp.now(tz="UTC").floor("min")
+        recent = old[pd.to_datetime(old["time_utc"], utc=True)
+                     >= now - pd.Timedelta(hours=args.skip_hours)] if len(old) else old
+        taken = set(zip(recent["coin"], recent["side"])) if len(recent) else set()
+        new = [s for s in found if (s.coin, s.side) not in taken]
+        rows = sj.rows_from_setups(new, first_id=int(old["id"].max()) + 1 if len(old) else 1,
+                                   when_utc=now.strftime("%Y-%m-%d %H:%M"), tf=args.tf)
+        if rows:
+            pd.concat([old, pd.DataFrame(rows)], ignore_index=True)[sj.COLUMNS] \
+                .to_csv(path, index=False, lineterminator="\n")
+        print(f"\njournaled {len(rows)} call(s) in {path}"
+              + (f" ({len(found) - len(rows)} already there)" if len(found) > len(rows) else ""))
+    return 0
+
+
+def cmd_scalp_journal(args: argparse.Namespace) -> int:
+    """Replay the scalp calls in journal/scalps.csv and refresh the journal."""
+    import time as _time
+
+    from backend import scalp_journal as sj
+    from backend.service import ScreenerService
+
+    fut = ScreenerService(load_config(args.config), refresh=False).futures()
+    calls = sj.load(args.csv)
+    now = int(_time.time() * 1000)
+    blocks = sj.render(calls, sj.run(calls, fut.klines, now), now)
+    sj.write_markdown(args.md, blocks)
+    print(blocks["SUMMARY"])
+    print(f"\nupdated {args.md}")
     return 0
 
 
@@ -732,7 +769,16 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--tf", default="15m", choices=["5m", "15m", "1h"])
     sp.add_argument("--min-move", type=float, default=8.0, help="24h move in %%")
     sp.add_argument("--min-score", type=int, default=3, help="confluence points needed")
+    sp.add_argument("--journal", action="store_true", help="add the calls to --csv")
+    sp.add_argument("--csv", default="journal/scalps.csv")
+    sp.add_argument("--skip-hours", type=float, default=4.0,
+                    help="skip a coin/side journaled this many hours back")
     sp.set_defaults(func=cmd_scalp)
+
+    sj = sub.add_parser("scalp-journal", help="replay the scalp calls and refresh the journal")
+    sj.add_argument("--csv", default="journal/scalps.csv")
+    sj.add_argument("--md", default="journal/SCALP_JOURNAL.md")
+    sj.set_defaults(func=cmd_scalp_journal)
 
     b = sub.add_parser("backtest", help="forward-return stats for a signal")
     b.add_argument("--coin", required=True)
