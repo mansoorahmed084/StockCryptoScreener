@@ -14,6 +14,7 @@ Binance spot data. `dry_run` is on — no real money.
 ```bash
 py -3.12 -m venv .venv
 .venv/Scripts/python.exe -m pip install freqtrade
+.venv/Scripts/python.exe -m pip install numba   # research/smc.py only
 cp config.example.json config.json
 ```
 

@@ -1,5 +1,11 @@
 # Handover — crypto strategy research, as of 2026-09-09
 
+**2026-10-30 update — SMC.** Smart Money Concepts were tested end to end
+([SMC_RESEARCH.md](SMC_RESEARCH.md)). One setup survived 203 never-used coins:
+[STRATEGY_SMC_SweepBreak.md](STRATEGY_SMC_SweepBreak.md) — daily bias, 4h
+break after a liquidity sweep, long and short, +0.245R a trade on the new
+coins, 22.6% CAGR at 15% DD on all 279 at 0.5% risk. Not yet in freqtrade.
+
 Read this first in a fresh session. It is the state of play, what is proven,
 what is dead, and what to do next.
 
