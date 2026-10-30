@@ -22,6 +22,7 @@ Rules:
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -58,10 +59,14 @@ WHY_TEXT = {"choch": "4h CHoCH", "stop": "stop", "target": "6R target",
 
 # ------------------------------------------------------------------ log
 class _Tee:
+    # a failed Telegram call logs its URL, and the URL holds the bot token
+    TOKEN = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
     def __init__(self, *streams):
         self.streams = [s for s in streams if s is not None]
 
     def write(self, x):
+        x = self.TOKEN.sub("bot<redacted>", x)
         for s in self.streams:
             s.write(x)
             s.flush()

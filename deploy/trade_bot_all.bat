@@ -1,14 +1,16 @@
 @echo off
-rem Trade bot for EVERY account (main and sehe): handles the Telegram Place and
-rem Confirm taps on SMC calls and Sehe setups, watches trades, trails stops
-rem that asked for a trail, and scans the Sehe recovery-ledger coins.
+rem Trade bot for EVERY account (main and sehe), in this window: handles the
+rem Telegram Place and Confirm taps on SMC calls and Sehe setups, watches
+rem trades, trails stops that asked for a trail, and scans the Sehe ledger.
 rem It places a trade only after you tap Place and then Confirm in Telegram.
-rem Run this INSTEAD of trade_bot_sehe.bat, never both: two bots on one
-rem Telegram bot fight over the taps.
+rem
+rem The log-in task (deploy\schedule-trade-bot.ps1) already runs this bot in
+rem the background. Both go through deploy\trade_bot_bg.py, which lets only
+rem one copy run, so this window just exits if the background one is on.
+rem Do not also run trade_bot_sehe.bat: it does not share that lock.
 title Trade bot (all accounts) - close this window to stop it
 cd /d "%~dp0.."
-:run
-.venv\Scripts\python.exe -m backend.cli trade bot
-echo The bot stopped. Restarting in 30 seconds (close this window to stop)...
-timeout /t 30 /nobreak >nul
-goto run
+.venv\Scripts\python.exe deploy\trade_bot_bg.py
+echo.
+echo Stopped. The log is data_cache\trade_bot.log
+pause
