@@ -30,29 +30,46 @@ class TelegramNotifier(Notifier):
         self._client = client or httpx.Client(timeout=timeout)
 
     def send(self, text: str) -> bool:
-        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-        try:
-            resp = self._client.post(url, json={
-                "chat_id": self.chat_id, "text": text,
-                "parse_mode": "Markdown", "disable_web_page_preview": True,
-            })
-            resp.raise_for_status()
+        """Markdown first (alerts use *bold*). If Telegram cannot parse it -- a
+        pair such as B-BNB_USDT has an underscore, which Markdown reads as the
+        start of italics -- the same text goes again as plain text."""
+        body = {"chat_id": self.chat_id, "text": text,
+                "parse_mode": "Markdown", "disable_web_page_preview": True}
+        status, desc, _ = self._post("sendMessage", body)
+        if status == 400 and "parse" in desc.lower():
+            body.pop("parse_mode")
+            status, desc, _ = self._post("sendMessage", body)
+        if status == 200:
             return True
-        except httpx.HTTPError as exc:
-            log.warning("Telegram send failed: %s", exc)
-            return False
+        log.warning("Telegram send failed: %s %s", status or "no answer", desc)
+        return False
 
+    def _post(self, method: str, body: dict,
+              timeout: float | None = None) -> tuple[int, str, dict]:
+        """(HTTP status, Telegram's description, the JSON). Status 0 = no answer.
+        Never raises, and never puts the URL in a message: it holds the token."""
+        url = f"https://api.telegram.org/bot{self.token}/{method}"
+        try:
+            resp = (self._client.post(url, json=body, timeout=timeout) if timeout
+                    else self._client.post(url, json=body))
+        except httpx.HTTPError as exc:
+            return 0, self._redact(f"{type(exc).__name__}: {exc}"), {}
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return resp.status_code, self._redact(str(data.get("description", ""))), data
+
+    def _redact(self, text: str) -> str:
+        return text.replace(self.token, "<token>") if self.token else text
 
     # -- buttons (the trade bot) -------------------------------------------------
     def _call(self, method: str, **body) -> dict | None:
-        try:
-            resp = self._client.post(f"https://api.telegram.org/bot{self.token}/{method}",
-                                     json=body, timeout=body.get("timeout", 0) + 15)
-            resp.raise_for_status()
-            return resp.json().get("result")
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("Telegram %s failed: %s", method, exc)
+        status, desc, data = self._post(method, body, timeout=body.get("timeout", 0) + 15)
+        if status != 200:
+            log.warning("Telegram %s failed: %s %s", method, status or "no answer", desc)
             return None
+        return data.get("result")
 
     @staticmethod
     def _keyboard(buttons: list[tuple[str, str]]) -> dict:
