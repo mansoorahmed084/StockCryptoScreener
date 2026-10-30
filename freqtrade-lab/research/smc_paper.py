@@ -35,6 +35,10 @@ import smc_oos  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 CSV = REPO / "journal" / "smc_paper.csv"
 MD = REPO / "journal" / "SMC_PAPER.md"
+# the main trade journal gets a short SMC section too (its own AUTO block);
+# its long-only replay cannot price shorts or a structure exit, so SMC calls
+# are kept out of trades.csv
+TRADE_MD = REPO / "journal" / "TRADE_JOURNAL.md"
 LOG = REPO / "freqtrade-lab" / "user_data" / "logs" / "smc_scan.log"
 
 CFG = smc_oos.FINALISTS["B_final"]
@@ -130,7 +134,8 @@ def _add(df: pd.DataFrame, live, t: dict, now: pd.Timestamp, late: bool) -> pd.D
 
 
 # ------------------------------------------------------------------ update
-def update(results: list, now: pd.Timestamp, scan_text: str) -> None:
+def update(results: list, now: pd.Timestamp, scan_text: str,
+           watching: list[dict] | None = None) -> None:
     import scan_smc   # here, not at the top: scan_smc imports this module
 
     df = load()
@@ -176,6 +181,7 @@ def update(results: list, now: pd.Timestamp, scan_text: str) -> None:
                 df.at[i, "exit_level"] = _f(o["choch_level"])
     save(df)
     write_md(df, scan_text, now)
+    write_trade_journal(df, now, watching)
 
 
 # ------------------------------------------------------------------ report
@@ -295,6 +301,57 @@ def write_md(df: pd.DataFrame, scan_text: str | None, now: pd.Timestamp) -> None
     if scan_text is not None:
         doc = _put(doc, "SCAN", "```\n" + scan_text + "\n```")
     MD.write_text(doc, encoding="utf-8")
+
+
+SECTION = """## SMC Sweep-Break calls (4h, long and short)
+
+Logged automatically every 4 hours by the SMC scan. These are kept out of
+trades.csv: that replay is long-only with a fixed stop and target, and these
+trades are mostly shorts that exit on the 4h structure. Full detail and the
+last scan: [SMC_PAPER.md](SMC_PAPER.md).
+
+<!-- AUTO:SMC -->
+<!-- /AUTO:SMC -->
+
+"""
+
+
+def write_trade_journal(df: pd.DataFrame, now: pd.Timestamp,
+                        watching: list[dict] | None) -> None:
+    """Rewrite the AUTO:SMC block in TRADE_JOURNAL.md (add the section once)."""
+    if not TRADE_MD.exists():
+        return
+    doc = TRADE_MD.read_text(encoding="utf-8")
+    if "<!-- AUTO:SMC -->" not in doc:
+        anchor = "## What works and what doesn't"
+        if anchor in doc:
+            doc = doc.replace(anchor, SECTION + anchor, 1)
+        else:
+            doc = doc.rstrip() + "\n\n" + SECTION
+    closed = df[df.status == "closed"]
+    on_time = closed[closed.late == "no"]
+    opened = df[df.status == "open"]
+    lines = [f"_Updated {(now + IST):%d %b %Y %H:%M} IST._", "",
+             f"- Calls: {len(df)} ({int((df.late == 'no').sum())} on time). "
+             f"Open: {len(opened)}. Closed on time: {_stats(on_time)}", ""]
+    rows = [{"#": r.id, "coin": r.coin, "side": r.side,
+             "entered": _ist(r.entry_utc), "entry": _d(r.entry),
+             "stop": _d(r.stop), "6R target": _d(r.target),
+             "status": (f"open, now {float(r.last_r):+.2f}R" if r.status == "open" and r.last_r
+                        else "open" if r.status == "open"
+                        else f"{WHY_TEXT.get(r.why, r.why)} {float(r.r):+.2f}R "
+                             f"({_ist(r.exit_utc)})"),
+             "late": r.late}
+            for r in df.iloc[::-1].head(25).itertuples()]
+    lines.append(_table(rows))
+    if len(df) > 25:
+        lines.append(f"\n_Last 25 of {len(df)}; all in SMC_PAPER.md._")
+    if watching:
+        lines += ["", "**Watching** (would trigger at the next 4h close):", ""]
+        lines += [f"- {w['coin']} {w['side'].lower()}: {w['trigger']} "
+                  f"(now {w['now']}, stop {w['stop']}, {w['stop %']}%)" for w in watching]
+    doc = _put(doc, "SMC", "\n".join(lines))
+    TRADE_MD.write_text(doc, encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ def main(days: int = 120, skip: float = 0.3) -> None:
     random.seed(11)
     tmp = Path(tempfile.mkdtemp())
     smc_paper.CSV, smc_paper.MD = tmp / "smc_paper.csv", tmp / "SMC_PAPER.md"
+    smc_paper.TRADE_MD = tmp / "TRADE_JOURNAL.md"   # absent: the real one is never touched
     scan_smc.scan = lambda **kw: ([], None)      # never reach the live API
     coins = [c for c in COINS if smc.have(c, "1h")]
     end = min(smc.bars(c, "4h", "1h").index[-1] for c in coins)

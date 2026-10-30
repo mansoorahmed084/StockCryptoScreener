@@ -1,6 +1,8 @@
 # Creates (or replaces) the Windows scheduled task that runs the SMC
 # Sweep-Break scan 5 minutes after every 4h candle close and logs each call
-# and exit to journal/smc_paper.csv and journal/SMC_PAPER.md.
+# and exit to journal/smc_paper.csv, journal/SMC_PAPER.md and an SMC
+# section of journal/TRADE_JOURNAL.md. Coins with $5M+ 24h volume; the
+# watch list (setups the next 4h close could trigger) goes in the journal too.
 #
 #   .\schedule-smc-scan.ps1           # create or update the task
 #   .\schedule-smc-scan.ps1 -Remove   # delete it
@@ -19,7 +21,7 @@ if ($Remove) {
 
 $lab = $PSScriptRoot
 $action = New-ScheduledTaskAction -Execute "$lab\.venv\Scripts\pythonw.exe" `
-    -Argument 'research\scan_smc.py --log' -WorkingDirectory $lab
+    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3' -WorkingDirectory $lab
 $firstUtc = [DateTime]::SpecifyKind([DateTime]::UtcNow.Date.AddMinutes(5), 'Utc')
 $trigger = New-ScheduledTaskTrigger -Once -At $firstUtc.ToLocalTime() `
     -RepetitionInterval (New-TimeSpan -Hours 4)

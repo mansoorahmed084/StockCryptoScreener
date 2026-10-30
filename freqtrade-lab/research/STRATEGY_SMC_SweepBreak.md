@@ -136,6 +136,12 @@ after each 4h close. Each run:
 * closes each logged trade when the backtest rules exit it, with the R
 * rebuilds [journal/SMC_PAPER.md](../../journal/SMC_PAPER.md): summary, open
   trades with the 4h close that would end each one, closed trades, last scan
+* rewrites the "SMC Sweep-Break calls" section of
+  [journal/TRADE_JOURNAL.md](../../journal/TRADE_JOURNAL.md) (its AUTO:SMC
+  block): the last 25 calls and the watch list. SMC calls stay out of
+  trades.csv, whose replay is long-only with a fixed stop and target
+* scans coins with $5M+ 24h volume (`--min-vol 5`) and adds the watch list
+  (`--watch 3`)
 * appends its output to `freqtrade-lab/user_data/logs/smc_scan.log`
 
 It runs only while you are logged in. If the PC slept through a run, the

@@ -255,7 +255,8 @@ def scan(min_vol: float = 10.0, dcx_only: bool = False,
         return [r for r in ex.map(one, uni) if r], now
 
 
-def watch_report(results: list, now: pd.Timestamp, near: float) -> str:
+def watch_report(results: list, now: pd.Timestamp, near: float) -> tuple[str, list]:
+    """The WATCH table as text, and its rows (for the journal)."""
     rows = []
     for live, vol, _ev in results:
         for t in watch(live, near):
@@ -282,7 +283,7 @@ def watch_report(results: list, now: pd.Timestamp, near: float) -> str:
            f"stop % and target move with it: {len(rows)}"]
     if rows:
         out.append(pd.DataFrame(rows).to_string(index=False))
-    return "\n".join(out)
+    return "\n".join(out), rows
 
 
 def report(results: list, now: pd.Timestamp) -> str:
@@ -364,10 +365,13 @@ def main() -> None:
         results, now = scan(a.min_vol, a.dcx_only, coins, a.workers)
         text = report(results, now)
         print(text)
+        watching = None
         if a.watch is not None:
-            print(watch_report(results, now, a.watch / 100))
+            wtext, watching = watch_report(results, now, a.watch / 100)
+            print(wtext)
+            text += "\n" + wtext
         if a.log:
-            smc_paper.update(results, now, text)
+            smc_paper.update(results, now, text, watching)
     except Exception:
         if not a.log:
             raise
