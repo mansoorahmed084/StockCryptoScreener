@@ -142,6 +142,11 @@ after each 4h close. Each run:
   trades.csv, whose replay is long-only with a fixed stop and target
 * scans coins with $5M+ 24h volume (`--min-vol 5`) and adds the watch list
   (`--watch 3`)
+* messages the trade bot on Telegram (`--telegram`): one "SMC NEW" message
+  per on-time call (entry, stop, 6R target, exit level, price at the scan)
+  and one "SMC CLOSED" message per finished paper trade (why, R, running
+  tally). Plain text, no buttons, no order path. A failed send is retried on
+  the next run; `--telegram-dry` prints the messages instead
 * appends its output to `freqtrade-lab/user_data/logs/smc_scan.log`
 
 It runs only while you are logged in. If the PC slept through a run, the

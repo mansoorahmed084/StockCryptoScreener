@@ -105,10 +105,14 @@ def evaluate(coin: str, ltf: pd.DataFrame, htf: pd.DataFrame,
     if len(ended):
         out["closed"] = dict(ended.iloc[-1])
 
-    tr2, _ = smc.run_frames(coin, CFG, ltf, htf, htf)
+    tr2, L2 = smc.run_frames(coin, CFG, ltf, htf, htf)
     fresh = tr2[tr2.sig == last_ts]
     if len(fresh):
-        out["new"] = dict(fresh.iloc[-1])
+        t = fresh.iloc[-1]
+        # the level a 4h CLOSE must cross to end the trade, as of the signal
+        # candle (index -2: the last row is the forming candle's open)
+        lvl = L2["lsl"][-2] if t.dir > 0 else L2["lsh"][-2]
+        out["new"] = dict(t, choch_level=float(lvl))
     return out
 
 
@@ -357,6 +361,11 @@ def main() -> None:
                     "would trigger, within PCT%% of price (default 3)")
     ap.add_argument("--log", action="store_true",
                     help="also update the paper journal (journal/smc_paper.csv)")
+    ap.add_argument("--telegram", action="store_true",
+                    help="with --log: message the trade bot on each NEW call "
+                         "and each closed paper trade (text only)")
+    ap.add_argument("--telegram-dry", action="store_true",
+                    help="with --log: print those messages instead of sending")
     a = ap.parse_args()
     if a.log:
         smc_paper.attach_log()      # scheduled runs have no console
@@ -371,7 +380,9 @@ def main() -> None:
             print(wtext)
             text += "\n" + wtext
         if a.log:
-            smc_paper.update(results, now, text, watching)
+            tg = (smc_paper.Telegram(dry=True) if a.telegram_dry else
+                  smc_paper.Telegram() if a.telegram else None)
+            smc_paper.update(results, now, text, watching, tg)
     except Exception:
         if not a.log:
             raise

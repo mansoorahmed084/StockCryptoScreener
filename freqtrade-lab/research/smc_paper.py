@@ -47,7 +47,9 @@ IST = pd.Timedelta(hours=5, minutes=30)
 COLS = ["id", "coin", "symbol", "side", "signal_utc", "entry_utc", "entry",
         "stop", "target", "stop_pct", "seen_utc", "seen_px", "late", "dcx",
         "status", "exit_utc", "exit_px", "why", "r", "last_utc", "last_px",
-        "last_r", "exit_level", "note"]
+        "last_r", "exit_level", "told", "note"]
+# told: which Telegram alert went out -- "" none yet, "new", "closed".
+# A failed send leaves it unchanged, so the next run tries again.
 WHY_TEXT = {"choch": "4h CHoCH", "stop": "stop", "target": "6R target",
             "time": "28 days"}
 
@@ -128,6 +130,9 @@ def _add(df: pd.DataFrame, live, t: dict, now: pd.Timestamp, late: bool) -> pd.D
         seen_utc=_ts(now), seen_px=_f(live.last),
         late="yes" if late else "no", dcx="yes" if live.dcx else "no",
         status="open")
+    lvl = t.get("choch_level", float("nan"))
+    if lvl is not None and np.isfinite(lvl):
+        row["exit_level"] = _f(lvl)
     print(f"  journal: logged {'LATE ' if late else ''}{live.coin} {side} "
           f"entry {row['entry']} stop {row['stop']}")
     return pd.concat([df, pd.DataFrame([row])], ignore_index=True)
@@ -135,7 +140,7 @@ def _add(df: pd.DataFrame, live, t: dict, now: pd.Timestamp, late: bool) -> pd.D
 
 # ------------------------------------------------------------------ update
 def update(results: list, now: pd.Timestamp, scan_text: str,
-           watching: list[dict] | None = None) -> None:
+           watching: list[dict] | None = None, telegram: "Telegram | None" = None) -> None:
     import scan_smc   # here, not at the top: scan_smc imports this module
 
     df = load()
@@ -180,8 +185,94 @@ def update(results: list, now: pd.Timestamp, scan_text: str,
             if o and pd.Timestamp(o["entry_time"]) == entry_ts and np.isfinite(o["choch_level"]):
                 df.at[i, "exit_level"] = _f(o["choch_level"])
     save(df)
+    if telegram is not None:
+        tell(df, telegram)
+        save(df)
     write_md(df, scan_text, now)
     write_trade_journal(df, now, watching)
+
+
+# ------------------------------------------------------------------ telegram
+class Telegram:
+    """Plain-text messages through the trade bot (.env TELEGRAM_BOT_TOKEN and
+    TELEGRAM_CHAT_ID). No buttons and no order path: sendMessage only.
+    `dry` prints the message instead of sending it."""
+
+    def __init__(self, dry: bool = False):
+        self.dry = dry
+        self.bot = None
+        if not dry:
+            import harness  # noqa: F401  (puts the repo root on sys.path)
+            from backend.alerts.telegram import telegram_from_env
+            self.bot = telegram_from_env()
+            if self.bot is None:
+                print("  telegram: no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID in .env")
+        self.sent: list[str] = []
+
+    def send(self, text: str) -> bool:
+        if self.dry:
+            print("  telegram (dry run):\n    " + text.replace("\n", "\n    "))
+            self.sent.append(text)
+            return True
+        if self.bot is None:
+            return False
+        # plain text on purpose: coin names with _ or * would break Markdown
+        ok = self.bot._call("sendMessage", chat_id=self.bot.chat_id, text=text,
+                            disable_web_page_preview=True) is not None
+        print(f"  telegram: {'sent' if ok else 'FAILED'}: {text.splitlines()[0]}")
+        if ok:
+            self.sent.append(text)
+        return ok
+
+
+def _num(x: str) -> str:
+    return _d(x) if x else "?"
+
+
+def new_message(r) -> str:
+    d = 1 if r.side == "long" else -1
+    lines = [f"SMC NEW: {r.side.upper()} {r.coin} ({r.symbol})",
+             f"Entry {_num(r.entry)} (4h open {_ist(r.entry_utc)} IST)",
+             f"Stop {_num(r.stop)} ({float(r.stop_pct):.1f}% away)",
+             f"Target 6R {_num(r.target)}"]
+    if r.exit_level:
+        lines.append(f"Exit early if a 4h candle closes {'below' if d > 0 else 'above'} "
+                     f"{_num(r.exit_level)}")
+    if r.seen_px:
+        moved = d * (float(r.seen_px) - float(r.entry)) / abs(float(r.entry) - float(r.stop))
+        lines.append(f"Price at the scan: {_num(r.seen_px)} ({moved:+.2f}R)")
+    lines.append(f"On CoinDCX futures: {r.dcx}")
+    lines.append("Paper trade. No order was placed.")
+    return "\n".join(lines)
+
+
+def close_message(r, df: pd.DataFrame) -> str:
+    closed = df[(df.status == "closed") & (df.late == "no")]
+    rs = closed.r.astype(float)
+    tally = (f"On-time closed so far: {len(rs)}, win {100 * (rs > 0).mean():.0f}%, "
+             f"avg {rs.mean():+.2f}R" if len(rs) else "")
+    lines = [f"SMC CLOSED: {r.side.upper()} {r.coin} {float(r.r):+.2f}R",
+             f"Exit: {WHY_TEXT.get(r.why, r.why)} at {_num(r.exit_px)} ({_ist(r.exit_utc)} IST)",
+             f"Entry {_num(r.entry)} ({_ist(r.entry_utc)} IST), stop {_num(r.stop)}"]
+    if r.late == "yes":
+        lines.append("This trade was logged late, so it is not in the on-time numbers.")
+    if tally:
+        lines.append(tally)
+    lines.append("Paper trade. No order was placed.")
+    return "\n".join(lines)
+
+
+def tell(df: pd.DataFrame, tg: Telegram) -> None:
+    """Send what has not been sent yet: a NEW alert for each on-time call that
+    is still open, and a CLOSED alert for every logged trade that ended."""
+    for i in df.index:
+        r = df.loc[i]
+        if r.status == "closed" and r.told != "closed":
+            if tg.send(close_message(r, df)):
+                df.at[i, "told"] = "closed"
+        elif r.status == "open" and r.told == "" and r.late == "no":
+            if tg.send(new_message(r)):
+                df.at[i, "told"] = "new"
 
 
 # ------------------------------------------------------------------ report

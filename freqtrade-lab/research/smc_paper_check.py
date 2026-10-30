@@ -47,6 +47,8 @@ def main(days: int = 120, skip: float = 0.3) -> None:
     cuts = pd.date_range(end - pd.Timedelta(days=days), end, freq="4h")
     bt = pd.concat([smc.run(c, scan_smc.CFG, "1h") for c in coins])
     ran = []
+    tg = smc_paper.Telegram(dry=True)
+    tg.send = lambda text: (tg.sent.append(text), True)[1]     # quiet dry run
     for cut in cuts:
         if random.random() < skip:
             continue
@@ -60,7 +62,7 @@ def main(days: int = 120, skip: float = 0.3) -> None:
             live = scan_smc.Live(c, f"{c}USDT", ltf, daily,
                                  float(ltf["open"].iloc[-1]), True)
             results.append((live, 0.0, scan_smc.evaluate(c, ltf, daily, cut)))
-        smc_paper.update(results, cut, "replay")
+        smc_paper.update(results, cut, "replay", None, tg)
     ran = pd.DatetimeIndex(ran)
 
     j = smc_paper.load()
@@ -107,6 +109,14 @@ def main(days: int = 120, skip: float = 0.3) -> None:
           f"{int((j.late == 'yes').sum())} late), {len(closed)} closed. "
           f"Backtest trades in window: {len(window)}; {missed} fell wholly "
           f"inside skipped runs. Failures: {fails}.")
+    n_new = sum(m.startswith("SMC NEW") for m in tg.sent)
+    n_closed = sum(m.startswith("SMC CLOSED") for m in tg.sent)
+    want_new = int((j.late == "no").sum())
+    if n_new != want_new or n_closed != len(closed):
+        fails += 1
+    print(f"Telegram (dry): {n_new} NEW alerts for {want_new} on-time calls, "
+          f"{n_closed} CLOSED alerts for {len(closed)} closed trades. "
+          f"Failures now: {fails}.")
     print(f"scratch journal: {smc_paper.MD}")
 
 

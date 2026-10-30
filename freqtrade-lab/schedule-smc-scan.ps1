@@ -3,6 +3,8 @@
 # and exit to journal/smc_paper.csv, journal/SMC_PAPER.md and an SMC
 # section of journal/TRADE_JOURNAL.md. Coins with $5M+ 24h volume; the
 # watch list (setups the next 4h close could trigger) goes in the journal too.
+# It also messages the trade bot on Telegram for each NEW call and each closed
+# paper trade: text only, no buttons, no orders.
 #
 #   .\schedule-smc-scan.ps1           # create or update the task
 #   .\schedule-smc-scan.ps1 -Remove   # delete it
@@ -21,7 +23,7 @@ if ($Remove) {
 
 $lab = $PSScriptRoot
 $action = New-ScheduledTaskAction -Execute "$lab\.venv\Scripts\pythonw.exe" `
-    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3' -WorkingDirectory $lab
+    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3 --telegram' -WorkingDirectory $lab
 $firstUtc = [DateTime]::SpecifyKind([DateTime]::UtcNow.Date.AddMinutes(5), 'Utc')
 $trigger = New-ScheduledTaskTrigger -Once -At $firstUtc.ToLocalTime() `
     -RepetitionInterval (New-TimeSpan -Hours 4)
