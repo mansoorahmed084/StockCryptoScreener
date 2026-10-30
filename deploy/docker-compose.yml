@@ -1,13 +1,48 @@
-# The dashboard on the Oracle VM. It listens on 127.0.0.1 only: the one way in
-# is the Cloudflare Tunnel, with Cloudflare Access in front. No public port.
+# The Oracle VM. Nothing listens on a public port: the dashboard is on
+# 127.0.0.1 for the Cloudflare Tunnel, and the bots only make outbound calls
+# (Binance, CoinDCX, Telegram).
+#
+# Files that live on the VM, outside the code folder (deploy.sh replaces
+# ~/screener on every deploy, so nothing here may be kept inside it):
+#   ~/screener-secrets/.env         Telegram + CoinDCX keys bound to THIS VM's IP
+#   ~/screener-secrets/config.yaml  your config.yaml (trading.mode, limits)
+#   ~/screener-state/data_cache/    trading.db, trading_sehe.db, recovery ledger
+#   ~/screener-state/journal/       the SMC paper journal and the trade journal
 services:
   dashboard:
     build: ..
     ports:
       - "127.0.0.1:8501:8501"
     volumes:
-      - screener-data:/app/data_cache   # watchlists + signal journal
+      - ../../screener-secrets/config.yaml:/app/config.yaml:ro
+      - ../../screener-state/data_cache:/app/data_cache
     restart: unless-stopped
 
-volumes:
-  screener-data:
+  # The trade bot for every account: handles Telegram Place / Confirm taps,
+  # re-reads positions, trails the stops of trades that asked for a trail,
+  # and scans the recovery-ledger coins. Places a trade only after your taps.
+  # Run only ONE of these per Telegram bot: stop the one on the laptop.
+  tradebot:
+    build: ..
+    command: ["python", "-m", "backend.cli", "trade", "bot"]
+    env_file:
+      - ../../screener-secrets/.env
+    volumes:
+      - ../../screener-secrets/config.yaml:/app/config.yaml:ro
+      - ../../screener-state/data_cache:/app/data_cache
+    restart: unless-stopped
+
+  # SMC Sweep-Break: scans 5 minutes after every 4h close, keeps the paper
+  # journal, checks each fresh call on CoinDCX in dry run, sends it to the
+  # trade bot with a Place button, and messages Telegram on NEW and CLOSED.
+  smc:
+    build: ..
+    command: ["python", "freqtrade-lab/research/smc_runner.py"]
+    env_file:
+      - ../../screener-secrets/.env
+    volumes:
+      - ../../screener-secrets/config.yaml:/app/config.yaml:ro
+      - ../../screener-state/data_cache:/app/data_cache
+      - ../../screener-state/journal:/app/journal
+      - ../../screener-state/logs:/app/freqtrade-lab/user_data/logs
+    restart: unless-stopped

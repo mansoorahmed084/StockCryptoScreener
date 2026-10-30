@@ -47,7 +47,9 @@ IST = pd.Timedelta(hours=5, minutes=30)
 COLS = ["id", "coin", "symbol", "side", "signal_utc", "entry_utc", "entry",
         "stop", "target", "stop_pct", "seen_utc", "seen_px", "late", "dcx",
         "status", "exit_utc", "exit_px", "why", "r", "last_utc", "last_px",
-        "last_r", "exit_level", "told", "note"]
+        "last_r", "exit_level", "dcx_check", "idea", "told", "note"]
+# dcx_check: the CoinDCX dry-run check of an on-time call (smc_trade.check)
+# idea: the trade bot's setup id when the call was offered with a Place button
 # told: which Telegram alert went out -- "" none yet, "new", "closed".
 # A failed send leaves it unchanged, so the next run tries again.
 WHY_TEXT = {"choch": "4h CHoCH", "stop": "stop", "target": "6R target",
@@ -140,7 +142,8 @@ def _add(df: pd.DataFrame, live, t: dict, now: pd.Timestamp, late: bool) -> pd.D
 
 # ------------------------------------------------------------------ update
 def update(results: list, now: pd.Timestamp, scan_text: str,
-           watching: list[dict] | None = None, telegram: "Telegram | None" = None) -> None:
+           watching: list[dict] | None = None, telegram: "Telegram | None" = None,
+           bot: "Bot | None" = None) -> None:
     import scan_smc   # here, not at the top: scan_smc imports this module
 
     df = load()
@@ -185,11 +188,71 @@ def update(results: list, now: pd.Timestamp, scan_text: str,
             if o and pd.Timestamp(o["entry_time"]) == entry_ts and np.isfinite(o["choch_level"]):
                 df.at[i, "exit_level"] = _f(o["choch_level"])
     save(df)
+    if bot is not None:
+        bot.handle_new(df, now)
+        save(df)
     if telegram is not None:
-        tell(df, telegram)
+        tell(df, telegram, bot)
         save(df)
     write_md(df, scan_text, now)
     write_trade_journal(df, now, watching)
+
+
+# ------------------------------------------------------------------ CoinDCX
+class Bot:
+    """The CoinDCX side of a fresh on-time call (smc_trade.py): a dry-run check
+    and, with `offer`, a Place-button setup in the live bot. Only calls whose
+    entry candle is still forming are touched; an old call is never offered."""
+
+    def __init__(self, check: bool = True, offer: bool = False, risk_pct: float = 1.0,
+                 risk_cap_inr: float = 500.0, leverage: int = 5):
+        import smc_trade
+        self.t = smc_trade
+        self.check, self.offer = check, offer
+        self.risk_pct, self.risk_cap_inr, self.leverage = risk_pct, risk_cap_inr, leverage
+        self.dry, self.live, self.settings = smc_trade.managers(dry_only=not offer)
+
+    @property
+    def risk_inr(self) -> float:
+        """risk_pct of the free futures balance, capped (the backtest risks
+        0.5-1% of equity a trade; a fixed rupee amount does not scale)."""
+        free = self.dry.free_inr() or 0.0
+        return round(min(self.risk_cap_inr, free * self.risk_pct / 100.0), 2)
+
+    def handle_new(self, df: pd.DataFrame, now: pd.Timestamp) -> None:
+        for i in df.index:
+            r = df.loc[i]
+            fresh = (r.status == "open" and r.late == "no"
+                     and pd.Timestamp(r.entry_utc, tz="UTC") + BAR > now)
+            if not fresh:
+                continue
+            if self.check and not r.dcx_check:
+                try:
+                    df.at[i, "dcx_check"] = self.t.check(self.dry, r, self.risk_inr,
+                                                         self.leverage)
+                except Exception as exc:          # a read failure must not stop the scan
+                    df.at[i, "dcx_check"] = f"check failed: {exc}"[:200]
+                print(f"  coindcx: {r.coin} {r.side}: {df.at[i, 'dcx_check']}")
+            if self.offer and not r.idea and self.live is not None:
+                try:
+                    idea_id, msg = self.t.offer(self.live, self.settings, r,
+                                                self.risk_inr, self.leverage)
+                except Exception as exc:          # retried next run if still fresh
+                    idea_id, msg = None, f"offer failed: {exc}"[:200]
+                    print(f"  coindcx: {r.coin} {r.side}: {msg}")
+                    continue
+                df.at[i, "idea"] = str(idea_id) if idea_id else "-"
+                df.at[i, "note"] = msg
+                print(f"  coindcx: {r.coin} {r.side}: {msg}")
+
+    def held(self, r) -> dict | None:
+        """The bot's open position placed from this call, if any."""
+        if self.live is None or not r.idea or r.idea == "-":
+            return None
+        try:
+            return self.t.held_from_idea(self.live, r.idea)
+        except Exception:
+            return None
 
 
 # ------------------------------------------------------------------ telegram
@@ -262,13 +325,19 @@ def close_message(r, df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def tell(df: pd.DataFrame, tg: Telegram) -> None:
+def tell(df: pd.DataFrame, tg: Telegram, bot: "Bot | None" = None) -> None:
     """Send what has not been sent yet: a NEW alert for each on-time call that
     is still open, and a CLOSED alert for every logged trade that ended."""
     for i in df.index:
         r = df.loc[i]
         if r.status == "closed" and r.told != "closed":
-            if tg.send(close_message(r, df)):
+            text = close_message(r, df)
+            held = bot.held(r) if bot is not None else None
+            if held:
+                text = (f"ACTION: you hold {held['pair']} from this call (bot trade "
+                        f"#{held['id']}). The strategy exits here: close it in the "
+                        f"CoinDCX app or with `trade close {held['pair']}`.\n" + text)
+            if tg.send(text):
                 df.at[i, "told"] = "closed"
         elif r.status == "open" and r.told == "" and r.late == "no":
             if tg.send(new_message(r)):
@@ -380,7 +449,7 @@ def write_md(df: pd.DataFrame, scan_text: str | None, now: pd.Timestamp) -> None
         "exit if a 4h candle closes": (("below " if r.side == "long" else "above ")
                                        + _d(r.exit_level)) if r.exit_level else "next run",
         "now": _d(r.last_px), "now R": f"{float(r.last_r):+.2f}" if r.last_r else "",
-        "late": r.late, "CoinDCX": r.dcx, "note": r.note}
+        "late": r.late, "CoinDCX": r.dcx, "CoinDCX dry run": r.dcx_check, "note": r.note}
         for r in opened.itertuples()]))
 
     doc = _put(doc, "CLOSED", _table([{
@@ -446,5 +515,8 @@ def write_trade_journal(df: pd.DataFrame, now: pd.Timestamp,
 
 
 if __name__ == "__main__":
-    write_md(load(), None, pd.Timestamp.now(tz="UTC"))
-    print(f"rebuilt {MD}")
+    # rebuild both pages from the csv, e.g. after pulling it from the VM
+    _now = pd.Timestamp.now(tz="UTC")
+    write_md(load(), None, _now)
+    write_trade_journal(load(), _now, None)
+    print(f"rebuilt {MD} and the SMC block of {TRADE_MD}")

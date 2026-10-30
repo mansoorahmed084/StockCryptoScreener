@@ -23,7 +23,7 @@ if ($Remove) {
 
 $lab = $PSScriptRoot
 $action = New-ScheduledTaskAction -Execute "$lab\.venv\Scripts\pythonw.exe" `
-    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3 --telegram' -WorkingDirectory $lab
+    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check' -WorkingDirectory $lab
 $firstUtc = [DateTime]::SpecifyKind([DateTime]::UtcNow.Date.AddMinutes(5), 'Utc')
 $trigger = New-ScheduledTaskTrigger -Once -At $firstUtc.ToLocalTime() `
     -RepetitionInterval (New-TimeSpan -Hours 4)

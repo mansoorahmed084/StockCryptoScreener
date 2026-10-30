@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Ship the committed code (HEAD) to the Oracle VM and rebuild the dashboard.
+# Ship the committed code (HEAD) to the Oracle VM and rebuild the dashboard,
+# the trade bot and the SMC scan.
 # Uncommitted changes are not shipped: commit first.
 #
 #   deploy/deploy.sh <vm-ip>        or   SCREENER_VM=<vm-ip> deploy/deploy.sh
@@ -16,6 +17,10 @@ git archive --format=tar HEAD | "${SSH[@]}" '
   tar -x -C ~/screener.new &&
   rm -rf ~/screener && mv ~/screener.new ~/screener'
 "${SSH[@]}" '
+  mkdir -p ~/screener-state/data_cache ~/screener-state/journal ~/screener-state/logs &&
+  if [ ! -f ~/screener-secrets/.env ] || [ ! -f ~/screener-secrets/config.yaml ]; then
+    echo "Missing ~/screener-secrets/.env or config.yaml: see deploy/env.example and deploy/push-state.sh"; exit 1
+  fi &&
   cd ~/screener/deploy &&
   sudo docker compose up -d --build &&
   sudo docker image prune -f >/dev/null &&

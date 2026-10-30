@@ -366,6 +366,19 @@ def main() -> None:
                          "and each closed paper trade (text only)")
     ap.add_argument("--telegram-dry", action="store_true",
                     help="with --log: print those messages instead of sending")
+    ap.add_argument("--dcx-check", action="store_true",
+                    help="with --log: size and check each fresh call on CoinDCX in "
+                         "dry run (nothing sent); result in the journal")
+    ap.add_argument("--offer", action="store_true",
+                    help="with --log: send each fresh call to the trade bot with a "
+                         "Place button (needs `trade bot` running for the taps)")
+    ap.add_argument("--risk-pct", type=float, default=1.0,
+                    help="risk per trade for --dcx-check / --offer, %% of the free "
+                         "futures balance (default 1)")
+    ap.add_argument("--risk-inr", type=float, default=500.0,
+                    help="cap on that risk in rupees (default Rs 500)")
+    ap.add_argument("--leverage", type=int, default=5,
+                    help="leverage for --dcx-check / --offer (default 5)")
     a = ap.parse_args()
     if a.log:
         smc_paper.attach_log()      # scheduled runs have no console
@@ -382,7 +395,11 @@ def main() -> None:
         if a.log:
             tg = (smc_paper.Telegram(dry=True) if a.telegram_dry else
                   smc_paper.Telegram() if a.telegram else None)
-            smc_paper.update(results, now, text, watching, tg)
+            bot = (smc_paper.Bot(check=a.dcx_check or a.offer, offer=a.offer,
+                                 risk_pct=a.risk_pct, risk_cap_inr=a.risk_inr,
+                                 leverage=a.leverage)
+                   if a.dcx_check or a.offer else None)
+            smc_paper.update(results, now, text, watching, tg, bot)
     except Exception:
         if not a.log:
             raise

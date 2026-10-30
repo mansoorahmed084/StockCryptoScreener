@@ -5,7 +5,13 @@
 **/__pycache__
 .pytest_cache
 data_cache
-freqtrade-lab
+# freqtrade-lab: only the research code goes in (the SMC scan runs in the
+# cloud); its venv, candle data, results and configs with passwords stay out
+freqtrade-lab/.venv
+freqtrade-lab/user_data
+freqtrade-lab/research/results
+freqtrade-lab/research/specs
+freqtrade-lab/config*.json
 reports
 research
 tests
