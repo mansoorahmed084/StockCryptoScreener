@@ -299,7 +299,9 @@ following alone (no sweep) is positive but half as good.
 2. **Paper trade it.** DONE 2026-10-30: [scan_smc.py](scan_smc.py) prints
    NEW / OPEN / CLOSED from live futures candles, and
    [scan_smc_check.py](scan_smc_check.py) shows it matches the backtest
-   (4,329 checks, 0 mismatches). Next: run it every 4h and log the calls.
+   (4,329 checks, 0 mismatches). Since 2026-10-30 a scheduled task runs it
+   every 4h and keeps a paper journal: [journal/SMC_PAPER.md](../../journal/SMC_PAPER.md).
+   Judge it after 30+ closed on-time trades.
 3. **Fix 2022.** Every SMC family was flat or negative in 2022 (a choppy
    bear). A regime switch on BTC volatility is the untested idea.
 4. **Stack with TrendlineBreakoutLTF.** Different holding period (5 days vs

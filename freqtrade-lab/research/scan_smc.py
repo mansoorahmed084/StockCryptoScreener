@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import harness  # noqa: E402,F401  (puts the repo root on sys.path)
 import smc      # noqa: E402
 import smc_oos  # noqa: E402
+import smc_paper  # noqa: E402
 
 from backend.data.binance_futures import BinanceFutures  # noqa: E402
 from backend.data.futures import fetch_futures           # noqa: E402
@@ -86,12 +87,13 @@ def evaluate(coin: str, ltf: pd.DataFrame, htf: pd.DataFrame,
     candle take its entry, exactly as the backtest's next-open fill does.
     """
     closed = ltf.iloc[:-1]
-    out = {"new": None, "open": None, "closed": None}
+    out = {"new": None, "open": None, "closed": None, "trades": None}
     if len(closed) < 100 or len(htf) < 30:
         return out
     last_ts = closed.index[-1]
 
     tr, L = smc.run_frames(coin, CFG, closed, htf, htf)
+    out["trades"] = tr
     held = tr[tr.why == "data_end"]
     if len(held):
         t = held.iloc[-1]
@@ -161,23 +163,16 @@ def _p(x: float) -> str:
     return f"{x:.6g}"
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--min-vol", type=float, default=10.0,
-                    help="min 24h quote volume, $ millions (default 10)")
-    ap.add_argument("--dcx-only", action="store_true",
-                    help="only coins listed on CoinDCX futures")
-    ap.add_argument("--coins", default="", help="comma list, e.g. BTC,ETH")
-    ap.add_argument("--workers", type=int, default=4)
-    a = ap.parse_args()
-
+def scan(min_vol: float = 10.0, dcx_only: bool = False,
+         coins: list[str] | None = None, workers: int = 4,
+         now: pd.Timestamp | None = None) -> tuple[list, pd.Timestamp]:
+    """Fetch and evaluate every coin. Returns [(Live, 24h vol, evaluate())]."""
     bf = BinanceFutures(cache_ttl=0)
-    now = pd.Timestamp.now(tz="UTC")
-    coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()] or None
-    uni, dcx = universe(bf, a.min_vol, a.dcx_only, coins)
+    now = now or pd.Timestamp.now(tz="UTC")
+    uni, dcx = universe(bf, min_vol, dcx_only, coins)
     print(f"SMC Sweep-Break scan  {now:%Y-%m-%d %H:%M} UTC  "
-          f"({len(uni)} Binance perps, 24h vol >= ${a.min_vol:g}M"
-          f"{', CoinDCX only' if a.dcx_only else ''})", file=sys.stderr)
+          f"({len(uni)} Binance perps, 24h vol >= ${min_vol:g}M"
+          f"{', CoinDCX only' if dcx_only else ''})", file=sys.stderr)
 
     def one(item):
         coin, sym, vol = item
@@ -194,9 +189,11 @@ def main() -> None:
             return None
         return live, vol, evaluate(coin, live.ltf, live.htf, now)
 
-    with ThreadPoolExecutor(a.workers) as ex:
-        results = [r for r in ex.map(one, uni) if r]
+    with ThreadPoolExecutor(workers) as ex:
+        return [r for r in ex.map(one, uni) if r], now
 
+
+def report(results: list, now: pd.Timestamp) -> str:
     new, held, ended = [], [], []
     for live, vol, ev in results:
         tag = "yes" if live.dcx else "-"
@@ -229,24 +226,57 @@ def main() -> None:
         if ev["closed"]:
             t = ev["closed"]
             ended.append({"coin": live.coin, "side": "LONG" if t["dir"] > 0 else "SHORT",
-                          "why": {"choch": "4h CHoCH", "stop": "stop", "target": "6R target",
-                                  "time": "28 days"}.get(t["why"], t["why"]),
+                          "why": WHY_TEXT.get(t["why"], t["why"]),
                           "R": f"{t['r']:+.2f}", "CoinDCX": tag})
 
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 20)
     last_close = now.floor("4h")
-    print(f"\nLast closed 4h candle: {last_close - BAR:%Y-%m-%d %H:%M} UTC "
-          f"(closed {last_close:%H:%M} UTC). Next scan after "
-          f"{last_close + BAR:%H:%M} UTC.")
+    out = [f"SMC Sweep-Break scan {now:%Y-%m-%d %H:%M} UTC, {len(results)} coins. "
+           f"Last closed 4h candle: {last_close - BAR:%Y-%m-%d %H:%M} UTC "
+           f"(closed {last_close:%H:%M} UTC). Next scan after "
+           f"{last_close + BAR:%H:%M} UTC."]
     for title, rows in (("NEW  - signal on the candle that just closed; enter at this candle's open", new),
                         ("OPEN - trades the strategy holds now", held),
                         ("CLOSED - ended on the last closed candle", ended)):
-        print(f"\n{title}: {len(rows)}")
+        out.append(f"\n{title}: {len(rows)}")
         if rows:
-            print(pd.DataFrame(rows).to_string(index=False))
-    print("\nRules: risk 0.5-1% of equity per trade, at most 10 open. "
-          "Size = risk / stop %. Backtest, not advice.")
+            out.append(pd.DataFrame(rows).to_string(index=False))
+    out.append("\nRules: risk 0.5-1% of equity per trade, at most 10 open. "
+               "Size = risk / stop %. Backtest, not advice.")
+    return "\n".join(out)
+
+
+WHY_TEXT = {"choch": "4h CHoCH", "stop": "stop", "target": "6R target",
+            "time": "28 days"}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--min-vol", type=float, default=10.0,
+                    help="min 24h quote volume, $ millions (default 10)")
+    ap.add_argument("--dcx-only", action="store_true",
+                    help="only coins listed on CoinDCX futures")
+    ap.add_argument("--coins", default="", help="comma list, e.g. BTC,ETH")
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--log", action="store_true",
+                    help="also update the paper journal (journal/smc_paper.csv)")
+    a = ap.parse_args()
+    if a.log:
+        smc_paper.attach_log()      # scheduled runs have no console
+    coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()] or None
+    try:
+        results, now = scan(a.min_vol, a.dcx_only, coins, a.workers)
+        text = report(results, now)
+        print(text)
+        if a.log:
+            smc_paper.update(results, now, text)
+    except Exception:
+        if not a.log:
+            raise
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

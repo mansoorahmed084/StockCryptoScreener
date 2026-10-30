@@ -119,6 +119,33 @@ events). Live candles are Binance FUTURES, the backtest used SPOT: on 30
 coins from May to September 2026, 24 trades were the same, 5 were spot only
 and 4 futures only. Same rules, slightly different candles.
 
+## Paper trading (automatic)
+
+A Windows scheduled task, **SMC Sweep-Break scan**, runs
+`scan_smc.py --log` at :35 past 01, 05, 09, 13, 17 and 21 IST — 5 minutes
+after each 4h close. Each run:
+
+* logs every NEW call to [journal/smc_paper.csv](../../journal/smc_paper.csv)
+  (entry = the backtest's fill, plus the price seen when the scan ran)
+* closes each logged trade when the backtest rules exit it, with the R
+* rebuilds [journal/SMC_PAPER.md](../../journal/SMC_PAPER.md): summary, open
+  trades with the 4h close that would end each one, closed trades, last scan
+* appends its output to `freqtrade-lab/user_data/logs/smc_scan.log`
+
+It runs only while you are logged in. If the PC slept through a run, the
+task runs once on waking; exits are still recorded at the right candle, and
+an entry found after its candle closed is flagged `late` and left out of the
+on-time numbers. [smc_paper_check.py](smc_paper_check.py) replays 120 days
+of runs with 30% skipped at random: 0 failures against the backtest.
+
+```powershell
+cd freqtrade-lab
+.\schedule-smc-scan.ps1           # create or update the task
+.\schedule-smc-scan.ps1 -Remove   # delete it
+```
+
+Nothing is committed automatically; the journal files change on every run.
+
 ## How to reproduce
 
 ```bash
