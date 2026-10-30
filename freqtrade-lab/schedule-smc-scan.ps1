@@ -4,7 +4,9 @@
 # section of journal/TRADE_JOURNAL.md. Coins with $5M+ 24h volume; the
 # watch list (setups the next 4h close could trigger) goes in the journal too.
 # It also messages the trade bot on Telegram for each NEW call and each closed
-# paper trade: text only, no buttons, no orders.
+# paper trade, checks each fresh call on CoinDCX in dry run, and offers it as
+# a setup with a Place button. Taps work only while deploy\trade_bot_all.bat
+# runs; a trade is placed only after you tap Place and then Confirm.
 #
 #   .\schedule-smc-scan.ps1           # create or update the task
 #   .\schedule-smc-scan.ps1 -Remove   # delete it
@@ -23,7 +25,7 @@ if ($Remove) {
 
 $lab = $PSScriptRoot
 $action = New-ScheduledTaskAction -Execute "$lab\.venv\Scripts\pythonw.exe" `
-    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check' -WorkingDirectory $lab
+    -Argument 'research\scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check --offer' -WorkingDirectory $lab
 $firstUtc = [DateTime]::SpecifyKind([DateTime]::UtcNow.Date.AddMinutes(5), 'Utc')
 $trigger = New-ScheduledTaskTrigger -Once -At $firstUtc.ToLocalTime() `
     -RepetitionInterval (New-TimeSpan -Hours 4)
