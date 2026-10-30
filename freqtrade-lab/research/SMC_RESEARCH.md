@@ -296,8 +296,10 @@ following alone (no sweep) is positive but half as good.
 1. **Cross-check B_final in freqtrade** (the repo rule). Needs a strategy
    file with the 4h/1d structure, informative daily pairs, custom stop and
    custom exit.
-2. **Paper trade it.** A live scanner that prints today's 4h sweep-breaks on
-   the daily trend would make it tradable by hand or through `trade propose`.
+2. **Paper trade it.** DONE 2026-10-30: [scan_smc.py](scan_smc.py) prints
+   NEW / OPEN / CLOSED from live futures candles, and
+   [scan_smc_check.py](scan_smc_check.py) shows it matches the backtest
+   (4,329 checks, 0 mismatches). Next: run it every 4h and log the calls.
 3. **Fix 2022.** Every SMC family was flat or negative in 2022 (a choppy
    bear). A regime switch on BTC volatility is the untested idea.
 4. **Stack with TrendlineBreakoutLTF.** Different holding period (5 days vs

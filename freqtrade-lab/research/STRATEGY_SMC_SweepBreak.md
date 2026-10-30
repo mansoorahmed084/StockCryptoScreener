@@ -90,6 +90,35 @@ essential.
 6. Not yet checked in freqtrade, and not forward tested. The repo's rule is
    that nothing is banked until a second engine agrees.
 
+## Live scan
+
+```bash
+cd freqtrade-lab
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/scan_smc.py
+```
+
+Run it just after a 4h candle closes (00:00, 04:00, 08:00, 12:00, 16:00,
+20:00 UTC = 05:30, 09:30, 13:30, 17:30, 21:30, 01:30 IST). It reads live
+Binance USDT perpetual candles (crypto only, 24h volume ≥ $10M; `--min-vol`,
+`--dcx-only`, `--coins` change that) and prints:
+
+* **NEW** — the candle that just closed made a signal. The backtest enters at
+  the open of the candle forming now; `now R` shows how far price has moved
+  since. Stop, stop % and the 6R target are given.
+* **OPEN** — trades the strategy holds now, with the 4h close that ends each
+  one (the CHoCH level). Exit when a 4h candle CLOSES beyond it.
+* **CLOSED** — trades that ended on the last closed candle.
+
+It places nothing. About 40 seconds for ~170 coins.
+
+**Checks.** [scan_smc_check.py](scan_smc_check.py) replays the scanner's own
+code at past moments on the backtest data — with only the 1000 4h and 400
+daily closed candles it gets live — and compares it with the backtest:
+4,329 checks on 40 coins, **0 mismatches** (216 NEW, 224 OPEN, 216 CLOSED
+events). Live candles are Binance FUTURES, the backtest used SPOT: on 30
+coins from May to September 2026, 24 trades were the same, 5 were spot only
+and 4 futures only. Same rules, slightly different candles.
+
 ## How to reproduce
 
 ```bash

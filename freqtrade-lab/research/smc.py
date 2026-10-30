@@ -161,6 +161,8 @@ def _structure(o, h, l, c, ph, phi, pl, pli):
     swb/sws[t] a bar that wicks through a live swing low/high and closes back
             inside (a sweep), stamped with the wick extreme
     rlo/rhi[t] the dealing range of the current trend (for premium/discount)
+    lsh/lsl[t] the live (unbroken) swing high / low after bar t -- the level a
+            close must cross to break structure next (NaN once broken)
     """
     n = len(c)
     trend = np.zeros(n, np.int8)
@@ -179,6 +181,8 @@ def _structure(o, h, l, c, ph, phi, pl, pli):
     rhi = np.full(n, np.nan)
     sl_any = np.full(n, np.nan)
     sh_any = np.full(n, np.nan)
+    lsh = np.full(n, np.nan)
+    lsl = np.full(n, np.nan)
 
     sh = np.nan
     shi = -1
@@ -278,8 +282,10 @@ def _structure(o, h, l, c, ph, phi, pl, pli):
         trend[t] = cur
         rlo[t] = r_lo
         rhi[t] = r_hi
+        lsh[t] = sh
+        lsl[t] = sl
     return (trend, ev, org, orgi, obh, obl, fvh, fvl, ext, swept, swb, sws,
-            rlo, rhi)
+            rlo, rhi, lsh, lsl)
 
 
 @njit(cache=True)
@@ -320,13 +326,12 @@ def _active_sweeps(c, swb, sws, life):
 
 # -------------------------------------------------------------- frames
 STRUCT_COLS = ("trend", "ev", "org", "orgi", "obh", "obl", "fvh", "fvl", "ext",
-               "swept", "swb", "sws", "rlo", "rhi")
+               "swept", "swb", "sws", "rlo", "rhi", "lsh", "lsl")
 
 
-@lru_cache(maxsize=None)
-def structure(coin: str, tf: str, k: int, base: str = "15m") -> dict:
-    df = bars(coin, tf, base)
-    o, h, l, c = (df[x].to_numpy() for x in ("open", "high", "low", "close"))
+def struct_of(df: pd.DataFrame, k: int) -> dict:
+    """Structure arrays for any OHLC frame (disk or live)."""
+    o, h, l, c = (df[x].to_numpy(dtype=float) for x in ("open", "high", "low", "close"))
     ph, phi, pl, pli = _pivots(h, l, k)
     out = dict(zip(STRUCT_COLS, _structure(o, h, l, c, ph, phi, pl, pli)))
     out.update(o=o, h=h, l=l, c=c, atr=_atr(h, l, c, 14), index=df.index)
@@ -334,11 +339,22 @@ def structure(coin: str, tf: str, k: int, base: str = "15m") -> dict:
 
 
 @lru_cache(maxsize=None)
+def structure(coin: str, tf: str, k: int, base: str = "15m") -> dict:
+    return struct_of(bars(coin, tf, base), k)
+
+
+@lru_cache(maxsize=None)
 def htf_on_ltf(coin: str, ltf: str, htf: str, k_htf: int, sweep_life: int,
                base: str = "15m") -> dict:
     """HTF context mapped onto every LTF bar, using only CLOSED HTF bars."""
-    H = structure(coin, htf, k_htf, base)
-    L = bars(coin, ltf, base)
+    return htf_map(bars(coin, ltf, base).index, ltf,
+                   structure(coin, htf, k_htf, base), htf, sweep_life)
+
+
+def htf_map(ltf_index: pd.DatetimeIndex, ltf: str, H: dict, htf: str,
+            sweep_life: int) -> dict:
+    """Map HTF structure `H` onto LTF bars by CLOSE time."""
+    L = pd.DataFrame(index=ltf_index)
     htf_close = (H["index"] + TF_DELTA[htf]).to_numpy()
     ltf_close = (L.index + TF_DELTA[ltf]).to_numpy()
     pos = np.searchsorted(htf_close, ltf_close, side="right") - 1
@@ -657,15 +673,17 @@ WHY = np.array(["stop", "target", "breakeven", "time", "choch", "data_end"])
 
 @lru_cache(maxsize=None)
 def extras(coin: str, ltf: str, base: str = "15m") -> dict:
+    return extras_of(bars(coin, ltf, base), bars(coin, "1d", base), ltf)
+
+
+def extras_of(L: pd.DataFrame, D: pd.DataFrame, ltf: str) -> dict:
     """Signal-bar filters: hour, relative volume, daily 50 SMA side.
 
     The daily flag is stamped at the daily bar's CLOSE, so an LTF bar only
     sees yesterday's completed daily candle.
     """
-    L = bars(coin, ltf, base)
     v = L["volume"]
     volx = (v / v.rolling(96, min_periods=20).mean()).to_numpy()
-    D = bars(coin, "1d", base)
     ma = D["close"].rolling(50).mean()
     side = np.sign(D["close"] - ma).where(ma.notna(), 0.0)
     side.index = side.index + TF_DELTA["1d"]
@@ -677,9 +695,27 @@ def extras(coin: str, ltf: str, base: str = "15m") -> dict:
 
 def run(coin: str, cfg: Cfg, base: str = "15m") -> pd.DataFrame:
     """Every trade one coin takes under one config."""
-    L = structure(coin, cfg.ltf, cfg.k_ltf, base)
-    H = htf_on_ltf(coin, cfg.ltf, cfg.htf, cfg.k_htf, cfg.sweep_life, base)
-    X = extras(coin, cfg.ltf, base)
+    return trades_of(coin, cfg, structure(coin, cfg.ltf, cfg.k_ltf, base),
+                     htf_on_ltf(coin, cfg.ltf, cfg.htf, cfg.k_htf,
+                                cfg.sweep_life, base),
+                     extras(coin, cfg.ltf, base))
+
+
+def run_frames(coin: str, cfg: Cfg, ltf_df: pd.DataFrame, htf_df: pd.DataFrame,
+               d_df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """The same simulation from frames handed in (the live scanner's path).
+
+    Every row must be a CLOSED candle except, optionally, a last LTF row
+    whose only known price is its open (o = h = l = c). Returns the trades
+    and the LTF structure, so callers can read the live swing levels.
+    """
+    L = struct_of(ltf_df, cfg.k_ltf)
+    H = htf_map(ltf_df.index, cfg.ltf, struct_of(htf_df, cfg.k_htf), cfg.htf,
+                cfg.sweep_life)
+    return trades_of(coin, cfg, L, H, extras_of(ltf_df, d_df, cfg.ltf)), L
+
+
+def trades_of(coin: str, cfg: Cfg, L: dict, H: dict, X: dict) -> pd.DataFrame:
     res = _sim(L["o"], L["h"], L["l"], L["c"], L["atr"], L["ev"], L["org"],
                L["orgi"], L["obh"], L["obl"], L["fvh"], L["fvl"], L["ext"],
                L["swept"],
