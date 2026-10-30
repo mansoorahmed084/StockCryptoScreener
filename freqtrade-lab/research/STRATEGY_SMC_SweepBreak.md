@@ -109,6 +109,12 @@ Binance USDT perpetual candles (crypto only, 24h volume ≥ $10M; `--min-vol`,
   one (the CHoCH level). Exit when a 4h candle CLOSES beyond it.
 * **CLOSED** — trades that ended on the last closed candle.
 
+* **WATCH** (with `--watch [PCT]`, default 3%) — setups the FORMING 4h
+  candle would trigger: either it fires if the candle closes at the current
+  price, or it needs a close just past the live 4h swing within PCT% of
+  price. The daily trend and the sweep are already in place. Checked on past
+  signal candles: 196 of 196 found, 0 false alarms on 450 other candles.
+
 It places nothing. About 40 seconds for ~170 coins.
 
 **Checks.** [scan_smc_check.py](scan_smc_check.py) replays the scanner's own
