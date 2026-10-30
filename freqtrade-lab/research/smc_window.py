@@ -82,10 +82,19 @@ def main(start: str | None, end: str | None) -> None:
     print(f"Best 20 trades = {top.r.head(20).sum() / t.r.sum():.0%} of the total R.")
 
     print("\nBy 12-month period (avg R / trades / total R):")
-    p = ((t.entry_time - lo).dt.days // 365).clip(upper=int((hi - lo).days // 365) - 1)
+    # 12-month steps from the window start; a shorter last step keeps its
+    # real end date instead of being folded into the year before it
+    edges = []
+    a = lo
+    while a < hi:
+        edges.append(a)
+        a = a + pd.DateOffset(years=1)
+    p = np.searchsorted(np.array(edges, dtype="datetime64[ns]"),
+                        t.entry_time.to_numpy("datetime64[ns]"), side="right") - 1
     for k, g in t.groupby(p):
-        a = lo + pd.DateOffset(years=int(k))
-        print(f"  {a:%b %Y} - {a + pd.DateOffset(years=1):%b %Y}: "
+        a = edges[int(k)]
+        b = min(a + pd.DateOffset(years=1), hi)
+        print(f"  {a:%d %b %Y} - {b:%d %b %Y}: "
               f"{g.r.mean():+.2f}R / {len(g)} / {g.r.sum():+.1f}R, win {100 * (g.r > 0).mean():.0f}%")
 
     mon = srt.groupby(srt.exit_time.dt.to_period("M")).r.sum()
