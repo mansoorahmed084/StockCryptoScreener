@@ -4,6 +4,24 @@ The one Smart Money Concepts setup out of ~2,000 tested that kept its edge on
 203 coins it had never seen. Derivation: [SMC_RESEARCH.md](SMC_RESEARCH.md).
 Code: [smc.py](smc.py); the config is `B_final` in [smc_oos.py](smc_oos.py).
 
+> **Status, 2026-11-01: paper + one-tap phase, on the laptop.** Every 4h a
+> scan logs the calls, checks each one on CoinDCX in dry run and sends it to
+> Telegram with Place + Confirm buttons. No real SMC trade has been placed.
+> 3 on-time calls so far, about -1.0R in total; far too few to judge. Live
+> numbers: [journal/SMC_PAPER.md](../../journal/SMC_PAPER.md).
+
+How it is run, section by section:
+
+| part | section |
+|---|---|
+| the rules | [Rules](#rules-long-shorts-are-the-mirror) |
+| what the backtest says to expect | [Results](#results), [By period](#by-period) |
+| the scanner | [Live scan](#live-scan) |
+| the paper journal and Telegram | [Paper trading](#paper-trading-automatic) |
+| placing real trades with two taps | [Trading it on CoinDCX](#trading-it-on-coindcx-one-tap) |
+| what runs on the laptop | [What runs where](#what-runs-where) |
+| when to trust it more | [From paper to real money](#from-paper-to-real-money) |
+
 ## Rules (long; shorts are the mirror)
 
 | step | rule |
@@ -55,6 +73,33 @@ trade stopped at once):
 Per year (all coins, avg R / trades): 2020 +0.31/54, 2021 +0.35/27,
 2022 +0.01/156, 2023 +0.17/461, 2024 +0.40/285, 2025 +0.34/339,
 2026 +0.32/412.
+
+### By period
+
+[smc_window.py](smc_window.py) runs the same thing over one date window, with
+the account starting at the window's first day.
+
+| | Jan 2020 – Sep 2023 | Sep 2023 – Sep 2026 |
+|---|---|---|
+| trades | 570 | 1,164 |
+| win rate | 40% | 37% |
+| avg R / profit factor | +0.23 / 1.50 | +0.29 / 1.60 |
+| avg win / avg loss | +1.70R / -0.76R | +2.09R / -0.77R |
+| **account at 0.5% risk** | **12.9% a year, 11.7% max DD** | **40.5% a year, 14.5% max DD** |
+| account at 1% risk | 24.4% a year, 22.3% max DD | 83.4% a year, 28.2% max DD |
+| R left without the best 20 trades | +11 of 130 | +219 of 339 |
+| flat stretch | 2022: +0.02R a trade | none |
+
+Both windows made money. The earlier one rested on a few big trades and had
+few coins (44-88 with data in 2020-2021). The later one is the strategy's
+best stretch; one month (October 2025) made 26% of its profit. **Plan for
+roughly 13-23% a year at 0.5% risk, not 40%.**
+
+```bash
+cd freqtrade-lab
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/smc_window.py 2023-09-14
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe research/smc_window.py 2020-01-01 2023-09-14
+```
 
 ### Controls (is the SMC part doing anything?)
 
@@ -145,8 +190,10 @@ after each 4h close. Each run:
 * messages the trade bot on Telegram (`--telegram`): one "SMC NEW" message
   per on-time call (entry, stop, 6R target, exit level, price at the scan)
   and one "SMC CLOSED" message per finished paper trade (why, R, running
-  tally). Plain text, no buttons, no order path. A failed send is retried on
-  the next run; `--telegram-dry` prints the messages instead
+  tally). These two are plain text with no buttons. A failed send is retried
+  on the next run; `--telegram-dry` prints the messages instead
+* checks each fresh on-time call on CoinDCX in dry run (`--dcx-check`) and
+  offers it with a Place button (`--offer`); see the next section
 * appends its output to `freqtrade-lab/user_data/logs/smc_scan.log`
 
 It runs only while you are logged in. If the PC slept through a run, the
@@ -162,6 +209,90 @@ cd freqtrade-lab
 ```
 
 Nothing is committed automatically; the journal files change on every run.
+
+## Trading it on CoinDCX (one-tap)
+
+Signals come from Binance futures candles; trades happen on CoinDCX INR
+futures through the existing trade bot (`backend/trading`). Bridge:
+[smc_trade.py](smc_trade.py), tested on a fake exchange in
+`tests/test_smc_trade.py`.
+
+**For each fresh on-time call** (its entry candle is still forming):
+
+1. **Dry-run check.** A dry-run trade manager sizes the trade with the real
+   instrument, price and rules, sends nothing, and writes the plan or the
+   reason for a refusal in the journal's "CoinDCX dry run" column.
+2. **Offer.** The call is recorded as a setup in the bot's database and sent
+   to Telegram with a **Place** button.
+3. **You tap Place.** The bot re-checks the trade at the current price and
+   shows the fresh plan with **Confirm** and **Skip**.
+4. **You tap Confirm** (within 2 minutes of Place). The bot opens the trade at
+   market and puts the **stop and the 6R target on the exchange**, then reads
+   them back; if the stop is not accepted, it closes the position.
+
+A setup can be placed only within **2 hours** of the scan that offered it.
+Nothing is ever placed without both taps.
+
+**Sizing.** Risk = **1% of the free futures balance**, capped at **Rs 500**
+(`--risk-pct`, `--risk-inr`), at **5x** leverage (`--leverage`). Example: a
+Rs 5,246 wallet risks about Rs 52 a trade. Small risk means small orders, and
+CoinDCX has minimums (BTC: 0.001 BTC / 60 USDT), so many calls are refused
+until the wallet is larger.
+
+**Refused when** any of these fails (the bot's own rules plus two for SMC):
+
+| rule | from |
+|---|---|
+| the coin is an INR future on CoinDCX | smc_trade.py |
+| CoinDCX's price is within 1.5% of Binance's (else the levels do not carry over) | smc_trade.py |
+| stop at most 10% away, leverage at most 5x, margin at most 5% of free balance | risk.py (fixed) |
+| reward at least 2x risk at the live price, fees in | ideas.py (fixed) |
+| risk at most Rs 500, at most 10 positions, daily loss under Rs 1,500, no position already on the coin, no trade on the coin in the last 24h | config.yaml `trading.limits` |
+
+**Exits.** The stop and the 6R target sit on the exchange and close the trade
+by themselves. The **4h CHoCH exit** (62% of exits in the backtest) and the
+28-day limit do not: when the paper trade ends that way and the bot holds the
+position, the CLOSED message starts with **"ACTION: ... close it"**. Close it
+in the CoinDCX app, or:
+
+```bash
+.venv/Scripts/python.exe -m backend.cli trade close B-XXX_USDT
+```
+
+## What runs where
+
+All on the laptop for now; it only runs while you are logged in and the
+laptop is awake. The cloud move is prepared: [deploy/SMC_CLOUD.md](../../deploy/SMC_CLOUD.md).
+
+| Windows task | runs | when | log |
+|---|---|---|---|
+| **SMC Sweep-Break scan** | `scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check --offer` | 01:35, 05:35, 09:35, 13:35, 17:35, 21:35 IST | `freqtrade-lab/user_data/logs/smc_scan.log` |
+| **Trade bot (all accounts)** | `deploy/trade_bot_bg.py` → `trade bot` for main and sehe: Telegram taps, position checks, stop trails, Sehe ledger scan | at log-in, restarts itself | `data_cache/trade_bot.log` |
+
+Only one trade bot may run per Telegram bot. The background one holds a lock,
+so `deploy/trade_bot_all.bat` exits if it is on. Do not start
+`trade_bot_sehe.bat` beside it.
+
+From the repo root:
+
+```powershell
+.\freqtrade-lab\schedule-smc-scan.ps1 -Remove   # stop the scans
+.\deploy\schedule-trade-bot.ps1 -Remove         # stop the trade bot
+```
+
+Run either script without `-Remove` to set its task up again.
+
+## From paper to real money
+
+1. **Now: paper + one-tap.** Let the journal collect on-time calls. Tap
+   Place only on calls you want; everything else stays on paper.
+2. **Judge after 30+ closed on-time trades**, not before. The backtest
+   expects about 36-40% wins, about +0.25R a trade, an average win near 2R,
+   and losing streaks of 10 or more. A short losing run is normal; a win
+   rate under ~25% or an average under 0R after 30+ trades is not.
+3. **Full auto is not built.** It would need the bot to place without taps
+   and to close on the 4h CHoCH by itself. Build it only if the paper record
+   matches the backtest and you ask for it.
 
 ## How to reproduce
 

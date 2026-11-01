@@ -125,6 +125,14 @@ trigger, a stop and targets. See [SCALP.md](SCALP.md).
 .venv/Scripts/python.exe -m backend.cli scalp --top 300 --tf 15m
 ```
 
+**SMC Sweep-Break** is the strategy now being paper-traded: daily trend, then
+a 4h break whose move started with a liquidity sweep; long and short; stop
+past the sweep; exit on the opposite 4h CHoCH or at 6R. A scheduled scan logs
+every call, checks it on CoinDCX in dry run and offers it in Telegram with
+Place + Confirm buttons. Rules, backtests and how it runs:
+[STRATEGY_SMC_SweepBreak.md](freqtrade-lab/research/STRATEGY_SMC_SweepBreak.md).
+Live results: [journal/SMC_PAPER.md](journal/SMC_PAPER.md).
+
 Run the API (Phase 4):
 
 ```bash
