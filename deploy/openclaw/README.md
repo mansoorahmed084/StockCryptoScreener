@@ -89,6 +89,20 @@ Sehe ledger scan. After pasting them into `smc/.env`, restart the bot so it
 finds the account (`trade_bot_switch.sh off`, then `on`, inside the
 container).
 
+### Auto mode (no tap) — the owner's switch
+
+```bash
+# REAL MONEY: the scan places each fresh SMC call with no tap (main account)
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/trade_bot_switch.sh auto-on'
+# back to Place buttons
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/trade_bot_switch.sh auto-off'
+```
+
+`auto-on` makes `smc/auto_trade.on`; `create_jobs.sh` then runs the scan
+with `--telegram --auto` instead of `--dcx-check --offer`. `off` removes
+both switches. Rules: STRATEGY_SMC_SweepBreak.md, "Auto mode". It never
+trades or closes S, ARB, APT and never writes to spot.
+
 The move stops the laptop bot and disables its log-in task (two bots on one
 Telegram bot fight over the taps), copies the three state files, and turns
 the server bot on. While the bot is on the server, use Telegram for trades:

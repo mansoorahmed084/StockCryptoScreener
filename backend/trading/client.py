@@ -145,6 +145,11 @@ class FuturesClient:
         raise last
 
     def _write(self, path: str, body: dict) -> Any:
+        # Owner's rule: the bot never touches spot holdings. Every write this
+        # client makes is a futures call; refuse anything else outright.
+        if not path.startswith(FUTURES + "/"):
+            raise CoinDcxError(0, f"refused: {path} is not a futures endpoint "
+                                  "(this bot never places spot orders)")
         try:
             return self._send("POST", path, body, True)
         except (httpx.TimeoutException, httpx.NetworkError) as exc:

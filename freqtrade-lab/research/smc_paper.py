@@ -194,6 +194,7 @@ def update(results: list, now: pd.Timestamp, scan_text: str,
                 df.at[i, "exit_level"] = _f(o["choch_level"])
     save(df)
     if bot is not None:
+        bot.handle_closed(df)
         bot.handle_new(df, now)
         save(df)
     if telegram is not None:
@@ -210,12 +211,14 @@ class Bot:
     entry candle is still forming are touched; an old call is never offered."""
 
     def __init__(self, check: bool = True, offer: bool = False, risk_pct: float = 1.0,
-                 risk_cap_inr: float = 500.0, leverage: int = 5):
+                 risk_cap_inr: float = 500.0, leverage: int = 5, auto: bool = False):
         import smc_trade
         self.t = smc_trade
-        self.check, self.offer = check, offer
+        # auto (the owner's switch): place fresh calls with no tap, and close
+        # the bot's SMC positions on the CHoCH / 28-day exits
+        self.check, self.offer, self.auto = check, offer and not auto, auto
         self.risk_pct, self.risk_cap_inr, self.leverage = risk_pct, risk_cap_inr, leverage
-        self.dry, self.live, self.settings = smc_trade.managers(dry_only=not offer)
+        self.dry, self.live, self.settings = smc_trade.managers(dry_only=not (offer or auto))
 
     @property
     def risk_inr(self) -> float:
@@ -238,7 +241,18 @@ class Bot:
                 except Exception as exc:          # a read failure must not stop the scan
                     df.at[i, "dcx_check"] = f"check failed: {exc}"[:200]
                 print(f"  coindcx: {r.coin} {r.side}: {df.at[i, 'dcx_check']}")
-            if self.offer and not r.idea and self.live is not None:
+            if self.auto and not r.idea and self.live is not None:
+                try:
+                    with self.live.lock:
+                        idea_id, _tid, msg = self.t.auto_open(
+                            self.live, self.settings, r, self.risk_inr, self.leverage)
+                except Exception as exc:          # retried next run if still fresh
+                    print(f"  coindcx: {r.coin} {r.side}: auto trade failed: {exc}")
+                    continue
+                df.at[i, "idea"] = str(idea_id) if idea_id else "-"
+                df.at[i, "note"] = msg
+                print(f"  coindcx: {r.coin} {r.side}: {msg}")
+            elif self.offer and not r.idea and self.live is not None:
                 try:
                     idea_id, msg = self.t.offer(self.live, self.settings, r,
                                                 self.risk_inr, self.leverage)
@@ -247,6 +261,25 @@ class Bot:
                     print(f"  coindcx: {r.coin} {r.side}: {msg}")
                     continue
                 df.at[i, "idea"] = str(idea_id) if idea_id else "-"
+                df.at[i, "note"] = msg
+                print(f"  coindcx: {r.coin} {r.side}: {msg}")
+
+    def handle_closed(self, df: pd.DataFrame) -> None:
+        """Auto mode: close the bot's position from a call whose paper trade
+        ended on the 4h CHoCH or the 28-day limit (the exchange stop and target
+        handle the rest). Retried every run while the position is still held."""
+        if not self.auto or self.live is None:
+            return
+        for i in df.index[(df.status == "closed") & df.why.isin(self.t.AUTO_EXITS)]:
+            r = df.loc[i]
+            try:
+                with self.live.lock:
+                    msg = self.t.auto_close(self.live, r)
+            except Exception as exc:              # retried next run
+                print(f"  coindcx: {r.coin} {r.side}: auto close failed: {exc}")
+                df.at[i, "note"] = f"auto close failed: {exc}"[:200]
+                continue
+            if msg:
                 df.at[i, "note"] = msg
                 print(f"  coindcx: {r.coin} {r.side}: {msg}")
 
@@ -310,7 +343,11 @@ def new_message(r) -> str:
         moved = d * (float(r.seen_px) - float(r.entry)) / abs(float(r.entry) - float(r.stop))
         lines.append(f"Price at the scan: {_num(r.seen_px)} ({moved:+.2f}R)")
     lines.append(f"On CoinDCX futures: {r.dcx}")
-    lines.append("Paper trade. No order was placed.")
+    note = str(r.get("note", "") or "")
+    if note.startswith(("traded", "not traded", "dry run")):
+        lines.append(f"AUTO: {note}")          # the owner's auto mode
+    else:
+        lines.append("Paper trade. No order was placed.")
     return "\n".join(lines)
 
 
@@ -326,7 +363,11 @@ def close_message(r, df: pd.DataFrame) -> str:
         lines.append("This trade was logged late, so it is not in the on-time numbers.")
     if tally:
         lines.append(tally)
-    lines.append("Paper trade. No order was placed.")
+    note = str(r.get("note", "") or "")
+    if note.startswith(("auto-closed", "auto close failed")):
+        lines.append(f"AUTO: {note}")          # the owner's auto mode
+    else:
+        lines.append("Paper trade (R from the backtest rules).")
     return "\n".join(lines)
 
 

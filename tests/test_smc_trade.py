@@ -92,3 +92,111 @@ def test_two_taps_place_it_with_stop_and_target_and_it_is_found_held(tmp_path, t
     assert sl_tp[1:] == (95.0, 130.0)
     held = smc_trade.held_from_idea(m, idea_id)
     assert held and held["pair"] == PAIR
+
+
+# ---------------------------------------------------------------- auto mode
+def test_auto_open_places_with_fixed_stop_target_and_no_trail(tmp_path, tg):
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex)
+    idea_id, trade_id, msg = smc_trade.auto_open(m, s, call(), 100.0, 5)
+    assert trade_id and msg.startswith("traded: ")
+    kinds = [w[0] for w in ex.writes]
+    assert "create_order" in kinds
+    assert next(w for w in ex.writes if w[0] == "create_tpsl")[1:] == (95.0, 130.0)
+    t = next(x for x in m.store.trades() if x["id"] == trade_id)
+    assert t["trail"] == 0                       # the strategy keeps a fixed stop
+    assert m.store.idea(idea_id)["status"] == ideas.PLACED
+    assert tg.sent == []                         # no Place button: nothing to tap
+    assert smc_trade.held_from_idea(m, idea_id)["id"] == trade_id
+
+
+@pytest.mark.parametrize("coin", ["S", "ARB", "APT"])
+def test_auto_open_never_trades_the_owners_coins(tmp_path, tg, coin):
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex)
+    idea_id, trade_id, msg = smc_trade.auto_open(m, s, call(coin=coin), 100.0, 5)
+    assert (idea_id, trade_id) == (None, None) and "protected" in msg
+    assert ex.writes == []
+
+
+def test_auto_open_never_adds_to_a_coin_already_held(tmp_path, tg):
+    ex = FakeExchange()
+    ex.fill(PAIR, 3.0)                           # a position opened by hand
+    m, s = bot(tmp_path, ex)
+    _, trade_id, msg = smc_trade.auto_open(m, s, call(), 100.0, 5)
+    assert trade_id is None and "already hold" in msg
+    assert ex.writes == []
+
+
+def test_auto_open_sizes_down_when_a_tight_stop_needs_too_much_margin(tmp_path, tg):
+    ex = FakeExchange()                          # free Rs 50,000: margin budget Rs 2,500
+    m, s = bot(tmp_path, ex)
+    _, trade_id, msg = smc_trade.auto_open(m, s, call(stop="99.5"), 1000.0, 5)
+    assert trade_id and "sized down" in msg
+    t = next(x for x in m.store.trades() if x["id"] == trade_id)
+    assert t["margin_inr"] <= 2500 and t["risk_inr"] < 1000
+    assert next(w for w in ex.writes if w[0] == "create_tpsl")[1] == 99.5
+
+
+def test_auto_close_closes_the_bots_trade_on_the_choch_exit_only(tmp_path, tg):
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex)
+    idea_id, trade_id, _ = smc_trade.auto_open(m, s, call(), 100.0, 5)
+    row = call(idea=str(idea_id), why="stop")
+    assert smc_trade.auto_close(m, row) is None  # the exchange stop handles that
+    assert "exit_position" not in [w[0] for w in ex.writes]
+    msg = smc_trade.auto_close(m, call(idea=str(idea_id), why="choch"))
+    assert msg and f"#{trade_id}" in msg
+    assert [w for w in ex.writes if w[0] == "exit_position"] == [("exit_position", "p1")]
+    assert smc_trade.auto_close(m, call(idea=str(idea_id), why="choch")) is None  # gone
+
+
+def test_auto_close_never_touches_a_hand_position_or_a_protected_coin(tmp_path, tg,
+                                                                    monkeypatch):
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex)
+    idea_id, _, _ = smc_trade.auto_open(m, s, call(), 100.0, 5)
+    assert smc_trade.auto_close(m, call(idea="-", why="choch")) is None
+    assert smc_trade.auto_close(m, call(idea="", why="time")) is None
+    monkeypatch.setattr(smc_trade, "PROTECTED", frozenset({"SOL"}))
+    assert smc_trade.auto_close(m, call(idea=str(idea_id), why="choch")) is None
+    assert "exit_position" not in [w[0] for w in ex.writes]
+
+
+def test_auto_dry_run_sends_nothing(tmp_path, tg):
+    from backend.trading.manager import DRY_RUN
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex, mode=DRY_RUN)
+    _, trade_id, msg = smc_trade.auto_open(m, s, call(), 100.0, 5)
+    assert trade_id and msg.startswith("dry run") and ex.writes == []
+
+
+def test_the_client_refuses_any_spot_write():
+    from backend.trading.client import CoinDcxError, FuturesClient
+    c = FuturesClient("k", "s")
+    with pytest.raises(CoinDcxError, match="never places spot orders"):
+        c._write("/exchange/v1/orders/create", {"market": "SOLINR"})
+
+
+def test_journal_auto_mode_trades_a_fresh_call_then_closes_it_on_choch(tmp_path, tg):
+    pytest.importorskip("numba")             # smc_paper -> smc needs it
+    import smc_paper
+    ex = FakeExchange()
+    m, s = bot(tmp_path, ex)
+    b = object.__new__(smc_paper.Bot)            # no config.yaml, no real exchange
+    b.t, b.check, b.offer, b.auto = smc_trade, False, False, True
+    b.dry, b.live, b.settings = m, m, s
+    b.risk_pct, b.risk_cap_inr, b.leverage = 1.0, 100.0, 5
+    now = pd.Timestamp("2026-11-07 16:10", tz="UTC")
+    row = {c: "" for c in smc_paper.COLS}
+    row.update(call().to_dict(), status="open", late="no", entry_utc="2026-11-07 16:00")
+    df = pd.DataFrame([row], columns=smc_paper.COLS)
+    b.handle_new(df, now)
+    assert df.at[0, "note"].startswith("traded: ") and df.at[0, "idea"] not in ("", "-")
+    assert "create_order" in [w[0] for w in ex.writes]
+    b.handle_new(df, now)                        # the next run never trades it twice
+    assert [w[0] for w in ex.writes].count("create_order") == 1
+    df.loc[0, ["status", "why"]] = ["closed", "choch"]
+    b.handle_closed(df)
+    assert df.at[0, "note"].startswith("auto-closed trade #")
+    assert ("exit_position", "p1") in ex.writes

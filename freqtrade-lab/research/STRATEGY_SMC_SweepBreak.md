@@ -261,6 +261,35 @@ in the CoinDCX app, or:
 .venv/Scripts/python.exe -m backend.cli trade close B-XXX_USDT
 ```
 
+## Auto mode (no tap), built 2026-11-07
+
+The owner asked on 2026-11-07 for trades with no tap, on the main account
+(Rs 1 lakh added to the futures wallet). Built and tested, **off until the
+owner switches it on** (`trade_bot_switch.sh auto-on`, see
+[deploy/openclaw/README.md](../../deploy/openclaw/README.md)). Scan flag
+`--auto`, code `smc_trade.auto_open` / `auto_close`.
+
+* **Opens** each fresh on-time call at market, through the same rules as a
+  tap (`TradeManager.open`). Risk = 1% of free balance capped at **Rs 500**
+  (0.5% of Rs 1 lakh, the backtest's account setting). When a tight stop
+  would need more margin than the limits allow (Rs 5,000, 5% of free), the
+  trade is **sized down** to that margin: same stop and target, fewer rupees.
+* **Stop and 6R target on the exchange; no trailing stop** (the bot's
+  default trail moves to breakeven at 1R, and breakeven moves failed in the
+  backtest).
+* **Closes** the bot's own SMC position on the 4h CHoCH and the 28-day exits.
+* **Never** trades or closes **S, ARB, APT** (`smc_trade.PROTECTED`, the
+  owner's own positions); never adds to a coin already held; never closes a
+  position the bot did not open from an SMC call.
+* **Never touches spot:** the CoinDCX client refuses any write that is not
+  a futures endpoint.
+* Daily loss limit Rs 1,500 and 10 positions (the owner's 3 count) still
+  stop new trades.
+
+Dry run on the server with the real balance (2026-11-07): SOL 3% stop →
+risk Rs 498, margin Rs 3,189; ETH 1% stop → sized down, risk Rs 273;
+ARB and APT refused (protected).
+
 ## What runs where
 
 **Since 2026-11-07 the scan and its monitoring run in OpenClaw on EC2**

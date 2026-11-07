@@ -161,9 +161,11 @@ def _offer(mgr: TradeManager, idea: dict, text: str) -> None:
 
 
 def propose(mgr: TradeManager, req: risk.TradeRequest, *, timeframe: str, why: str,
-            settings: Settings) -> dict:
+            settings: Settings, send: bool = True) -> dict:
     """Record a setup found by hand (or by Claude in chat) and offer it with a Place
-    button. Places nothing: only the owner's tap or `trade take ID` places it."""
+    button. Places nothing: only the owner's tap or `trade take ID` places it.
+    ``send=False`` records it without the Place message (the SMC auto mode, which
+    the owner switched on, places it itself)."""
     req.pair = risk.to_pair(req.pair)
     now = int(time.time() * 1000)
     plan = mgr.preview(req)
@@ -179,7 +181,7 @@ def propose(mgr: TradeManager, req: risk.TradeRequest, *, timeframe: str, why: s
                 status=BLOCKED if errors else READY,
                 reason="; ".join(errors) if errors else why)
     idea["id"] = mgr.store.add_idea(**idea)
-    if not errors:
+    if not errors and send:
         entry = f"limit {plan.entry:g}" if idea["limit_price"] else f"market ~{plan.entry:g}"
         _offer(mgr, idea, f"{req.side.upper()} {idea['coin']} ({timeframe}) {entry}, "
                           f"SL {plan.stop_loss:g} TP {plan.take_profit:g}, {plan.rr:.1f}R, "

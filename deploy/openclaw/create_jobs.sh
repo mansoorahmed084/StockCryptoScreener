@@ -20,7 +20,13 @@ SCAN="env -u TELEGRAM_BOT_TOKEN -u TELEGRAM_CHAT_ID $W/.venv/bin/python research
 # With the trade bot on this server, the scan also does what the laptop scan
 # did: Telegram NEW/CLOSED from the trade bot, the CoinDCX dry-run check, and
 # a Place button for each fresh call. All three need the keys in smc/.env.
-if [ -f "$W/trade_bot.on" ]; then SCAN="$SCAN --telegram --dcx-check --offer"; fi
+# With auto_trade.on as well (the owner's switch: trade_bot_switch.sh auto-on),
+# the scan PLACES each fresh call with no tap and closes the bot's SMC trades
+# on the CHoCH / 28-day exits. Never the PROTECTED coins (smc_trade.py).
+if [ -f "$W/trade_bot.on" ]; then
+  if [ -f "$W/auto_trade.on" ]; then SCAN="$SCAN --telegram --auto"
+  else SCAN="$SCAN --telegram --dcx-check --offer"; fi
+fi
 
 openclaw cron add --declaration-key smc-scan --name smc-scan \
   --description "SMC Sweep-Break 4h scan + paper journal (deterministic Python, no model)" \

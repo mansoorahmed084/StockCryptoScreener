@@ -372,6 +372,10 @@ def main() -> None:
     ap.add_argument("--offer", action="store_true",
                     help="with --log: send each fresh call to the trade bot with a "
                          "Place button (needs `trade bot` running for the taps)")
+    ap.add_argument("--auto", action="store_true",
+                    help="with --log: PLACE each fresh on-time call on CoinDCX with no "
+                         "tap, and close the bot's SMC positions on the CHoCH / 28-day "
+                         "exits (the owner's auto mode; never the PROTECTED coins)")
     ap.add_argument("--risk-pct", type=float, default=1.0,
                     help="risk per trade for --dcx-check / --offer, %% of the free "
                          "futures balance (default 1)")
@@ -395,10 +399,10 @@ def main() -> None:
         if a.log:
             tg = (smc_paper.Telegram(dry=True) if a.telegram_dry else
                   smc_paper.Telegram() if a.telegram else None)
-            bot = (smc_paper.Bot(check=a.dcx_check or a.offer, offer=a.offer,
+            bot = (smc_paper.Bot(check=a.dcx_check or a.offer or a.auto, offer=a.offer,
                                  risk_pct=a.risk_pct, risk_cap_inr=a.risk_inr,
-                                 leverage=a.leverage)
-                   if a.dcx_check or a.offer else None)
+                                 leverage=a.leverage, auto=a.auto)
+                   if a.dcx_check or a.offer or a.auto else None)
             smc_paper.update(results, now, text, watching, tg, bot)
     except Exception:
         if not a.log:
