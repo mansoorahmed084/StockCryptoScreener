@@ -1,7 +1,7 @@
 # SMC Sweep-Break on OpenClaw (AWS EC2)
 
 Since 2026-11-07 the SMC scan and its monitoring run inside OpenClaw on the
-EC2 server (`ubuntu@13.207.59.231`, Mumbai, key `myClawNew.pem`), so they run
+EC2 server (`ubuntu@13.206.103.15`, Mumbai, key `myClawNew.pem`), so they run
 when the laptop is off. The laptop's Windows scan task is disabled.
 
 | OpenClaw job | kind | when (UTC) | does |
@@ -34,18 +34,18 @@ places no orders and gives no advice.
 deploy/openclaw/pull_journal.sh
 
 # job status and the last runs
-ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) openclaw cron list'
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) openclaw cron list'
 
 # after changing the scan code: commit, then copy it again
 git archive --format=tar HEAD freqtrade-lab/research/{harness,smc,smc_loop,smc_account,smc_oos,smc_paper,scan_smc,smc_trade}.py \
     backend deploy/trade_bot_bg.py \
-  | ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'tar -x -C ~/openclaw/workspace/smc'
+  | ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'tar -x -C ~/openclaw/workspace/smc'
 
 # after changing the prompt or the schedule: copy the files, then
-ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/create_jobs.sh'
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/create_jobs.sh'
 
 # an OpenClaw image update changed the container's Python: rebuild the env
-ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/setup_smc.sh'
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/setup_smc.sh'
 ```
 
 ## The trade bot on the server (prepared 2026-11-07)
@@ -66,12 +66,13 @@ keys are readable by those agents.**
 
 Before the first move (owner):
 
-1. AWS: EC2 → Elastic IPs. Make sure the server has a fixed IP (an Elastic
-   IP on instance `i-0d065d9ea84fad130`). A normal IP changes on stop/start.
-2. CoinDCX: new API keys for main and sehe, bound to that IP, futures on.
+1. Fixed IP: done 2026-11-07. Elastic IP `13.206.103.15`
+   (`eipalloc-0134dc1a1598ea58e`) is on instance `i-0d065d9ea84fad130`; the
+   old `13.207.59.231` is gone. If the server is ever deleted, release it.
+2. CoinDCX: new API keys for main and sehe, bound to `13.206.103.15`, futures on.
 3. Paste them:
    ```bash
-   ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231
+   ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15
    nano ~/openclaw/workspace/smc/.env
    ```
 

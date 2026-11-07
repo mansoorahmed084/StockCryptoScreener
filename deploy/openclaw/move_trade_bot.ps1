@@ -21,7 +21,7 @@ start the laptop bot again. Old copies are kept as *.bak.
 param(
     [switch]$Back,
     [switch]$Check,
-    [string]$Server = 'ubuntu@13.207.59.231',
+    [string]$Server = 'ubuntu@13.206.103.15',
     [string]$Key = "$HOME\Downloads\myClawNew.pem"
 )
 $ErrorActionPreference = 'Stop'
