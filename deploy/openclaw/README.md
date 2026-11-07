@@ -8,6 +8,7 @@ when the laptop is off. The laptop's Windows scan task is disabled.
 |---|---|---|---|
 | `smc-scan` | command, no model | :05 past 00, 04, 08, 12, 16, 20 | the tested Python scan (`scan_smc.py --log --min-vol 5 --watch 3`); updates the paper journal |
 | `smc-monitor` | agent, **openai/gpt-5.6-terra** | :12 past the same hours | runs `report_input.sh` (its only tool is exec, its only command that script) and sends a short report to Telegram chat 1265841645 through the OpenClaw bot |
+| `trade-bot` | command, no model | every 5 min | keep-alive for the CoinDCX trade bot; does nothing until `trade_bot.on` exists (see below) |
 
 The scan is a command job on purpose: the same rules every time, as tested
 against the backtest. Terra only reads the result and writes the message. It
@@ -37,7 +38,7 @@ ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo d
 
 # after changing the scan code: commit, then copy it again
 git archive --format=tar HEAD freqtrade-lab/research/{harness,smc,smc_loop,smc_account,smc_oos,smc_paper,scan_smc,smc_trade}.py \
-    backend/__init__.py backend/data/{__init__,binance_futures,futures}.py \
+    backend deploy/trade_bot_bg.py \
   | ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'tar -x -C ~/openclaw/workspace/smc'
 
 # after changing the prompt or the schedule: copy the files, then
@@ -47,12 +48,46 @@ ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo d
 ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/setup_smc.sh'
 ```
 
-## What did not move
+## The trade bot on the server (prepared 2026-11-07)
 
-* **Place-button offers and the CoinDCX dry-run check** stay off on EC2: the
-  CoinDCX keys are bound to the home IP, and the taps are handled by the trade
-  bot on the laptop. To bring them back, create CoinDCX keys bound to
-  13.207.59.231 and move the trade bot there too.
-* **The trade bot** (`Trade bot (all accounts)`) still runs on the laptop.
-* Back to the laptop: `Enable-ScheduledTask -TaskName 'SMC Sweep-Break scan'`
-  and disable both OpenClaw jobs (`openclaw cron disable <id>`).
+The CoinDCX trade bot (`trade bot`, every account: Place / Confirm taps,
+position checks, stop trails, the Sehe ledger scan) can run inside the same
+OpenClaw container. The owner chose this over a separate container. **Any
+OpenClaw agent that can run commands can read `smc/.env`, so the exchange
+keys are readable by those agents.**
+
+| part | what |
+|---|---|
+| `trade-bot` job | command job every 5 min: `start_trade_bot.sh` starts `deploy/trade_bot_bg.py` when it is not running, only while `smc/trade_bot.on` exists |
+| `trade_bot_switch.sh` | `check` (key names + `trade status` per account), `on`, `off`, `status` |
+| `smc/.env` | Telegram lines (copied) + the CoinDCX keys (owner pastes them) |
+| `smc/data_cache/` | `trading.db`, `trading_sehe.db`, `recovery_sehe.csv`, `trade_bot.log` |
+| scan flags | while `trade_bot.on` exists, `create_jobs.sh` adds `--telegram --dcx-check --offer` to `smc-scan` |
+
+Before the first move (owner):
+
+1. AWS: EC2 → Elastic IPs. Make sure the server has a fixed IP (an Elastic
+   IP on instance `i-0d065d9ea84fad130`). A normal IP changes on stop/start.
+2. CoinDCX: new API keys for main and sehe, bound to that IP, futures on.
+3. Paste them:
+   ```bash
+   ssh -i ~/Downloads/myClawNew.pem ubuntu@13.207.59.231
+   nano ~/openclaw/workspace/smc/.env
+   ```
+
+Then from the laptop:
+
+```powershell
+deploy\openclaw\move_trade_bot.ps1 -Check   # keys work from the server?
+deploy\openclaw\move_trade_bot.ps1          # laptop -> server
+deploy\openclaw\move_trade_bot.ps1 -Back    # server -> laptop
+```
+
+The move stops the laptop bot and disables its log-in task (two bots on one
+Telegram bot fight over the taps), copies the three state files, and turns
+the server bot on. While the bot is on the server, use Telegram for trades:
+the laptop dashboard's Trade page reads the old laptop database.
+
+* Back to the laptop for the scan as well: `move_trade_bot.ps1 -Back`, then
+  `Enable-ScheduledTask -TaskName 'SMC Sweep-Break scan'` and disable the
+  OpenClaw jobs (`openclaw cron disable <id>`).

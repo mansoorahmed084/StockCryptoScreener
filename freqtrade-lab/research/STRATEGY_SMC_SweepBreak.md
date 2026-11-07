@@ -267,8 +267,10 @@ in the CoinDCX app, or:
 `smc-scan` (command, no model) and the job `smc-monitor` (GPT-5.6 Terra,
 report to Telegram). The Windows scan task below is **disabled**, so there
 are no Place-button offers or CoinDCX dry-run checks for now (the CoinDCX keys
-are bound to the home IP). The trade bot still runs on the laptop. The
-Oracle plan for the trade bot is in [deploy/SMC_CLOUD.md](../../deploy/SMC_CLOUD.md).
+are bound to the home IP). The trade bot still runs on the laptop. Its move
+into the same OpenClaw container is prepared (job `trade-bot`, off until the
+server has its own CoinDCX keys): `deploy/openclaw/move_trade_bot.ps1`, see
+the README above. Moving it brings back the Place buttons and dry-run checks.
 
 | Windows task | runs | when | log |
 |---|---|---|---|
