@@ -7,7 +7,8 @@ Code: [smc.py](smc.py); the config is `B_final` in [smc_oos.py](smc_oos.py).
 > **Status, 2026-11-07: paper phase, running in OpenClaw on AWS EC2.** Every
 > 4h an OpenClaw command job runs the scan and updates the paper journal on
 > the server; 7 minutes later a GPT-5.6 Terra job sends a short report to
-> Telegram. See [deploy/openclaw/README.md](../../deploy/openclaw/README.md).
+> Telegram. The trade bot runs there too, so fresh calls come with a Place
+> button (main account). See [deploy/openclaw/README.md](../../deploy/openclaw/README.md).
 > No real SMC trade has been placed. By 2026-11-07, 4 on-time calls had
 > closed, all losses (-3.3R); far too few to judge.
 
@@ -265,17 +266,16 @@ in the CoinDCX app, or:
 **Since 2026-11-07 the scan and its monitoring run in OpenClaw on EC2**
 ([deploy/openclaw/README.md](../../deploy/openclaw/README.md)): the job
 `smc-scan` (command, no model) and the job `smc-monitor` (GPT-5.6 Terra,
-report to Telegram). The Windows scan task below is **disabled**, so there
-are no Place-button offers or CoinDCX dry-run checks for now (the CoinDCX keys
-are bound to the home IP). The trade bot still runs on the laptop. Its move
-into the same OpenClaw container is prepared (job `trade-bot`, off until the
-server has its own CoinDCX keys): `deploy/openclaw/move_trade_bot.ps1`, see
-the README above. Moving it brings back the Place buttons and dry-run checks.
+report to Telegram). **Since 2026-11-07 17:52 IST the trade bot runs there
+too** (job `trade-bot`, main account only until the sehe keys are added), so
+the scan again sends Place buttons and runs the CoinDCX dry-run check. Both
+Windows tasks below are **disabled**. Back to the laptop:
+`deploy/openclaw/move_trade_bot.ps1 -Back`.
 
 | Windows task | runs | when | log |
 |---|---|---|---|
 | **SMC Sweep-Break scan** (disabled 2026-11-07) | `scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check --offer` | 01:35, 05:35, 09:35, 13:35, 17:35, 21:35 IST | `freqtrade-lab/user_data/logs/smc_scan.log` |
-| **Trade bot (all accounts)** | `deploy/trade_bot_bg.py` → `trade bot` for main and sehe: Telegram taps, position checks, stop trails, Sehe ledger scan | at log-in, restarts itself | `data_cache/trade_bot.log` |
+| **Trade bot (all accounts)** (disabled 2026-11-07, runs on EC2) | `deploy/trade_bot_bg.py` → `trade bot` for main and sehe: Telegram taps, position checks, stop trails, Sehe ledger scan | at log-in, restarts itself | `data_cache/trade_bot.log` |
 
 Only one trade bot may run per Telegram bot. The background one holds a lock,
 so `deploy/trade_bot_all.bat` exits if it is on. Do not start

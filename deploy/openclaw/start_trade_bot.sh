@@ -19,6 +19,10 @@ if [ ! -f .env ]; then echo "trade bot NOT started: no .env with the keys"; exit
 if running; then echo "trade bot running"; exit 0; fi
 
 mkdir -p data_cache
+# The OpenClaw container sets TELEGRAM_BOT_TOKEN to an empty string, and
+# load_dotenv never overrides a set variable: without this the bot would not
+# read the trade bot's token from .env, and its buttons would be off.
+unset TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
 setsid nohup .venv/bin/python deploy/trade_bot_bg.py >/dev/null 2>&1 </dev/null &
 sleep 5
 if running; then echo "trade bot started"; exit 0; fi

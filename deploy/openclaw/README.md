@@ -48,7 +48,7 @@ ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo d
 ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) sh /home/node/.openclaw/workspace/smc/setup_smc.sh'
 ```
 
-## The trade bot on the server (prepared 2026-11-07)
+## The trade bot on the server (moved 2026-11-07 17:52 IST, main only)
 
 The CoinDCX trade bot (`trade bot`, every account: Place / Confirm taps,
 position checks, stop trails, the Sehe ledger scan) can run inside the same

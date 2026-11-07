@@ -15,7 +15,8 @@ set -e
 W=/home/node/.openclaw/workspace/smc
 TO=1265841645            # the owner's Telegram chat (same as the GST jobs)
 
-SCAN="$W/.venv/bin/python research/scan_smc.py --log --min-vol 5 --watch 3"
+# env -u: the container's empty TELEGRAM_BOT_TOKEN would hide the one in .env
+SCAN="env -u TELEGRAM_BOT_TOKEN -u TELEGRAM_CHAT_ID $W/.venv/bin/python research/scan_smc.py --log --min-vol 5 --watch 3"
 # With the trade bot on this server, the scan also does what the laptop scan
 # did: Telegram NEW/CLOSED from the trade bot, the CoinDCX dry-run check, and
 # a Place button for each fresh call. All three need the keys in smc/.env.
