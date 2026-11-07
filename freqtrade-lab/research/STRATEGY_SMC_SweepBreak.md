@@ -4,11 +4,12 @@ The one Smart Money Concepts setup out of ~2,000 tested that kept its edge on
 203 coins it had never seen. Derivation: [SMC_RESEARCH.md](SMC_RESEARCH.md).
 Code: [smc.py](smc.py); the config is `B_final` in [smc_oos.py](smc_oos.py).
 
-> **Status, 2026-11-01: paper + one-tap phase, on the laptop.** Every 4h a
-> scan logs the calls, checks each one on CoinDCX in dry run and sends it to
-> Telegram with Place + Confirm buttons. No real SMC trade has been placed.
-> 3 on-time calls so far, about -1.0R in total; far too few to judge. Live
-> numbers: [journal/SMC_PAPER.md](../../journal/SMC_PAPER.md).
+> **Status, 2026-11-07: paper phase, running in OpenClaw on AWS EC2.** Every
+> 4h an OpenClaw command job runs the scan and updates the paper journal on
+> the server; 7 minutes later a GPT-5.6 Terra job sends a short report to
+> Telegram. See [deploy/openclaw/README.md](../../deploy/openclaw/README.md).
+> No real SMC trade has been placed. By 2026-11-07, 4 on-time calls had
+> closed, all losses (-3.3R); far too few to judge.
 
 How it is run, section by section:
 
@@ -261,12 +262,17 @@ in the CoinDCX app, or:
 
 ## What runs where
 
-All on the laptop for now; it only runs while you are logged in and the
-laptop is awake. The cloud move is prepared: [deploy/SMC_CLOUD.md](../../deploy/SMC_CLOUD.md).
+**Since 2026-11-07 the scan and its monitoring run in OpenClaw on EC2**
+([deploy/openclaw/README.md](../../deploy/openclaw/README.md)): the job
+`smc-scan` (command, no model) and the job `smc-monitor` (GPT-5.6 Terra,
+report to Telegram). The Windows scan task below is **disabled**, so there
+are no Place-button offers or CoinDCX dry-run checks for now (the CoinDCX keys
+are bound to the home IP). The trade bot still runs on the laptop. The
+Oracle plan for the trade bot is in [deploy/SMC_CLOUD.md](../../deploy/SMC_CLOUD.md).
 
 | Windows task | runs | when | log |
 |---|---|---|---|
-| **SMC Sweep-Break scan** | `scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check --offer` | 01:35, 05:35, 09:35, 13:35, 17:35, 21:35 IST | `freqtrade-lab/user_data/logs/smc_scan.log` |
+| **SMC Sweep-Break scan** (disabled 2026-11-07) | `scan_smc.py --log --min-vol 5 --watch 3 --telegram --dcx-check --offer` | 01:35, 05:35, 09:35, 13:35, 17:35, 21:35 IST | `freqtrade-lab/user_data/logs/smc_scan.log` |
 | **Trade bot (all accounts)** | `deploy/trade_bot_bg.py` → `trade bot` for main and sehe: Telegram taps, position checks, stop trails, Sehe ledger scan | at log-in, restarts itself | `data_cache/trade_bot.log` |
 
 Only one trade bot may run per Telegram bot. The background one holds a lock,
