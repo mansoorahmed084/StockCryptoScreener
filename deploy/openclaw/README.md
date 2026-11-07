@@ -84,6 +84,11 @@ deploy\openclaw\move_trade_bot.ps1          # laptop -> server
 deploy\openclaw\move_trade_bot.ps1 -Back    # server -> laptop
 ```
 
+Sehe keys are optional: without them the bot watches main only and runs no
+Sehe ledger scan. After pasting them into `smc/.env`, restart the bot so it
+finds the account (`trade_bot_switch.sh off`, then `on`, inside the
+container).
+
 The move stops the laptop bot and disables its log-in task (two bots on one
 Telegram bot fight over the taps), copies the three state files, and turns
 the server bot on. While the bot is on the server, use Telegram for trades:

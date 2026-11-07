@@ -18,12 +18,19 @@ case "${1:-status}" in
   check)
     [ -f .env ] || { echo "no $W/.env yet"; exit 1; }
     bad=0
-    for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID COINDCX_API_KEY COINDCX_API_SECRET \
-             COINDCX_API_KEY_SEHE COINDCX_API_SECRET_SEHE; do
+    for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID COINDCX_API_KEY COINDCX_API_SECRET; do
       if grep -Eq "^$k=.+" .env; then echo "  $k: set"; else echo "  $k: MISSING"; bad=1; fi
     done
     [ "$bad" = 0 ] || exit 1
-    for a in main sehe; do
+    # sehe is optional: without its keys the bot watches main only (and runs
+    # no Sehe ledger scan). After adding them, restart the bot: off, then on.
+    accts=main
+    if grep -Eq "^COINDCX_API_KEY_SEHE=.+" .env && grep -Eq "^COINDCX_API_SECRET_SEHE=.+" .env; then
+      accts="main sehe"
+    else
+      echo "  sehe keys: not set (the bot will watch main only)"
+    fi
+    for a in $accts; do
       echo "== trade status --account $a"
       $PY -m backend.cli trade status --account "$a" || bad=1
     done
