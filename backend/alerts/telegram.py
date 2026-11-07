@@ -91,8 +91,19 @@ class TelegramNotifier(Notifier):
     def answer(self, callback_id: str, text: str = "") -> None:
         self._call("answerCallbackQuery", callback_query_id=callback_id, text=text)
 
-    def updates(self, offset: int | None, timeout: int = 20) -> list[dict]:
-        body = {"timeout": timeout, "allowed_updates": ["callback_query"]}
+    def send_text(self, text: str) -> int | None:
+        """Plain text (no Markdown: pair names have underscores); the message id."""
+        res = self._call("sendMessage", chat_id=self.chat_id, text=text[:4000])
+        return res.get("message_id") if res else None
+
+    def set_commands(self, commands: list[tuple[str, str]]) -> None:
+        """The '/' menu Telegram shows for this bot."""
+        self._call("setMyCommands",
+                   commands=[{"command": c, "description": d} for c, d in commands])
+
+    def updates(self, offset: int | None, timeout: int = 20,
+                allowed: tuple[str, ...] = ("callback_query",)) -> list[dict]:
+        body = {"timeout": timeout, "allowed_updates": list(allowed)}
         if offset is not None:
             body["offset"] = offset
         return self._call("getUpdates", **body) or []

@@ -89,6 +89,22 @@ Sehe ledger scan. After pasting them into `smc/.env`, restart the bot so it
 finds the account (`trade_bot_switch.sh off`, then `on`, inside the
 container).
 
+### Telegram commands (two-way, since 2026-11-08)
+
+Send these to the trade bot in Telegram (only your chat is answered; the
+"/" menu lists them):
+
+| command | answer |
+|---|---|
+| `/positions` | every open position: entry, price now, profit/loss in rupees, SL, TP, leverage, liquidation, whose it is (yours / bot trade #N, protected) |
+| `/pnl` | closed profit/loss for today (IST), 7 days and 30 days, split into trades, funding and fees; plus open profit/loss now |
+| `/close SOL` | shows the position with **Close it** / **Cancel**; only the tap (within 2 minutes) closes it at market and cancels its stop/target. `/close SOL sehe` picks an account |
+| `/help` | the list |
+
+Code: `backend/trading/tgcmd.py`, wired in `tgbot.Listener`. The chat never
+opens a trade. S, ARB, APT can be closed here (that is you asking); no
+automatic path ever closes them.
+
 ### Auto mode (no tap) — the owner's switch
 
 ```bash

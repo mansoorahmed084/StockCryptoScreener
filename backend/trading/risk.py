@@ -161,6 +161,15 @@ class Plan:
         return "\n".join(lines)
 
 
+# The owner's own positions (owner's rule, 2026-11-07): no automatic path ever
+# opens a trade on these coins or closes them. Only the owner closes them.
+OWNER_COINS = frozenset({"S", "ARB", "APT"})
+
+
+def owner_coin(coin_or_pair: str) -> bool:
+    return to_pair(coin_or_pair).removeprefix("B-").removesuffix("_USDT") in OWNER_COINS
+
+
 def to_pair(coin_or_pair: str) -> str:
     """'sol' / 'SOLUSDT' / 'B-SOL_USDT' -> 'B-SOL_USDT'."""
     s = coin_or_pair.strip().upper()

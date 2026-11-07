@@ -52,7 +52,7 @@ MAX_GAP = 0.015          # CoinDCX vs Binance price
 TIMEFRAME = "4h"
 # The owner's own positions (2026-11-07): the auto mode never opens a trade
 # on these coins and never closes them. Only the owner closes them.
-PROTECTED = frozenset({"S", "ARB", "APT"})
+PROTECTED = risk.OWNER_COINS
 AUTO_EXITS = ("choch", "time")   # exits the exchange orders cannot see
 
 

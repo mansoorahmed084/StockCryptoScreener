@@ -23,7 +23,12 @@ class FakeTelegram:
     def answer(self, callback_id, text=""):
         self.answers.append(text)
 
-    def updates(self, offset, timeout=20):
+    def send_text(self, text):
+        self.sent.append((text, None))
+        return 100 + len(self.sent)
+
+    def updates(self, offset, timeout=20, allowed=("callback_query",)):
+        self.allowed = allowed
         out, self.queue = self.queue, []
         return out
 

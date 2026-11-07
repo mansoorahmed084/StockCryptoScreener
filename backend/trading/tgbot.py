@@ -7,7 +7,10 @@ the current price and shows the fresh plan with **Confirm** and **Skip**. Confir
 rules and checks as the Trade page and `trade take`. Nothing is placed without the
 owner's two taps, and taps from any other chat are ignored.
 
-The listener runs inside `trade bot`, long-polling Telegram for button taps.
+The listener runs inside `trade bot`, long-polling Telegram for button taps and
+the owner's text commands (tgcmd: /positions, /pnl, /close COIN, /help). A
+/close closes nothing by itself: it answers with a **Close it** button, and
+only that tap (within ``CONFIRM_S``) closes the position.
 """
 from __future__ import annotations
 
@@ -16,13 +19,15 @@ import time
 from typing import Any
 
 from backend.alerts.telegram import telegram_from_env
-from backend.trading import ideas
+from backend.trading import ideas, tgcmd
 from backend.trading.manager import TradeError, TradeManager
 
 log = logging.getLogger(__name__)
 
-CONFIRM_S = 120          # a Confirm button older than this asks for a fresh Place
+CONFIRM_S = 120          # a Confirm (or Close) button older than this asks again
 PLACE, CONFIRM, SKIP = "p", "c", "x"
+CLOSE, KEEP = "k", "n"   # the buttons of the owner's /close command
+UPDATES = ("callback_query", "message")
 
 
 def offer(mgr: TradeManager, idea: dict, text: str) -> bool:
@@ -47,20 +52,80 @@ class Listener:
         self.tg = tg or telegram_from_env()
         self.clock = clock
         self.offset: int | None = None
+        self._menu_set = False
 
     def poll(self, timeout: int = 20) -> list[str]:
-        """Wait up to ``timeout`` s for taps and handle them; what happened, for the log."""
+        """Wait up to ``timeout`` s for taps and commands and handle them; what
+        happened, for the log."""
+        if not self._menu_set and hasattr(self.tg, "set_commands"):
+            self._menu_set = True
+            try:
+                self.tg.set_commands(tgcmd.COMMANDS)
+            except Exception as exc:              # the menu is a nicety
+                log.warning("setting the command menu failed: %s", exc)
         out = []
-        for u in self.tg.updates(self.offset, timeout):
+        for u in self.tg.updates(self.offset, timeout, allowed=UPDATES):
             self.offset = u["update_id"] + 1
-            cq = u.get("callback_query")
-            if cq:
-                try:
+            cq, msg = u.get("callback_query"), u.get("message")
+            try:
+                if cq:
                     out.append(self.handle(cq))
-                except Exception as exc:          # one bad tap never stops the bot
-                    log.exception("button tap failed")
-                    out.append(f"tap failed: {exc}")
+                elif msg:
+                    out.append(self.command(msg))
+            except Exception as exc:              # one bad tap or command never stops the bot
+                log.exception("telegram update failed")
+                out.append(f"update failed: {exc}")
+                if msg and self._owner(msg):
+                    self.tg.send_text(f"That failed: {exc}")
         return out
+
+    def _owner(self, msg: dict) -> bool:
+        return str((msg.get("chat") or {}).get("id", "")) == str(self.tg.chat_id)
+
+    def command(self, msg: dict) -> str:
+        """A text command from the owner's chat (tgcmd). Other chats get no answer."""
+        chat = str((msg.get("chat") or {}).get("id", ""))
+        if not self._owner(msg):
+            return f"ignored a message from chat {chat}"
+        cmd, answer = tgcmd.reply_for(self.managers, msg.get("text") or "")
+        if cmd == "close" and not isinstance(answer, str):
+            mgr, pos = answer
+            pair, now = pos["pair"], int(self.clock())
+            self.tg.send_buttons(tgcmd.close_prompt(mgr, pos), [
+                ("Close it", f"{CLOSE}|{mgr.account}|{pair}|{now}"),
+                ("Cancel", f"{KEEP}|{mgr.account}|{pair}")])
+            return f"/close {pair} on {mgr.account}: asked to confirm"
+        self.tg.send_text(answer)
+        return f"/{cmd} answered"
+
+    def _close_tap(self, cq: dict, parts: list[str]) -> str:
+        """The Close it / Cancel buttons of a /close command."""
+        action, account, pair = parts[0], parts[1], parts[2]
+        mid = (cq.get("message") or {}).get("message_id")
+        mgr = self.managers.get(account)
+        if mgr is None:
+            self.tg.answer(cq["id"], f"account {account} is not watched by this bot")
+            return f"close tap for unwatched account {account}"
+        tag = f"[{account}] {tgcmd.coin(pair)}"
+        if action == KEEP:
+            self.tg.answer(cq["id"], "kept")
+            self.tg.edit(mid, f"{tag}: kept open.")
+            return f"{tag}: close cancelled"
+        if self.clock() - int(parts[3]) > CONFIRM_S:
+            self.tg.answer(cq["id"], "too old")
+            self.tg.edit(mid, f"{tag}: that Close button expired. Send /close "
+                              f"{tgcmd.coin(pair)} again.")
+            return f"{tag}: close expired"
+        self.tg.answer(cq["id"], "closing...")
+        try:
+            with mgr.lock:
+                mgr.close(pair, confirm=pair)
+        except TradeError as exc:
+            self.tg.edit(mid, f"{tag}: not closed - {exc}")
+            return f"{tag}: close refused - {exc}"
+        word = "closed at market" if mgr.live else "dry run, nothing sent"
+        self.tg.edit(mid, f"{tag}: {word}. Its stop and target orders were cancelled.")
+        return f"{tag}: {word} (owner's /close)"
 
     def handle(self, cq: dict) -> str:
         msg = cq.get("message") or {}
@@ -69,6 +134,8 @@ class Listener:
             self.tg.answer(cq["id"], "not allowed")
             return f"ignored a tap from chat {chat}"
         parts = str(cq.get("data", "")).split("|")
+        if parts[0] in (CLOSE, KEEP):
+            return self._close_tap(cq, parts)
         action, account, idea_id = parts[0], parts[1], int(parts[2])
         mgr = self.managers.get(account)
         mid = msg.get("message_id")
