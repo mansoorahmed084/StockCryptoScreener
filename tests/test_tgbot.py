@@ -13,17 +13,17 @@ class FakeTelegram:
     def __init__(self):
         self.sent, self.edits, self.answers, self.queue = [], [], [], []
 
-    def send_buttons(self, text, buttons):
+    def send_buttons(self, text, buttons, html=False):
         self.sent.append((text, buttons))
         return 100 + len(self.sent)
 
-    def edit(self, message_id, text, buttons=None):
+    def edit(self, message_id, text, buttons=None, html=False):
         self.edits.append((message_id, text, buttons))
 
     def answer(self, callback_id, text=""):
         self.answers.append(text)
 
-    def send_text(self, text):
+    def send_text(self, text, html=False):
         self.sent.append((text, None))
         return 100 + len(self.sent)
 
@@ -82,7 +82,7 @@ def test_place_then_confirm_places_the_trade(tmp_path, tg):
     assert bot.poll() == [f"[main] #{idea['id']} SOL: plan shown"]
     assert ex.writes == []                                 # Place alone sends nothing
     _, text, buttons = tg.edits[-1]
-    assert "stop loss" in text and [b[0] for b in buttons] == ["Confirm", "Skip"]
+    assert "<b>Risk:</b>" in text and [b[0] for b in buttons] == ["Confirm", "Skip"]
 
     tap(tg, buttons[0][1])
     [line] = bot.poll()

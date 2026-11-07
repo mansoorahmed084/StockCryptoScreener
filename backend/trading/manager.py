@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from backend.trading import risk
+from backend.trading import risk, tgfmt
 from backend.trading.client import MAIN, CoinDcxError, FuturesClient, UnknownOutcome
 from backend.trading.store import CLOSED, FAILED, OPEN, PENDING, TradeStore
 
@@ -111,7 +111,7 @@ class TradeManager:
                    TradeStore(account_db(t.get("db", "data_cache/trading.db"), account)),
                    account_limits(t, account),
                    mode=DRY_RUN if force_dry_run else str(t.get("mode", DRY_RUN)),
-                   notify=notifier_from_env().send,
+                   notify=notifier_from_env().send_html,
                    fill_timeout_s=float(t.get("fill_timeout_s", 20)),
                    close_unprotected=bool(t.get("close_unprotected", False)),
                    account=account)
@@ -124,12 +124,95 @@ class TradeManager:
     def halted(self) -> bool:
         return self.store.flag(HALT_FLAG) == "1"
 
-    def notify(self, text: str) -> None:
-        log.info(text)
+    def notify(self, text: str, *, card: bool = False) -> None:
+        """A Telegram message (HTML). ``card``: a ready tgfmt card; any other
+        text gets the small bot header and is escaped."""
+        log.info(tgfmt.strip(text) if card else text)
         try:
-            self._notify(f"[CoinDCX{'' if self.account == MAIN else ' ' + self.account}] {text}")
+            self._notify(text if card else tgfmt.notice(text, self.account))
         except Exception as exc:              # a failed message must not stop trading logic
             log.warning("notify failed: %s", exc)
+
+    def _open_card(self, trade_id: int | None, ts: Any = None) -> None:
+        """The OPEN card of a filled, protected trade. Never raises: a message
+        must not stop trading logic."""
+        try:
+            self._open_card_send(trade_id, ts)
+        except Exception as exc:
+            log.warning("OPEN message failed: %s", exc)
+
+    def _open_card_send(self, trade_id: int | None, ts: Any) -> None:
+        t = self.store.trade(trade_id) if trade_id else None
+        if t is None:
+            return
+        entry, tp, sl = _f(t["entry"]), _f(t["take_profit"]), _f(t["stop_loss"])
+        rr = reward = None
+        if tp and entry and sl and entry != sl and t["risk_inr"]:
+            rr = abs(tp - entry) / abs(entry - sl)
+            reward = rr * _f(t["risk_inr"])
+        self.notify(tgfmt.open_card(t, self.account, self.live, ts, reward, rr), card=True)
+
+    def realized_inr(self, position_id: str | None, since_ms: float, *,
+                     tries: int = 1, wait_s: float = 2.0) -> float | None:
+        """Booked profit/loss of a position since ``since_ms``: trades, funding
+        and fees from the futures wallet ledger. None while nothing but funding
+        is booked (``tries`` re-reads it ``wait_s`` apart: a close is booked a
+        moment after it fills)."""
+        if not position_id or not self.client.has_keys:
+            return None
+        for i in range(max(1, tries)):
+            try:
+                rows = [t for t in self.client.transactions(1)
+                        if str(t.get("position_id")) == str(position_id)
+                        and _f(t.get("created_at")) >= since_ms]
+            except Exception as exc:
+                log.warning("reading the ledger failed: %s", exc)
+                return None
+            if any(t.get("stage") != "funding" for t in rows):
+                return sum(_f(t.get("amount")) - _f(t.get("fee_amount")) for t in rows)
+            if i + 1 < tries:
+                self._sleep(wait_s)
+        return None
+
+    def _exit_fill(self, pair: str, since_ms: float) -> tuple[float | None, str]:
+        """(price, why) of the order that closed ``pair`` after ``since_ms``,
+        when CoinDCX lists it; (None, '') otherwise."""
+        try:
+            done = [o for o in self.client.orders("filled")
+                    if o.get("pair") == pair and _f(o.get("updated_at")) >= since_ms]
+        except Exception:
+            return None, ""
+        if not done:
+            return None, ""
+        o = max(done, key=lambda o: _f(o.get("updated_at")))
+        kind = str(o.get("order_type", ""))
+        why = ("stop loss hit" if "stop" in kind else "target hit" if "take_profit" in kind
+               else "closed at market")
+        return (_f(o.get("avg_price")) or _f(o.get("price")) or None), why
+
+    def closed_card(self, *, side: str, pair: str, entry: float, position_id: str | None,
+                    since_ms: float, risk_inr: float | None, why: str,
+                    trade_id: int | None = None, tries: int = 1) -> None:
+        """Send the CLOSED card: booked profit/loss from the ledger, the exit
+        price from the closing order (else the last price). Never raises."""
+        try:
+            self._closed_card_send(side, pair, entry, position_id, since_ms, risk_inr, why,
+                                   trade_id, tries)
+        except Exception as exc:
+            log.warning("CLOSED message failed: %s", exc)
+
+    def _closed_card_send(self, side, pair, entry, position_id, since_ms, risk_inr, why,
+                          trade_id, tries) -> None:
+        pnl = self.realized_inr(position_id, since_ms, tries=tries)
+        exit_px, fill_why = self._exit_fill(pair, since_ms)
+        if exit_px is None:
+            try:
+                exit_px = self.last_price(pair) or None
+            except Exception:
+                exit_px = None
+        self.notify(tgfmt.closed_card(side=side, pair=pair, entry=entry, exit_px=exit_px,
+                                      pnl_inr=pnl, risk_inr=risk_inr, why=fill_why or why,
+                                      trade_id=trade_id, account=self.account), card=True)
 
     # -- market data -------------------------------------------------------------
     def instrument(self, pair: str) -> risk.Instrument:
@@ -276,7 +359,14 @@ class TradeManager:
             return plan, trade_id
 
         self.store.update_trade(trade_id, order_id=str((resp or {}).get("id", "")))
-        self.notify(f"entry sent: {plan.summary().splitlines()[0]}")
+        if req.entry_type != risk.MARKET:
+            self.notify(tgfmt.card(
+                tgfmt.head("⏳", f"ORDER PLACED {req.side.upper()} {tgfmt.coin(pair)}",
+                           self.account), None,
+                [tgfmt.risk_line(plan.risk_inr, plan.stop_loss, plan.entry),
+                 tgfmt.reward_line(plan.reward_inr, plan.take_profit, plan.entry, plan.rr)],
+                [f"Limit {tgfmt.px(plan.entry)} · waits for a fill · trade #{trade_id}"]),
+                card=True)
         if req.entry_type == risk.MARKET:
             pos = self._wait_for_position(pair)
             if pos is None:
@@ -285,7 +375,7 @@ class TradeManager:
                 self.notify(f"{pair}: market order sent but no position seen after "
                             f"{self.fill_timeout_s:.0f}s. Run `trade reconcile`.")
             else:
-                self._protect(trade_id, pos, plan.stop_loss, plan.take_profit)
+                self._protect(trade_id, pos, plan.stop_loss, plan.take_profit, announce=True)
         return plan, trade_id
 
     # -- add to a winner ---------------------------------------------------------------
@@ -389,7 +479,7 @@ class TradeManager:
 
     # -- stop loss and target ---------------------------------------------------------
     def _protect(self, trade_id: int | None, pos: dict, stop_loss: float,
-                 take_profit: float | None) -> bool:
+                 take_profit: float | None, announce: bool = False) -> bool:
         """Attach SL/TP to a filled position and read them back. Closes the
         position if the stop loss cannot be confirmed."""
         pair, pos_id = pos["pair"], pos["id"]
@@ -410,10 +500,12 @@ class TradeManager:
                 if trade_id:
                     self.store.update_trade(trade_id, status=OPEN, position_id=pos_id,
                                             entry=_f(fresh.get("avg_price")) or None)
+                if announce:
+                    self._open_card(trade_id)
                 if take_profit and not _f(fresh.get("take_profit_trigger")):
                     self.notify(f"{pair}: stop loss set at {fresh['stop_loss_trigger']} but the "
                                 "target was not accepted; set it again with `trade tpsl`")
-                else:
+                elif not announce:
                     self.notify(f"{pair}: protected. SL {fresh['stop_loss_trigger']}"
                                 f"  TP {fresh.get('take_profit_trigger') or 'none'}")
                 return True
@@ -544,7 +636,7 @@ class TradeManager:
                                 else f"trailing {how}")
 
     # -- close and cancel ----------------------------------------------------------
-    def close(self, pair: str, confirm: str) -> None:
+    def close(self, pair: str, confirm: str, why: str = "closed by you") -> None:
         pair = risk.to_pair(pair)
         if confirm.strip().upper() != pair:
             raise TradeError(f"not confirmed: type {pair} to close this position")
@@ -553,6 +645,7 @@ class TradeManager:
             raise TradeError(f"no open {pair} position")
         trade = self.store.latest_for_pair(pair)
         trade_id = trade["id"] if trade else None
+        started = time.time() * 1000
         self._write("exit_position", self.client.exit_position, pos["id"], trade_id=trade_id)
         try:
             self._write("cancel_position_orders", self.client.cancel_position_orders,
@@ -560,7 +653,15 @@ class TradeManager:
         except Exception as exc:
             log.warning("cancelling leftover orders on %s failed: %s", pair, exc)
         if trade_id and self.live:
-            self.store.update_trade(trade_id, status=CLOSED, note="closed by you")
+            self.store.update_trade(trade_id, status=CLOSED, note=why)
+        if self.live:
+            # a bot trade counts from its open; a position the bot did not
+            # open, only from this close (not its whole funding history)
+            since = trade["created_ms"] if trade else started - 60_000
+            self.closed_card(side=position_side(pos), pair=pair, entry=_f(pos.get("avg_price")),
+                             position_id=pos.get("id"), since_ms=since,
+                             risk_inr=trade["risk_inr"] if trade else None, why=why,
+                             trade_id=trade_id, tries=3)
 
     def cancel_order(self, order_id: str) -> None:
         self._write("cancel_order", self.client.cancel_order, order_id)
@@ -602,7 +703,8 @@ class TradeManager:
         """
         if not (self.live and self.client.has_keys):
             return []
-        msgs: list[str] = []
+        msgs: list[str] = []          # what happened, for the log
+        notes: list[str] = []         # plain messages for Telegram (cards go at once)
         held = {p["pair"]: p for p in self.positions()}
         open_orders = {o.get("id") for o in self.client.orders("open,partially_filled")}
 
@@ -612,7 +714,7 @@ class TradeManager:
             pos = held.get(t["pair"])
             if pos is not None:
                 if not _f(pos.get("stop_loss_trigger")):
-                    self._protect(t["id"], pos, t["stop_loss"], t["take_profit"])
+                    self._protect(t["id"], pos, t["stop_loss"], t["take_profit"], announce=True)
                     msgs.append(f"{t['pair']}: entry filled; SL/TP attached")
                 else:
                     self.store.update_trade(t["id"], status=OPEN, position_id=pos["id"])
@@ -620,25 +722,46 @@ class TradeManager:
                 self.store.update_trade(t["id"], status=CLOSED,
                                         note="entry order is gone (cancelled or rejected)")
                 msgs.append(f"{t['pair']}: entry order is no longer open")
+                notes.append(msgs[-1])
 
         for t in self.store.trades(OPEN):
             if t["mode"] == LIVE and t["pair"] not in held:
                 self.store.update_trade(t["id"], status=CLOSED,
                                         note="position closed (stop, target or by hand)")
                 msgs.append(f"{t['pair']}: position closed")
+                self.closed_card(side=t["side"], pair=t["pair"], entry=_f(t["entry"]),
+                                 position_id=t["position_id"], since_ms=t["created_ms"],
+                                 risk_inr=t["risk_inr"], trade_id=t["id"],
+                                 why="stop, target, or closed outside the bot")
 
         known = {t["pair"] for t in self.store.trades(PENDING) + self.store.trades(OPEN)}
         unprotected = {pair for pair, pos in held.items()
                        if not _f(pos.get("stop_loss_trigger")) and pair not in known}
         self._warned_unprotected &= unprotected
+        today = dt.datetime.now(tgfmt.IST).strftime("%Y-%m-%d")
         for pair in sorted(unprotected - self._warned_unprotected):
             if self.close_unprotected:
                 self._write("exit_position", self.client.exit_position, held[pair]["id"])
                 msgs.append(f"{pair}: had no stop loss; closed (trading.close_unprotected)")
-            else:
-                self._warned_unprotected.add(pair)
-                msgs.append(f"{pair}: open with NO stop loss. Set one: "
-                            f"python -m backend.cli trade tpsl {pair} --sl PRICE")
-        for m in msgs:
+                notes.append(msgs[-1])
+                continue
+            self._warned_unprotected.add(pair)
+            msgs.append(f"{pair}: open with NO stop loss")
+            # at most once a day per coin, also across bot restarts
+            if self.store.flag(f"nostop_warned:{pair}") == today:
+                continue
+            self.store.set_flag(f"nostop_warned:{pair}", today)
+            pos = held[pair]
+            self.notify(tgfmt.warn_card(
+                f"NO STOP LOSS {position_side(pos).upper()} {tgfmt.coin(pair)}",
+                [f"Entry {tgfmt.px(_f(pos.get('avg_price')))}, now "
+                 f"{tgfmt.px(_f(pos.get('mark_price')))}, liquidation "
+                 f"{tgfmt.px(_f(pos.get('liquidation_price')))}",
+                 "Set a stop in the CoinDCX app, or: python -m backend.cli trade tpsl "
+                 f"{pair} --sl PRICE",
+                 "Reminder once a day." + (" Protected coin: the bot never closes it."
+                                           if risk.owner_coin(pair) else "")],
+                self.account), card=True)
+        for m in notes:
             self.notify(m)
         return msgs

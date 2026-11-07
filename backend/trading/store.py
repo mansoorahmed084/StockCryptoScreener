@@ -117,6 +117,11 @@ class TradeStore:
         with self._db() as db:
             return [dict(r) for r in db.execute(sql, [*args, limit])]
 
+    def trade(self, trade_id: int) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+        return dict(row) if row else None
+
     def latest_for_pair(self, pair: str, statuses: tuple[str, ...] = (PENDING, OPEN)) -> dict | None:
         marks = ",".join("?" * len(statuses))
         with self._db() as db:

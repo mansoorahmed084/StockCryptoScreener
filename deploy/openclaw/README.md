@@ -101,6 +101,13 @@ Send these to the trade bot in Telegram (only your chat is answered; the
 | `/close SOL` | shows the position with **Close it** / **Cancel**; only the tap (within 2 minutes) closes it at market and cancels its stop/target. `/close SOL sehe` picks an account |
 | `/help` | the list |
 
+Every message uses one layout (`backend/trading/tgfmt.py`, HTML): what
+happened, side and coin (`🟢 OPEN LONG SOL`, `✅/🔴 CLOSED ...`, `📣 SMC
+SIGNAL ...`), then the date and time in IST, then Risk/Reward or
+Gained/Loss, then the details. The no-stop-loss reminder comes at most once
+a day per coin. Terra's 4h report follows the same style
+(`smc_monitor_prompt.txt`).
+
 Code: `backend/trading/tgcmd.py`, wired in `tgbot.Listener`. The chat never
 opens a trade. S, ARB, APT can be closed here (that is you asking); no
 automatic path ever closes them.

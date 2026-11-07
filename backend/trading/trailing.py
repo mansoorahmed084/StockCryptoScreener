@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from backend.trading import risk
+from backend.trading import risk, tgfmt
 from backend.trading.manager import LIVE, TradeError, TradeManager, _f, position_side
 from backend.trading.store import OPEN
 
@@ -152,8 +152,10 @@ def run(mgr: TradeManager, s: Settings) -> list[str]:
             msgs.append(f"{pair}: trailing stop {current or 'none'} -> {new:g} "
                         f"({locked:+.1f}% vs entry; best {best:g})"
                         + ("" if mgr.live else " [dry run: not sent]"))
+            mgr.notify(tgfmt.stop_moved_card(side=side, pair=pair, old=current, new=new,
+                                             entry=entry, account=mgr.account,
+                                             live=mgr.live), card=True)
         except TradeError as exc:
             msgs.append(f"{pair}: trailing stop move to {new:g} failed: {exc}")
-    for m in msgs:
-        mgr.notify(m)
+            mgr.notify(msgs[-1])
     return msgs

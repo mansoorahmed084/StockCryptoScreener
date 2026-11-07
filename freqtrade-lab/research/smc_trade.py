@@ -189,8 +189,8 @@ def auto_close(mgr: TradeManager, row) -> str | None:
     held = held_from_idea(mgr, row.idea)
     if held is None or protected(held["pair"]):
         return None
-    mgr.close(held["pair"], confirm=held["pair"])
-    mgr.store.update_trade(held["id"], note=f"SMC auto: closed on the strategy exit ({row.why})")
+    mgr.close(held["pair"], confirm=held["pair"],
+              why=f"SMC strategy exit: {'4h CHoCH' if row.why == 'choch' else '28 days'}")
     return f"auto-closed trade #{held['id']} ({held['pair']})"
 
 

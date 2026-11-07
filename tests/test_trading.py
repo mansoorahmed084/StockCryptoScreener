@@ -706,7 +706,7 @@ def test_each_account_keeps_its_own_records(tmp_path, monkeypatch):
     assert b.store.trades() == [] and len(a.store.trades()) == 1
     b.panic("PANIC")
     assert b.halted and not a.halted
-    assert sent and sent[-1].startswith("[CoinDCX second]")
+    assert sent and "CoinDCX bot</b> · second" in sent[-1]       # the account is named
 
 
 # -- per-account limits and adds to a winner ------------------------------------------

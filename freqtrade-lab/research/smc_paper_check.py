@@ -109,8 +109,9 @@ def main(days: int = 120, skip: float = 0.3) -> None:
           f"{int((j.late == 'yes').sum())} late), {len(closed)} closed. "
           f"Backtest trades in window: {len(window)}; {missed} fell wholly "
           f"inside skipped runs. Failures: {fails}.")
-    n_new = sum(m.startswith("SMC NEW") for m in tg.sent)
-    n_closed = sum(m.startswith("SMC CLOSED") for m in tg.sent)
+    n_new = sum("SMC SIGNAL" in m.splitlines()[0] for m in tg.sent)
+    n_closed = sum("CLOSED" in m.splitlines()[0] and "(SMC)" in m.splitlines()[0]
+                   for m in tg.sent)
     want_new = int((j.late == "no").sum())
     if n_new != want_new or n_closed != len(closed):
         fails += 1

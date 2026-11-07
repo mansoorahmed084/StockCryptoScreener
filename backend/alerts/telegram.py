@@ -13,6 +13,12 @@ class Notifier:
     def send(self, text: str) -> bool:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def send_html(self, text: str) -> bool:
+        """An HTML card (backend/trading/tgfmt.py); plain text where HTML is unknown."""
+        import html
+        import re
+        return self.send(html.unescape(re.sub(r"<[^>]+>", "", text)))
+
 
 class NullNotifier(Notifier):
     """Logs instead of sending — used when no credentials are configured."""
@@ -60,6 +66,26 @@ class TelegramNotifier(Notifier):
             data = {}
         return resp.status_code, self._redact(str(data.get("description", ""))), data
 
+    def send_html(self, text: str) -> bool:
+        """An HTML card (backend/trading/tgfmt.py). If Telegram cannot parse it,
+        the same text goes again with the tags taken out."""
+        return self._html("sendMessage", {"chat_id": self.chat_id, "text": text[:4000],
+                                          "disable_web_page_preview": True}) is not None
+
+    def _html(self, method: str, body: dict) -> dict | None:
+        """``method`` with parse_mode HTML, then once more as plain text when
+        Telegram refuses the HTML (400 ... parse ...). The result, or None."""
+        import html
+        import re
+        status, desc, data = self._post(method, {**body, "parse_mode": "HTML"}, timeout=25)
+        if status == 400 and "pars" in desc.lower():
+            plain = html.unescape(re.sub(r"<[^>]+>", "", body["text"]))
+            status, desc, data = self._post(method, {**body, "text": plain}, timeout=25)
+        if status != 200:
+            log.warning("Telegram %s failed: %s %s", method, status or "no answer", desc)
+            return None
+        return data.get("result") or {}
+
     def _redact(self, text: str) -> str:
         return text.replace(self.token, "<token>") if self.token else text
 
@@ -75,25 +101,32 @@ class TelegramNotifier(Notifier):
     def _keyboard(buttons: list[tuple[str, str]]) -> dict:
         return {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]}
 
-    def send_buttons(self, text: str, buttons: list[tuple[str, str]]) -> int | None:
-        """Send plain text with one row of (label, callback data) buttons; the message id."""
-        res = self._call("sendMessage", chat_id=self.chat_id, text=text,
-                         reply_markup=self._keyboard(buttons))
+    def send_buttons(self, text: str, buttons: list[tuple[str, str]],
+                     html: bool = False) -> int | None:
+        """Send text with one row of (label, callback data) buttons; the message id.
+        ``html``: the text is a tgfmt card."""
+        body = {"chat_id": self.chat_id, "text": text, "reply_markup": self._keyboard(buttons)}
+        res = self._html("sendMessage", body) if html else self._call("sendMessage", **body)
         return res.get("message_id") if res else None
 
     def edit(self, message_id: int, text: str,
-             buttons: list[tuple[str, str]] | None = None) -> None:
+             buttons: list[tuple[str, str]] | None = None, html: bool = False) -> None:
         body = {"chat_id": self.chat_id, "message_id": message_id, "text": text}
         if buttons:
             body["reply_markup"] = self._keyboard(buttons)
-        self._call("editMessageText", **body)
+        if html:
+            self._html("editMessageText", body)
+        else:
+            self._call("editMessageText", **body)
 
     def answer(self, callback_id: str, text: str = "") -> None:
         self._call("answerCallbackQuery", callback_query_id=callback_id, text=text)
 
-    def send_text(self, text: str) -> int | None:
-        """Plain text (no Markdown: pair names have underscores); the message id."""
-        res = self._call("sendMessage", chat_id=self.chat_id, text=text[:4000])
+    def send_text(self, text: str, html: bool = False) -> int | None:
+        """Plain text (no Markdown: pair names have underscores), or a tgfmt
+        card with ``html``; the message id."""
+        body = {"chat_id": self.chat_id, "text": text[:4000]}
+        res = self._html("sendMessage", body) if html else self._call("sendMessage", **body)
         return res.get("message_id") if res else None
 
     def set_commands(self, commands: list[tuple[str, str]]) -> None:

@@ -42,9 +42,11 @@ def test_positions_lists_each_position_with_profit_now(setup):
     assert listener.poll() == ["/positions answered"]
     [(text, buttons)] = tg.sent
     # 2 SOL bought at 100, now 110: +20 USDT at 90 INR/USDT = +Rs 1,800
-    assert buttons is None and "[main] 1 open, +Rs 1,800 now" in text
-    assert "SOL LONG 2 @ 100, now 110 (+10.0%): +Rs 1,800" in text
-    assert "SL NONE" in text and "[yours]" in text
+    assert buttons is None and text.startswith("<b>📊 OPEN POSITIONS</b>")
+    assert "<b>Open profit/loss:</b> +₹1,800 on 1" in text
+    assert "✅ <b>LONG SOL</b> · yours" in text
+    assert "2 @ 100 → 110 (+10.0%)" in text and "<b>Gain now:</b> +₹1,800" in text
+    assert "SL <b>NONE</b>" in text
     assert "message" in tg.allowed             # the bot now listens for text too
     assert ex.writes == []
 
@@ -55,7 +57,7 @@ def test_a_protected_coin_is_marked(setup):
     ex.pos[ARB].update(id="p2", mark_price=95.0)
     say(tg, "/positions")
     listener.poll()
-    assert "ARB LONG 100" in tg.sent[0][0] and "[yours, protected]" in tg.sent[0][0]
+    assert "🔴 <b>LONG ARB</b> · yours 🔒" in tg.sent[0][0]
 
 
 def test_another_chat_gets_no_answer(setup):
@@ -72,7 +74,7 @@ def test_close_asks_first_then_the_tap_closes_it(setup):
     say(tg, "/close sol")
     listener.poll()
     [(text, buttons)] = tg.sent
-    assert "Close this position at market?" in text and "SOL LONG 2" in text
+    assert text.startswith("<b>❓ CLOSE LONG SOL?</b>") and "2 @ 100 → 110" in text
     assert ex.writes == []                     # nothing closes on the command alone
     close = next(d for label, d in buttons if label == "Close it")
     tap(tg, close)
@@ -104,7 +106,7 @@ def test_close_of_a_protected_coin_warns_but_the_owner_may_close_it(setup):
     say(tg, "/close arb")
     listener.poll()
     text, buttons = tg.sent[0]
-    assert "protected coins" in text
+    assert "Protected coin" in text
     tap(tg, next(d for label, d in buttons if label == "Close it"))
     listener.poll()
     assert ("exit_position", "p2") in ex.writes
@@ -114,7 +116,7 @@ def test_close_of_a_coin_not_held_says_so(setup):
     ex, m, tg, listener = setup
     say(tg, "/close btc")
     listener.poll()
-    assert tg.sent == [("no open BTC position", None)]
+    assert tg.sent == [("No open BTC position.", None)]
     say(tg, "/close")
     listener.poll()
     assert "Which one?" in tg.sent[-1][0]
@@ -133,14 +135,14 @@ def test_pnl_sums_closed_trades_funding_and_fees_by_period(setup):
          "fee_amount": 4},
     ] if page == 1 else []
     text = tgcmd.pnl_text({"main": m}, now)
-    assert "Today (IST): net -Rs 10 (trades +Rs 0, funding -Rs 10, fees +Rs 0)" in text
-    assert "7 days: net +Rs 485" in text
-    assert "30 days: net +Rs 181" in text
-    assert "Open now: +Rs 1,800 on 1 position(s)" in text
+    assert "<b>Today:</b> −₹10\n   trades +₹0 · funding −₹10 · fees +₹0" in text
+    assert "<b>7 days:</b> +₹485" in text
+    assert "<b>30 days:</b> +₹181" in text
+    assert "<b>Open now:</b> +₹1,800 on 1 position(s)" in text
 
 
 def test_help_for_anything_else(setup):
     ex, m, tg, listener = setup
     say(tg, "hello")
     listener.poll()
-    assert tg.sent[0][0].startswith("Commands:")
+    assert tg.sent[0][0].startswith("<b>🤖 TRADE BOT COMMANDS</b>")

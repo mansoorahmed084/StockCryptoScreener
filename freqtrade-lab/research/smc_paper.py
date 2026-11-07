@@ -312,15 +312,15 @@ class Telegram:
 
     def send(self, text: str) -> bool:
         if self.dry:
-            print("  telegram (dry run):\n    " + text.replace("\n", "\n    "))
+            plain = _fmt().strip(text)
+            print("  telegram (dry run):\n    " + plain.replace("\n", "\n    "))
             self.sent.append(text)
             return True
         if self.bot is None:
             return False
-        # plain text on purpose: coin names with _ or * would break Markdown
-        ok = self.bot._call("sendMessage", chat_id=self.bot.chat_id, text=text,
-                            disable_web_page_preview=True) is not None
-        print(f"  telegram: {'sent' if ok else 'FAILED'}: {text.splitlines()[0]}")
+        # an HTML card (tgfmt); plain text again if Telegram refuses the HTML
+        ok = self.bot.send_html(text)
+        print(f"  telegram: {'sent' if ok else 'FAILED'}: {_fmt().strip(text.splitlines()[0])}")
         if ok:
             self.sent.append(text)
         return ok
@@ -330,45 +330,73 @@ def _num(x: str) -> str:
     return _d(x) if x else "?"
 
 
+def _fmt():
+    """backend/trading/tgfmt.py: the shared Telegram layout (HTML)."""
+    import harness  # noqa: F401  (puts the repo root on sys.path)
+    from backend.trading import tgfmt
+    return tgfmt
+
+
 def new_message(r) -> str:
+    """A fresh on-time call: SIGNAL, its time, risk and reward, then what
+    was done with it (paper, a Place button, or the auto trade)."""
+    f = _fmt()
     d = 1 if r.side == "long" else -1
-    lines = [f"SMC NEW: {r.side.upper()} {r.coin} ({r.symbol})",
-             f"Entry {_num(r.entry)} (4h open {_ist(r.entry_utc)} IST)",
-             f"Stop {_num(r.stop)} ({float(r.stop_pct):.1f}% away)",
-             f"Target 6R {_num(r.target)}"]
-    if r.exit_level:
-        lines.append(f"Exit early if a 4h candle closes {'below' if d > 0 else 'above'} "
-                     f"{_num(r.exit_level)}")
+    entry, stop = float(r.entry), float(r.stop)
+    details = [f"Entry {f.px(entry)} at the 4h open"]
     if r.seen_px:
-        moved = d * (float(r.seen_px) - float(r.entry)) / abs(float(r.entry) - float(r.stop))
-        lines.append(f"Price at the scan: {_num(r.seen_px)} ({moved:+.2f}R)")
-    lines.append(f"On CoinDCX futures: {r.dcx}")
+        moved = d * (float(r.seen_px) - entry) / abs(entry - stop)
+        details[0] += f" · price at the scan {f.px(float(r.seen_px))} ({f.signed(moved, '.2f', 'R')})"
+    if r.exit_level:
+        details.append(f"Exit early on a 4h close {'below' if d > 0 else 'above'} "
+                       f"{f.px(float(r.exit_level))}")
+    details.append(f"On CoinDCX futures: {f.esc(r.dcx)}")
     note = str(r.get("note", "") or "")
-    if note.startswith(("traded", "not traded", "dry run")):
-        lines.append(f"AUTO: {note}")          # the owner's auto mode
+    if note.startswith("traded"):
+        details.append(f"🤖 <b>Auto:</b> {f.esc(note)}. The OPEN message has the fill.")
+    elif note.startswith(("not traded", "dry run")):
+        details.append(f"🤖 <b>Auto:</b> {f.esc(note)}")
+    elif note.startswith("offered"):
+        details.append(f"🔔 {f.esc(note)}")
     else:
-        lines.append("Paper trade. No order was placed.")
-    return "\n".join(lines)
+        details.append("📝 Paper only. No order was placed.")
+    return f.card(f.head("📣", f"SMC SIGNAL {r.side.upper()} {r.coin}"), r.entry_utc, [
+        f.risk_line(None, stop, entry),
+        f.reward_line(None, float(r.target), entry, 6.0),
+    ], details)
 
 
-def close_message(r, df: pd.DataFrame) -> str:
+def close_message(r, df: pd.DataFrame, held: dict | None = None) -> str:
+    """A logged trade that ended: CLOSED, its time, the result in R, then why.
+    ``held``: the bot still holds it (not auto mode), so the owner should close it."""
+    f = _fmt()
     closed = df[(df.status == "closed") & (df.late == "no")]
     rs = closed.r.astype(float)
-    tally = (f"On-time closed so far: {len(rs)}, win {100 * (rs > 0).mean():.0f}%, "
-             f"avg {rs.mean():+.2f}R" if len(rs) else "")
-    lines = [f"SMC CLOSED: {r.side.upper()} {r.coin} {float(r.r):+.2f}R",
-             f"Exit: {WHY_TEXT.get(r.why, r.why)} at {_num(r.exit_px)} ({_ist(r.exit_utc)} IST)",
-             f"Entry {_num(r.entry)} ({_ist(r.entry_utc)} IST), stop {_num(r.stop)}"]
+    r_val = float(r.r)
+    entry, exit_px = float(r.entry), float(r.exit_px) if r.exit_px else None
+    move = ""
+    if exit_px:
+        move = f" ({f.pct(entry, exit_px) if r.side == 'long' else f.pct(exit_px, entry)})"
+    details = [f"Entry {f.px(entry)} → exit {f.px(exit_px) if exit_px else '?'}{move}",
+               f"Why: {f.esc(WHY_TEXT.get(r.why, r.why))}"]
     if r.late == "yes":
-        lines.append("This trade was logged late, so it is not in the on-time numbers.")
-    if tally:
-        lines.append(tally)
+        details.append("Logged late: not in the on-time numbers.")
+    if len(rs):
+        details.append(f"On time so far: {len(rs)} closed · {100 * (rs > 0).mean():.0f}% won"
+                       f" · avg {f.signed(rs.mean(), '.2f', 'R')}")
     note = str(r.get("note", "") or "")
-    if note.startswith(("auto-closed", "auto close failed")):
-        lines.append(f"AUTO: {note}")          # the owner's auto mode
+    if held:
+        details.insert(0, f"⚠️ <b>ACTION:</b> the bot holds {f.esc(f.coin(held['pair']))} from "
+                          f"this call (trade #{held['id']}). The strategy exits here: send "
+                          f"/close {f.esc(f.coin(held['pair']))}")
+    elif note.startswith(("auto-closed", "auto close failed")):
+        details.append(f"🤖 <b>Auto:</b> {f.esc(note)}")
     else:
-        lines.append("Paper trade (R from the backtest rules).")
-    return "\n".join(lines)
+        details.append("📝 Paper trade: result in R from the backtest rules.")
+    icon = "✅" if r_val >= 0 else "🔴"
+    word = "Gained" if r_val >= 0 else "Loss"
+    return f.card(f.head(icon, f"CLOSED {r.side.upper()} {r.coin} (SMC)"), r.exit_utc,
+                  [f"<b>{word}:</b> {f.signed(r_val, '.2f', 'R')}"], details)
 
 
 def tell(df: pd.DataFrame, tg: Telegram, bot: "Bot | None" = None) -> None:
@@ -377,17 +405,27 @@ def tell(df: pd.DataFrame, tg: Telegram, bot: "Bot | None" = None) -> None:
     for i in df.index:
         r = df.loc[i]
         if r.status == "closed" and r.told != "closed":
-            text = close_message(r, df)
             held = bot.held(r) if bot is not None else None
-            if held:
-                text = (f"ACTION: you hold {held['pair']} from this call (bot trade "
-                        f"#{held['id']}). The strategy exits here: close it in the "
-                        f"CoinDCX app or with `trade close {held['pair']}`.\n" + text)
+            text = _safe(lambda: close_message(r, df, held),
+                         f"SMC CLOSED {r.side.upper()} {r.coin} {float(r.r):+.2f}R ({r.why})")
             if tg.send(text):
                 df.at[i, "told"] = "closed"
         elif r.status == "open" and r.told == "" and r.late == "no":
-            if tg.send(new_message(r)):
+            text = _safe(lambda: new_message(r),
+                         f"SMC SIGNAL {r.side.upper()} {r.coin}: entry {r.entry}, stop {r.stop}, "
+                         f"target {r.target}")
+            if tg.send(text):
                 df.at[i, "told"] = "new"
+
+
+def _safe(build, fallback: str) -> str:
+    """The formatted message, or a short plain one if formatting fails: a
+    message problem must never stop the journal (or hide a call)."""
+    try:
+        return build()
+    except Exception as exc:
+        print(f"  telegram: formatting failed ({exc}); sending the short form")
+        return _fmt().esc(fallback)
 
 
 # ------------------------------------------------------------------ report

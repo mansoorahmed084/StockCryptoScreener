@@ -19,7 +19,8 @@ import time
 from typing import Any
 
 from backend.alerts.telegram import telegram_from_env
-from backend.trading import ideas, tgcmd
+from backend.trading import ideas, tgcmd, tgfmt
+from backend.trading.tgfmt import esc
 from backend.trading.manager import TradeError, TradeManager
 
 log = logging.getLogger(__name__)
@@ -35,8 +36,10 @@ def offer(mgr: TradeManager, idea: dict, text: str) -> bool:
     tg = telegram_from_env()
     if tg is None:
         return False
-    mid = tg.send_buttons(f"[{mgr.account}] {text}\nsetup #{idea['id']}",
-                          [("Place", f"{PLACE}|{mgr.account}|{idea['id']}")])
+    why = (idea.get("reason") if idea.get("source") == ideas.PROPOSED
+           else f"{idea.get('pattern')} ({idea.get('timeframe')}, scanner)")
+    mid = tg.send_buttons(tgfmt.idea_card(idea, mgr.account, why or ""),
+                          [("Place", f"{PLACE}|{mgr.account}|{idea['id']}")], html=True)
     if mid:
         mgr.store.update_idea(idea["id"], tg_message_id=mid)
     return bool(mid)
@@ -76,7 +79,7 @@ class Listener:
                 log.exception("telegram update failed")
                 out.append(f"update failed: {exc}")
                 if msg and self._owner(msg):
-                    self.tg.send_text(f"That failed: {exc}")
+                    self.tg.send_text(f"⛔ That failed: {esc(exc)}", html=True)
         return out
 
     def _owner(self, msg: dict) -> bool:
@@ -91,11 +94,11 @@ class Listener:
         if cmd == "close" and not isinstance(answer, str):
             mgr, pos = answer
             pair, now = pos["pair"], int(self.clock())
-            self.tg.send_buttons(tgcmd.close_prompt(mgr, pos), [
+            self.tg.send_buttons(tgcmd.close_prompt(mgr, pos), html=True, buttons=[
                 ("Close it", f"{CLOSE}|{mgr.account}|{pair}|{now}"),
                 ("Cancel", f"{KEEP}|{mgr.account}|{pair}")])
             return f"/close {pair} on {mgr.account}: asked to confirm"
-        self.tg.send_text(answer)
+        self.tg.send_text(answer, html=True)
         return f"/{cmd} answered"
 
     def _close_tap(self, cq: dict, parts: list[str]) -> str:
@@ -107,24 +110,27 @@ class Listener:
             self.tg.answer(cq["id"], f"account {account} is not watched by this bot")
             return f"close tap for unwatched account {account}"
         tag = f"[{account}] {tgcmd.coin(pair)}"
+        c = esc(tgcmd.coin(pair))
         if action == KEEP:
             self.tg.answer(cq["id"], "kept")
-            self.tg.edit(mid, f"{tag}: kept open.")
+            self.tg.edit(mid, f"↩️ <b>{c} kept open.</b> Nothing was sent.", html=True)
             return f"{tag}: close cancelled"
         if self.clock() - int(parts[3]) > CONFIRM_S:
             self.tg.answer(cq["id"], "too old")
-            self.tg.edit(mid, f"{tag}: that Close button expired. Send /close "
-                              f"{tgcmd.coin(pair)} again.")
+            self.tg.edit(mid, f"⌛ <b>That Close button expired.</b>\nSend /close {c} again.",
+                         html=True)
             return f"{tag}: close expired"
         self.tg.answer(cq["id"], "closing...")
         try:
             with mgr.lock:
                 mgr.close(pair, confirm=pair)
         except TradeError as exc:
-            self.tg.edit(mid, f"{tag}: not closed - {exc}")
+            self.tg.edit(mid, f"⛔ <b>{c} not closed</b>\n{esc(exc)}", html=True)
             return f"{tag}: close refused - {exc}"
         word = "closed at market" if mgr.live else "dry run, nothing sent"
-        self.tg.edit(mid, f"{tag}: {word}. Its stop and target orders were cancelled.")
+        self.tg.edit(mid, f"✅ <b>{c} {word}.</b>\nIts stop and target orders were cancelled. "
+                          "The CLOSED message with the result follows." if mgr.live else
+                          f"🧪 <b>{c}: dry run, nothing sent.</b>", html=True)
         return f"{tag}: {word} (owner's /close)"
 
     def handle(self, cq: dict) -> str:
@@ -151,32 +157,39 @@ class Listener:
         if action == SKIP:
             mgr.store.update_idea(idea_id, status=ideas.EXPIRED, reason="skipped by you")
             self.tg.answer(cq["id"], "skipped")
-            self.tg.edit(mid, f"{tag}: skipped.")
+            self.tg.edit(mid, f"⏭️ <b>Skipped:</b> {esc(idea['coin'])} setup #{idea_id}",
+                         html=True)
             return f"{tag}: skipped"
 
         if action == PLACE:
             text, buttons = self._fresh_plan(mgr, idea)
             self.tg.answer(cq["id"])
-            self.tg.edit(mid, f"{tag}\n{text}", buttons)
+            self.tg.edit(mid, text, buttons, html=True)
             return f"{tag}: plan shown" + ("" if buttons else " (blocked)")
 
         if action == CONFIRM:
             sent = int(parts[3])
             if self.clock() - sent > CONFIRM_S:
                 self.tg.answer(cq["id"], "too old: tap Place again")
-                self.tg.edit(mid, f"{tag}: the confirm button expired. Tap Place for a "
-                                  "fresh price.", [("Place", f"{PLACE}|{account}|{idea_id}")])
+                self.tg.edit(mid, "⌛ <b>The Confirm button expired.</b>\nTap Place for a "
+                                  "fresh price.", [("Place", f"{PLACE}|{account}|{idea_id}")],
+                             html=True)
                 return f"{tag}: confirm expired"
             self.tg.answer(cq["id"], "placing...")
             try:
                 with mgr.lock:
                     trade_id = ideas.place(mgr, idea_id, self.settings)
             except TradeError as exc:
-                self.tg.edit(mid, f"{tag}: refused - {exc}")
+                self.tg.edit(mid, f"⛔ <b>Not placed:</b> {esc(idea['coin'])} setup "
+                                  f"#{idea_id}\n{esc(exc)}", html=True)
                 return f"{tag}: refused - {exc}"
             word = "placed" if mgr.live else "dry run, nothing sent"
-            self.tg.edit(mid, f"{tag}: {word}, trade #{trade_id}. Stop and target are on "
-                              "the exchange; the bot trails the stop.")
+            c = esc(idea["coin"])
+            self.tg.edit(mid, (f"✅ <b>Placed:</b> {c} setup #{idea_id} → trade #{trade_id}\n"
+                               "Stop and target are on CoinDCX. The OPEN message follows.")
+                         if mgr.live else
+                         f"🧪 <b>Dry run:</b> {c} setup #{idea_id}, nothing sent "
+                         f"(trade #{trade_id})", html=True)
             return f"{tag}: {word}, trade #{trade_id}"
         self.tg.answer(cq["id"], "unknown button")
         return f"{tag}: unknown button {action!r}"
@@ -185,20 +198,21 @@ class Listener:
         """The trade re-sized at the current price, and the Confirm/Skip buttons
         (None when it may not be placed now)."""
         if idea["status"] != ideas.READY:
-            return f"this setup is {idea['status']}: {idea['reason']}", None
+            return (f"⛔ <b>This setup is {esc(idea['status'])}</b>\n"
+                    f"{esc(idea['reason'])}"), None
         age_ms = self.clock() * 1000 - idea["ts_ms"]
         if age_ms > self.settings.max_age_minutes * 60_000:
             mgr.store.update_idea(idea["id"], status=ideas.EXPIRED,
                                   reason=f"older than {self.settings.max_age_minutes} minutes")
-            return "this setup is too old now.", None
+            return "⌛ <b>This setup is too old now.</b>", None
         free = mgr.free_inr()
         if free is None:
-            return "no API keys for this account.", None
+            return "⛔ <b>No API keys for this account.</b>", None
         plan = mgr.preview(ideas.request_for(idea, free, self.settings))
         rr = ideas.rr_error(plan)
-        text = f"{'LIVE' if mgr.live else 'DRY RUN'}\n{plan.summary()}"
+        text = tgfmt.plan_card(plan, mgr.live, mgr.account)
         if not plan.ok or rr:
-            return text + (f"\n  BLOCKED: {rr}" if rr else ""), None
+            return text + (f"\n⛔ BLOCKED: {esc(rr)}" if rr else ""), None
         a, i, now = mgr.account, idea["id"], int(self.clock())
-        return (text + f"\nConfirm within {CONFIRM_S // 60} minutes.",
+        return (text + f"\n\nTap Confirm within {CONFIRM_S // 60} minutes.",
                 [("Confirm", f"{CONFIRM}|{a}|{i}|{now}"), ("Skip", f"{SKIP}|{a}|{i}")])
