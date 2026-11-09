@@ -77,11 +77,19 @@ because Binance refuses US servers, and Streamlit Cloud runs in the US.
    `master`, main file `market_desk/app.py`.
 3. **Advanced settings** → Python 3.12, and paste these secrets:
    ```toml
-   MARKET_DESK_DB_URL = "<value of MARKET_DESK_VIEW_DB_URL in .env>"
+   MARKET_DESK_DB_URL = "postgresql://desk_viewer.kblyeideezamwokclqno:PASSWORD@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require"
    MARKET_DESK_MODE = "view"
-   MARKET_DESK_PASSWORD = "<a password you choose>"
+   MARKET_DESK_PASSWORD = "your-page-password"
    ```
-   Use the **viewer** line, not the writer line.
+   The first value is **not** this example: it is the text after
+   `MARKET_DESK_VIEW_DB_URL=` in `.env` (it starts with
+   `postgresql://desk_viewer.`). Never the writer line. Inside the quotes go
+   only the link and your page password, with no `< >`.
+
+   This copies the ready line to the clipboard (Windows PowerShell):
+   ```powershell
+   $u = ((Get-Content .env | Select-String '^MARKET_DESK_VIEW_DB_URL=').Line -split '=', 2)[1].Trim(); Set-Clipboard "MARKET_DESK_DB_URL = `"$u`""
+   ```
 4. **Deploy**. The repo is private, so the app is private: only you, plus
    any viewers you invite under Settings → Sharing.
 
