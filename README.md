@@ -176,6 +176,19 @@ python -m backend.cli watch --interval 5      # always-on alert scanner
 python -m backend.cli backtest --coin SOL --base BTC --timeframe 1d
 ```
 
+## Market Desk — `market_desk/`
+
+A separate research and paper-trading desk for crypto, NSE and US stocks:
+sector heatmap, watchlist screen, rule backtests with fees (checked on
+control symbols too), trade plans, paper trades with a risk layer, news
+and sentiment, and price alerts. Own settings, own database, own app.
+Paper only. See [market_desk/README.md](market_desk/README.md).
+
+```bash
+.venv/Scripts/python.exe -m streamlit run market_desk/app.py --server.port 8503
+.venv/Scripts/python.exe -m market_desk watch
+```
+
 ## Execution & backtesting — `freqtrade-lab/`
 
 The screener answers *which* coin. [freqtrade-lab/](freqtrade-lab/README.md)

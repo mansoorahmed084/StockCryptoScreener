@@ -1,0 +1,113 @@
+# Market Desk settings. The desk is separate from the screener: its own
+# watchlist, its own database (data_cache/market_desk.db) and its own app.
+# Percent values are written as percent: 0.10 means 0.10 %.
+
+# What the desk follows. Bare names: crypto -> Binance spot USDT pair,
+# india -> NSE, us -> Yahoo ticker. Full TradingView names also work
+# (BINANCE:SOLUSDT, NSE:TCS, NASDAQ:AAPL).
+watchlist:
+  crypto: [BTC, ETH, SOL, BNB, XRP, LINK, AVAX, DOGE]
+  india: [RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, LT, SBIN, BHARTIARTL]
+  us: [NASDAQ:AAPL, NASDAQ:MSFT, NASDAQ:NVDA, NASDAQ:AMZN, NASDAQ:META,
+       NASDAQ:GOOGL, NASDAQ:TSLA, AMEX:SPY]
+
+# Also follow one Chart Workspace watchlist (its name), read-only. Empty = off.
+chart_watchlist: ""
+
+# Control symbols are NOT on the watchlist. A rule is only kept when it also
+# makes money on these. This is the out-of-sample check: a rule that only
+# works on hand-picked symbols is curve-fit.
+control:
+  crypto: [ADA, DOT, LTC, TRX, ATOM, NEAR, FIL, ETC, BCH, XLM, UNI, AAVE]
+  india: [ITC, HINDUNILVR, KOTAKBANK, AXISBANK, MARUTI, SUNPHARMA, TITAN,
+          ASIANPAINT, ULTRACEMCO, WIPRO, NTPC, POWERGRID]
+  us: [NYSE:JPM, NYSE:JNJ, NYSE:PG, NYSE:XOM, NYSE:KO, NASDAQ:PEP, NYSE:HD,
+       NYSE:UNH, NYSE:CVX, NYSE:V, NASDAQ:COST, NYSE:LLY]
+
+# Costs per side (each buy and each sell), in percent.
+fees:
+  crypto: 0.10      # Binance spot taker
+  india: 0.12       # delivery: STT 0.1 % + exchange, GST, stamp
+  us: 0.02          # no commission; SEC/TAF fees
+slippage: 0.05      # on every market fill (entry, stop, time exit)
+
+backtest:
+  years: 5          # history the rules are tested on
+  order_bars: 3     # a buy-stop order waits this many daily candles
+  max_hold: 20      # time exit: close after this many daily candles
+  min_trades: 30    # pooled over the watchlist of one market
+  min_exp_r: 0.05   # keep a rule only above this average R per trade (after fees)
+  min_pf: 1.10      # ... and this profit factor
+  recent_years: 1   # extra column: the same rule over the last year only
+
+# The setups. target_r = target distance in R (1R = entry - stop).
+rules:
+  breakout20: {enabled: true, target_r: 3}
+  pullback20: {enabled: true, target_r: 2}
+  rsi_dip: {enabled: true, target_r: 2}
+
+# The paper account and its hard risk layer. Paper only: the desk never
+# sends a real order.
+paper:
+  start_equity: 100000
+  risk_pct: 1.0            # risk per trade, % of equity
+  max_position_pct: 20     # one position's size cap, % of equity
+  max_open: 5
+  max_per_market: 3
+  max_total_risk_pct: 5    # all open trades together
+  max_new_per_day: 3
+  max_new_plans: 5         # plans written per morning
+
+# The routines in `python -m market_desk watch` (IST, 24h clock).
+schedule:
+  night: "03:00"           # backtest + news research (after the US close)
+  morning: "08:45"         # screen + trade plans (before the NSE open)
+  tick_minutes: 5          # paper trades + price alerts
+
+news:
+  days: 7                  # headlines read per symbol
+  spike_ratio: 2.0         # last 24h vs the 7-day daily average
+  spike_min: 5             # and at least this many headlines in 24h
+
+notify:
+  telegram: true           # cards to the TELEGRAM_* chat in .env, tagged "desk"
+
+# Heatmap tiles. india / us: one index or ETF per sector.
+# crypto: groups of coins (Binance spot USDT pairs).
+heatmap:
+  india:
+    NIFTY 50: NSE:NIFTY
+    Bank: NSE:BANKNIFTY
+    Financials: YAHOO:NIFTY_FIN_SERVICE.NS
+    PSU Bank: YAHOO:^CNXPSUBANK
+    IT: NSE:CNXIT
+    Auto: YAHOO:^CNXAUTO
+    Pharma: YAHOO:^CNXPHARMA
+    FMCG: YAHOO:^CNXFMCG
+    Metal: YAHOO:^CNXMETAL
+    Energy: YAHOO:^CNXENERGY
+    Realty: YAHOO:^CNXREALTY
+    Infra: YAHOO:^CNXINFRA
+    Consumption: YAHOO:^CNXCONSUM
+  us:
+    S&P 500: AMEX:SPY
+    Nasdaq 100: NASDAQ:QQQ
+    Tech: AMEX:XLK
+    Comms: AMEX:XLC
+    Discretionary: AMEX:XLY
+    Staples: AMEX:XLP
+    Financials: AMEX:XLF
+    Health: AMEX:XLV
+    Energy: AMEX:XLE
+    Industrials: AMEX:XLI
+    Materials: AMEX:XLB
+    Utilities: AMEX:XLU
+    Real estate: AMEX:XLRE
+  crypto:
+    Majors: [BTC, ETH, BNB, SOL, XRP]
+    L1: [ADA, AVAX, DOT, NEAR, SUI, APT, TRX, HBAR]
+    L2: [ARB, OP, POL, STRK]
+    DeFi: [LINK, UNI, AAVE, CRV, LDO, PENDLE, JUP]
+    AI: [FET, RENDER, TAO, WLD]
+    Memes: [DOGE, SHIB, PEPE, WIF, BONK, FLOKI]
+    Payments: [LTC, XLM, BCH]
