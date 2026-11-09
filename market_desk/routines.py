@@ -13,7 +13,7 @@ import datetime as dt
 import logging
 import time
 
-from . import alerts, news, paper
+from . import alerts, heatmap, news, paper
 from .backtest import run_backtests
 from .data import DeskData
 from .notify import Sender, morning_card, night_card
@@ -31,7 +31,7 @@ class Desk:
                  store: DeskStore | None = None, sender: Sender | None = None):
         self.settings = settings or Settings.load()
         self.data = data or DeskData(cache_dir=self.settings.cache_dir)
-        self.store = store or DeskStore(self.settings.db_path)
+        self.store = store or DeskStore(self.settings.db_target)
         self.sender = sender if sender is not None else Sender(self.settings)
 
     def _stamp(self, key: str) -> None:
@@ -70,9 +70,37 @@ class Desk:
 
     def tick(self) -> list[paper.Event]:
         events = paper.tick(self.settings, self.data, self.store, self.sender)
-        events += alerts.check(self.store, self.data, self.sender)
+        symbols = sorted(set(self.settings.watch_all())
+                         | {p["symbol"] for p in self.store.plans("pending")}
+                         | {t["symbol"] for t in self.store.trades("open")}
+                         | {a["symbol"] for a in self.store.alerts(active=True)})
+        quotes = None
+        try:
+            quotes = self.data.quotes(symbols)
+            self.store.save_quotes(quotes)
+        except Exception as exc:   # alerts fetch again on their own
+            log.warning("desk quotes failed: %s", exc)
+        events += alerts.check(self.store, self.data, self.sender, quotes)
+        self.refresh_heatmap()
         self._stamp("tick")
         return events
+
+    def refresh_heatmap(self, max_age: int = 900) -> bool:
+        """Save the heatmap for the cloud page, at most every ``max_age`` s."""
+        last = int(self.store.get_meta("heatmap_ts") or 0)
+        if time.time() - last < max_age:
+            return False
+        try:
+            df = heatmap.build(self.settings, self.data)
+        except Exception as exc:
+            log.warning("desk heatmap failed: %s", exc)
+            return False
+        if df.empty:
+            return False
+        now = int(time.time())
+        self.store.save_heatmap(now, df.to_dict("records"))
+        self.store.set_meta("heatmap_ts", str(now))
+        return True
 
     def watch(self, interval_min: float | None = None) -> None:
         sched = self.settings.section("schedule")

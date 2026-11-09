@@ -47,6 +47,60 @@ Commands:
 morning job at 08:45 IST (`schedule` in `desk.yaml`). It must stay running;
 for "laptop closed", run it on a server.
 
+## In the cloud (open it from anywhere)
+
+Since 2026-11-10 the desk runs without the laptop:
+
+| Part | Where | What |
+|---|---|---|
+| Data | Supabase project **MarketDesk** (`kblyeideezamwokclqno`, org "Automation", the AutomatedPosting account, free plan, Mumbai) | schema `desk`, not exposed by the REST API |
+| Jobs | EC2 server, OpenClaw, `workspace/desk/` | `desk-tick` every 5 min, `desk-night` 03:00 IST (no Telegram card), `desk-morning` 08:45 IST |
+| Page | Streamlit Community Cloud, `market_desk/app.py` | view mode: reads Supabase, runs no jobs |
+
+Two database logins (made by `market_desk/sql/setup.py`):
+
+- `desk_writer`: the server jobs and the laptop (`MARKET_DESK_DB_URL` in `.env`).
+- `desk_viewer`: the cloud page (`MARKET_DESK_VIEW_DB_URL` in `.env`). It reads
+  everything and may add or remove alerts. Nothing else.
+
+With `MARKET_DESK_DB_URL` in `.env`, the laptop's CLI and app use Supabase
+too. **Do not run `watch` on the laptop**: the server already runs the jobs.
+
+The server saves the heatmap (every 15 min) and the last prices (every tick)
+in Supabase. The cloud page needs no market data of its own, which matters
+because Binance refuses US servers, and Streamlit Cloud runs in the US.
+
+### Put the page on Streamlit Cloud (owner's steps)
+
+1. Go to https://share.streamlit.io and sign in with GitHub.
+2. **Create app** → repo `mansoorahmed084/StockCryptoScreener`, branch
+   `master`, main file `market_desk/app.py`.
+3. **Advanced settings** → Python 3.12, and paste these secrets:
+   ```toml
+   MARKET_DESK_DB_URL = "<value of MARKET_DESK_VIEW_DB_URL in .env>"
+   MARKET_DESK_MODE = "view"
+   MARKET_DESK_PASSWORD = "<a password you choose>"
+   ```
+   Use the **viewer** line, not the writer line.
+4. **Deploy**. The repo is private, so the app is private: only you, plus
+   any viewers you invite under Settings → Sharing.
+
+### Server tasks
+
+```bash
+# job status
+ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'sudo docker exec $(sudo docker ps -qf name=openclaw-gateway) openclaw cron list'
+
+# after changing desk code: commit, then copy it again
+git archive --format=tar HEAD backend market_desk \
+  | ssh -i ~/Downloads/myClawNew.pem ubuntu@13.206.103.15 'tar -x -C ~/openclaw/workspace/desk'
+```
+
+Setup from scratch: `deploy/openclaw/setup_desk.sh` (Python env),
+`deploy/openclaw/create_desk_jobs.sh` (the 3 jobs), and `workspace/desk/.env`
+with `MARKET_DESK_DB_URL` (writer) and the two `TELEGRAM_*` lines. Any
+OpenClaw agent that can run commands can read that file.
+
 ## How a rule is kept or killed
 
 Each rule is tested per market (crypto, India, US), on all watchlist trades

@@ -410,6 +410,38 @@ def test_sender_respects_switch():
     assert Sender(s, Flaky()).send("x") is False
 
 
+def test_store_heatmap_quotes_and_numpy_values(tmp_path):
+    store = DeskStore(tmp_path / "d.db")
+    assert not store.pg and store.where.endswith("d.db")
+    rows = heatmap.changes([bar(i, 100 + i, 101 + i, 99 + i, 100 + i) for i in range(40)])
+    row = {"market": "crypto", "group": "Majors", "label": "BTC", "symbol": "BINANCE:BTCUSDT",
+           **rows, "chg_1m": float("nan")}
+    store.save_heatmap(10, [row])
+    store.save_heatmap(20, [{**row, "last": np.float64(5.0)}])     # replaces, numpy ok
+    (got,) = store.heatmap("crypto")
+    assert got["ts"] == 20 and got["group"] == "Majors" and got["last"] == 5.0
+    assert got["chg_1m"] is None and store.heatmap("us") == []
+    store.save_quotes({"NSE:TCS": {"last": np.float64(3000.5), "change_pct": 1.2}}, ts=5)
+    store.save_quotes({"NSE:TCS": {"last": 3001.0, "change_pct": 1.3}}, ts=6)
+    assert store.quotes()["NSE:TCS"]["last"] == 3001.0
+    pid = store.add_plan({"id": 99, "symbol": "NSE:TCS", "market": "india", "rule": "r",
+                          "entry": np.float64(1.0), "stop": 0.9, "target": 1.2,
+                          "valid_from": np.int64(7), "order_bars": 3, "score": 1.0, "note": ""})
+    assert pid == 1 and store.plans("pending")[0]["valid_from"] == 7
+
+
+def test_db_target_from_env(monkeypatch):
+    s = settings()
+    monkeypatch.setenv("MARKET_DESK_DB_URL", "postgresql://u:p@h:5432/postgres")
+    monkeypatch.setenv("MARKET_DESK_MODE", "view")
+    assert s.db_target == "postgresql://u:p@h:5432/postgres" and s.view_only
+    store = DeskStore(s.db_target)            # no connection until first use
+    assert store.pg and store.where == "Supabase"
+    monkeypatch.setenv("MARKET_DESK_DB_URL", "")
+    monkeypatch.setenv("MARKET_DESK_MODE", "")
+    assert s.db_target == s.db_path and not s.view_only
+
+
 def test_store_latest_rows(tmp_path):
     store = DeskStore(tmp_path / "d.db")
     v = {"market": "us", "rule": "rsi_dip", "keep": 0, "why": "x", "w_trades": 1,

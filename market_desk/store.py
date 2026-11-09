@@ -1,14 +1,25 @@
-"""The desk's own SQLite file: data_cache/market_desk.db.
+"""The desk's database: SQLite on the laptop, or Postgres on Supabase.
 
+  DeskStore("data_cache/market_desk.db")        a local SQLite file
+  DeskStore("postgresql://desk_writer...")      the Supabase project; its
+                                                tables are made once by
+                                                market_desk/sql/setup.py
+
+The same SQL runs on both (written with ``?`` marks; Postgres gets ``%s``).
 Times are UTC epoch seconds.
 """
 from __future__ import annotations
 
+import logging
+import math
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -45,6 +56,11 @@ CREATE TABLE IF NOT EXISTS sentiment (
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, op TEXT, price REAL,
   note TEXT, created_ts INTEGER, fired_ts INTEGER, fired_px REAL);
+CREATE TABLE IF NOT EXISTS heatmap (
+  ts INTEGER, market TEXT, grp TEXT, label TEXT, symbol TEXT, last REAL,
+  chg_1d REAL, chg_1w REAL, chg_1m REAL);
+CREATE TABLE IF NOT EXISTS quotes (
+  symbol TEXT PRIMARY KEY, last REAL, change_pct REAL, ts INTEGER);
 """
 
 
@@ -52,22 +68,95 @@ def now_s() -> int:
     return int(time.time())
 
 
+def _clean(v):
+    """numpy scalars -> Python; NaN -> NULL (as SQLite stores it)."""
+    if hasattr(v, "item") and not isinstance(v, (str, bytes)):
+        v = v.item()
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return v
+
+
+class _Conn:
+    """One connection, either kind, taking ``?`` SQL."""
+
+    def __init__(self, raw, pg: bool):
+        self.raw, self.pg = raw, pg
+
+    def _sql(self, sql: str) -> str:
+        return sql.replace("?", "%s") if self.pg else sql
+
+    def execute(self, sql: str, params: tuple = ()):
+        return self.raw.execute(self._sql(sql), tuple(_clean(p) for p in params))
+
+    def executemany(self, sql: str, seq: list[tuple]) -> None:
+        seq = [tuple(_clean(p) for p in row) for row in seq]
+        if self.pg:
+            with self.raw.cursor() as cur:
+                cur.executemany(self._sql(sql), seq)
+        else:
+            self.raw.executemany(sql, seq)
+
+
 class DeskStore:
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._db() as db:
-            db.executescript(SCHEMA)
+    def __init__(self, target: str | Path):
+        self.pg = isinstance(target, str) and target.startswith(("postgres://", "postgresql://"))
+        self._lock = threading.Lock()
+        self._pg_raw = None
+        self._pg_used = 0.0
+        if self.pg:
+            self.url = target
+            self.path = None
+            self.where = "Supabase"
+        else:
+            self.path = Path(target)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.where = str(self.path)
+            with self._db() as db:
+                db.raw.executescript(SCHEMA)
+
+    # --- connections ---------------------------------------------------------
+    def _pg_conn(self):
+        import psycopg
+        from psycopg.rows import dict_row
+        c = self._pg_raw
+        if c is not None and (c.closed or c.broken):
+            c = None
+        if c is not None and time.time() - self._pg_used > 60:
+            try:                       # the pooler drops idle connections
+                c.execute("SELECT 1")
+                c.commit()
+            except psycopg.Error:
+                c = None
+        if c is None:
+            # The desk logins have search_path = desk (set by sql/setup.py).
+            c = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=15)
+            self._pg_raw = c
+        self._pg_used = time.time()
+        return c
 
     @contextmanager
-    def _db(self) -> Iterator[sqlite3.Connection]:
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
+    def _db(self) -> Iterator[_Conn]:
+        if self.pg:
+            with self._lock:
+                raw = self._pg_conn()
+                try:
+                    yield _Conn(raw, True)
+                    raw.commit()
+                except BaseException:
+                    try:
+                        raw.rollback()
+                    except Exception:          # a dead connection: reconnect next time
+                        self._pg_raw = None
+                    raise
+            return
+        raw = sqlite3.connect(self.path, timeout=30)
+        raw.row_factory = sqlite3.Row
         try:
-            yield db
-            db.commit()
+            yield _Conn(raw, False)
+            raw.commit()
         finally:
-            db.close()
+            raw.close()
 
     def rows(self, sql: str, params: tuple = ()) -> list[dict]:
         with self._db() as db:
@@ -77,17 +166,21 @@ class DeskStore:
         cols = ", ".join(row)
         marks = ", ".join("?" for _ in row)
         with self._db() as db:
-            cur = db.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})",
+            cur = db.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks}) RETURNING id",
                              tuple(row.values()))
-            return int(cur.lastrowid)
+            got = cur.fetchone()
+            return int(got["id"] if isinstance(got, dict) else got[0])
 
-    def _insert_many(self, table: str, rows: list[dict]) -> None:
+    def _insert_many(self, table: str, rows: list[dict], db: _Conn | None = None) -> None:
         if not rows:
             return
         cols = list(rows[0])
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})"
-        with self._db() as db:
+        if db is not None:
             db.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
+            return
+        with self._db() as db2:
+            db2.executemany(sql, [tuple(r[c] for c in cols) for r in rows])
 
     # --- meta ----------------------------------------------------------------
     def get_meta(self, key: str, default: str | None = None) -> str | None:
@@ -100,13 +193,16 @@ class DeskStore:
                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
     # --- backtests -----------------------------------------------------------
+    def _trim(self, db: _Conn, table: str, keep: int) -> None:
+        db.execute(f"DELETE FROM {table} WHERE run_ts NOT IN (SELECT DISTINCT run_ts "
+                   f"FROM {table} ORDER BY run_ts DESC LIMIT {int(keep)})")
+
     def save_backtest(self, run_ts: int, verdicts: list[dict], symbols: list[dict]) -> None:
-        self._insert_many("verdicts", [{"run_ts": run_ts, **v} for v in verdicts])
-        self._insert_many("bt_symbols", [{"run_ts": run_ts, **s} for s in symbols])
-        with self._db() as db:   # keep the last 30 runs
-            for table in ("verdicts", "bt_symbols"):
-                db.execute(f"DELETE FROM {table} WHERE run_ts NOT IN (SELECT DISTINCT run_ts "
-                           f"FROM {table} ORDER BY run_ts DESC LIMIT 30)")
+        with self._db() as db:
+            self._insert_many("verdicts", [{"run_ts": run_ts, **v} for v in verdicts], db)
+            self._insert_many("bt_symbols", [{"run_ts": run_ts, **s} for s in symbols], db)
+            for table in ("verdicts", "bt_symbols"):   # keep the last 30 runs
+                self._trim(db, table, 30)
 
     def _latest(self, table: str) -> list[dict]:
         return self.rows(f"SELECT * FROM {table} WHERE run_ts = "
@@ -120,16 +216,16 @@ class DeskStore:
 
     # --- screen --------------------------------------------------------------
     def save_screen(self, run_ts: int, rows: list[dict]) -> None:
-        self._insert_many("screens", [{"run_ts": run_ts, **r} for r in rows])
         with self._db() as db:
-            db.execute("DELETE FROM screens WHERE run_ts NOT IN (SELECT DISTINCT run_ts "
-                       "FROM screens ORDER BY run_ts DESC LIMIT 60)")
+            self._insert_many("screens", [{"run_ts": run_ts, **r} for r in rows], db)
+            self._trim(db, "screens", 60)
 
     def latest_screen(self) -> list[dict]:
         return sorted(self._latest("screens"), key=lambda r: -r["score"])
 
     # --- plans and paper trades ----------------------------------------------
     def add_plan(self, plan: dict) -> int:
+        plan = {k: v for k, v in plan.items() if k != "id"}
         return self._insert("plans", {"created_ts": now_s(), "status": "pending", **plan})
 
     def plans(self, status: str | None = None, limit: int = 500) -> list[dict]:
@@ -144,6 +240,7 @@ class DeskStore:
                        "WHERE id = ?", (status, note, now_s(), plan_id))
 
     def add_trade(self, trade: dict) -> int:
+        trade = {k: v for k, v in trade.items() if k != "id"}
         return self._insert("trades", {"opened_ts": now_s(), "status": "open", **trade})
 
     def trades(self, status: str | None = None, limit: int = 1000) -> list[dict]:
@@ -165,11 +262,11 @@ class DeskStore:
         added = 0
         with self._db() as db:
             for r in rows:
-                cur = db.execute("INSERT OR IGNORE INTO news (link, symbol, ts, source, title, "
-                                 "tone) VALUES (?, ?, ?, ?, ?, ?)",
+                cur = db.execute("INSERT INTO news (link, symbol, ts, source, title, tone) "
+                                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
                                  (r["link"], r["symbol"], r["ts"], r["source"], r["title"],
                                   r["tone"]))
-                added += cur.rowcount
+                added += max(cur.rowcount, 0)
             db.execute("DELETE FROM news WHERE ts < ?", (now_s() - 60 * 86400,))
         return added
 
@@ -196,6 +293,32 @@ class DeskStore:
         for r in rows:
             by_day.setdefault(r["run_ts"] // 86400, r["headlines_24h"])
         return list(by_day.values())[:days]
+
+    # --- heatmap and quotes (written by the server, read by the cloud page) --
+    def save_heatmap(self, ts: int, rows: list[dict]) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM heatmap")
+            self._insert_many("heatmap", [
+                {"ts": ts, "market": r["market"], "grp": r["group"], "label": r["label"],
+                 "symbol": r["symbol"], "last": r["last"], "chg_1d": r["chg_1d"],
+                 "chg_1w": r["chg_1w"], "chg_1m": r["chg_1m"]} for r in rows], db)
+
+    def heatmap(self, market: str | None = None) -> list[dict]:
+        sql = "SELECT ts, market, grp AS \"group\", label, symbol, last, chg_1d, chg_1w, " \
+              "chg_1m FROM heatmap"
+        return self.rows(sql + " WHERE market = ?", (market,)) if market else self.rows(sql)
+
+    def save_quotes(self, quotes: dict[str, dict], ts: int | None = None) -> None:
+        ts = now_s() if ts is None else ts
+        with self._db() as db:
+            for sym, q in quotes.items():
+                db.execute("INSERT INTO quotes (symbol, last, change_pct, ts) VALUES (?, ?, ?, ?) "
+                           "ON CONFLICT(symbol) DO UPDATE SET last = excluded.last, "
+                           "change_pct = excluded.change_pct, ts = excluded.ts",
+                           (sym, q.get("last"), q.get("change_pct"), ts))
+
+    def quotes(self) -> dict[str, dict]:
+        return {r["symbol"]: r for r in self.rows("SELECT * FROM quotes")}
 
     # --- alerts --------------------------------------------------------------
     def add_alert(self, symbol: str, op: str, price: float, note: str = "") -> int:

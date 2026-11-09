@@ -55,9 +55,14 @@ def when(ts) -> str:
     return dt.datetime.fromtimestamp(int(ts), IST).strftime("%d %b %H:%M IST")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_heatmap(market: str) -> pd.DataFrame:
     desk = get_desk()
+    if desk.settings.view_only:      # the server saves it every 15 minutes
+        cols = ["market", "group", "label", "symbol", "last", "chg_1d", "chg_1w", "chg_1m"]
+        rows = desk.store.heatmap(market)
+        return pd.DataFrame(rows, columns=["ts"] + cols).astype(
+            {c: float for c in ("last", "chg_1d", "chg_1w", "chg_1m")})
     return heatmap.build(desk.settings, desk.data, market)
 
 
@@ -65,10 +70,31 @@ def load_heatmap(market: str) -> pd.DataFrame:
 def load_quotes(symbols: tuple[str, ...]) -> dict:
     if not symbols:
         return {}
+    desk = get_desk()
     try:
-        return get_desk().data.quotes(list(symbols))
+        if desk.settings.view_only:  # saved by the server on every tick
+            saved = desk.store.quotes()
+            return {s: saved[s] for s in symbols if s in saved}
+        return desk.data.quotes(list(symbols))
     except Exception:   # quotes are a nice-to-have on this page
         return {}
+
+
+def password_ok() -> bool:
+    """MARKET_DESK_PASSWORD (a Streamlit secret) closes the page with a password."""
+    import hmac
+    import os
+    want = os.environ.get("MARKET_DESK_PASSWORD", "")
+    if not want or st.session_state.get("desk_ok"):
+        return True
+    st.title("🧭 Market Desk")
+    pw = st.text_input("Password", type="password")
+    if pw and hmac.compare_digest(pw, want):
+        st.session_state["desk_ok"] = True
+        st.rerun()
+    elif pw:
+        st.error("Wrong password.")
+    return False
 
 
 # ------------------------------------------------------------------ sidebar
@@ -76,6 +102,16 @@ def sidebar(desk: Desk) -> None:
     st.sidebar.title("🧭 Market Desk")
     st.sidebar.caption("Separate from the screener. **Paper trades only**: the desk "
                        "never sends a real order.")
+    if desk.settings.view_only:
+        st.sidebar.info("The jobs run on the server (night 03:00, morning 08:45 IST, "
+                        "paper trades + alerts every 5 min). This page reads them from "
+                        "Supabase.")
+        if st.sidebar.button("🔄 Reload data", width="stretch"):
+            st.cache_data.clear()
+        st.sidebar.divider()
+        for key, name in (("night", "Night"), ("morning", "Morning"), ("tick", "Tick")):
+            st.sidebar.caption(f"{name}: {when(desk.store.get_meta(f'last_{key}'))}")
+        return
     if st.sidebar.button("🌙 Night: backtest + news", width="stretch",
                          help="Tests every rule with fees and reads the headlines. "
                               "Takes a few minutes."):
@@ -95,6 +131,7 @@ def sidebar(desk: Desk) -> None:
         st.sidebar.caption(f"{name}: {when(desk.store.get_meta(f'last_{key}'))}")
     st.sidebar.caption("Run all of it on a schedule:\n\n"
                        "`.venv/Scripts/python.exe -m market_desk watch`")
+    st.sidebar.caption(f"Data: {desk.store.where}")
 
 
 # ------------------------------------------------------------------ heatmap
@@ -147,8 +184,13 @@ def heatmap_tab() -> None:
         df = load_heatmap(market)
     d = df.dropna(subset=[period])
     if d.empty:
-        st.info("No prices came back. Try again in a minute.")
+        st.info("No prices yet. The server saves them every 15 minutes."
+                if get_desk().settings.view_only else
+                "No prices came back. Try again in a minute.")
         return
+    if "ts" in d:
+        st.caption(f"Prices saved by the server {when(d['ts'].max())}.")
+        d = d.drop(columns=["ts"])
     st.plotly_chart(treemap_figure(d, period, market), width="stretch")
     st.caption("Blue = up, red = down, gray = flat. "
                + ("Crypto group tiles show the group's average. " if market == "crypto" else "")
@@ -427,6 +469,8 @@ def alerts_tab(desk: Desk) -> None:
 
 
 def main() -> None:
+    if not password_ok():
+        return
     desk = get_desk()
     sidebar(desk)
     tabs = st.tabs(["🗺️ Heatmap", "🏁 Screen", "🧪 Backtest", "📝 Plans & paper",

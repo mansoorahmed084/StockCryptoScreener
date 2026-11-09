@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,18 @@ DESK_YAML = Path(__file__).with_name("desk.yaml")
 MARKETS = ("crypto", "india", "us")
 MARKET_NAMES = {"crypto": "Crypto", "india": "India", "us": "US"}
 _INDIA_YAHOO = ("^NSE", "^CNX", "^BSE", "NIFTY")
+
+
+def load_dotenv(path: str | Path | None = None) -> None:
+    """KEY=value lines of the repo's .env into os.environ; set ones win."""
+    p = Path(path) if path else ROOT / ".env"
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
 def to_symbol(market: str, item: str) -> str:
@@ -130,6 +143,20 @@ class Settings:
     @property
     def db_path(self) -> Path:
         return ROOT / "data_cache" / "market_desk.db"
+
+    @property
+    def db_target(self) -> str | Path:
+        """Supabase when MARKET_DESK_DB_URL is set (in .env or the
+        environment), else the local SQLite file."""
+        load_dotenv()
+        return os.environ.get("MARKET_DESK_DB_URL", "").strip() or self.db_path
+
+    @property
+    def view_only(self) -> bool:
+        """MARKET_DESK_MODE=view: the cloud page. It reads the database and
+        runs no jobs (the server does)."""
+        load_dotenv()
+        return os.environ.get("MARKET_DESK_MODE", "").strip().lower() == "view"
 
     @property
     def cache_dir(self) -> Path:

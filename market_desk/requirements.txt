@@ -1,0 +1,9 @@
+# Streamlit Cloud installs this file (it sits next to the app, market_desk/app.py).
+# The server jobs need the same, minus streamlit and plotly.
+streamlit>=1.50
+plotly>=5.22
+pandas>=2.2
+numpy>=1.26
+httpx>=0.27
+PyYAML>=6.0
+psycopg[binary]>=3.2

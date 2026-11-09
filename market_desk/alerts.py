@@ -21,15 +21,20 @@ def add(store: DeskStore, symbol: str, op: str, price: float, note: str = "") ->
     return store.add_alert(parse(symbol).full, op, price, note)
 
 
-def check(store: DeskStore, data: DeskData, sender: Sender | None = None) -> list[Event]:
+def check(store: DeskStore, data: DeskData, sender: Sender | None = None,
+          quotes: dict[str, dict] | None = None) -> list[Event]:
+    """``quotes``: prices already fetched this tick (missing ones are fetched)."""
     active = store.alerts(active=True)
     if not active:
         return []
-    try:
-        quotes = data.quotes(sorted({a["symbol"] for a in active}))
-    except Exception as exc:
-        log.warning("alert quotes failed: %s", exc)
-        return []
+    want = sorted({a["symbol"] for a in active})
+    quotes = dict(quotes or {})
+    missing = [s for s in want if s not in quotes]
+    if missing:
+        try:
+            quotes.update(data.quotes(missing))
+        except Exception as exc:
+            log.warning("alert quotes failed: %s", exc)
     events = []
     for a in active:
         q = quotes.get(a["symbol"])

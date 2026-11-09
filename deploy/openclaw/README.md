@@ -134,3 +134,20 @@ the laptop dashboard's Trade page reads the old laptop database.
 * Back to the laptop for the scan as well: `move_trade_bot.ps1 -Back`, then
   `Enable-ScheduledTask -TaskName 'SMC Sweep-Break scan'` and disable the
   OpenClaw jobs (`openclaw cron disable <id>`).
+
+## Market Desk on the server (since 2026-11-10)
+
+The Market Desk (`market_desk/`) runs here too, in its own folder
+`workspace/desk/` with its own `.venv` (`setup_desk.sh`), apart from `smc/`.
+Its jobs are plain Python command jobs (`create_desk_jobs.sh`), paper only:
+
+| job | when (UTC) | does |
+|---|---|---|
+| `desk-tick` | every 5 min | paper fills / stops / targets, price alerts, last prices, heatmap every 15 min |
+| `desk-night` | 21:30 (03:00 IST) | backtest + news, `--quiet` (no Telegram card at night) |
+| `desk-morning` | 03:15 (08:45 IST) | screen + trade plans, morning card to Telegram |
+
+They write to the Supabase project MarketDesk (`desk/.env`:
+`MARKET_DESK_DB_URL`, the `desk_writer` login, plus the `TELEGRAM_*` lines
+copied from `smc/.env`). The page is on Streamlit Cloud; see
+[market_desk/README.md](../../market_desk/README.md#in-the-cloud-open-it-from-anywhere).
