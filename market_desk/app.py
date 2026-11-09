@@ -80,19 +80,38 @@ def load_quotes(symbols: tuple[str, ...]) -> dict:
         return {}
 
 
+def _clean_pw(value: str) -> str:
+    """Spaces, quotes and the < > of the README's example are not part of it."""
+    value = str(value or "").strip()
+    while len(value) >= 2 and (value[0], value[-1]) in (("<", ">"), ('"', '"'), ("'", "'")):
+        value = value[1:-1].strip()
+    return value
+
+
+def page_password() -> str:
+    """MARKET_DESK_PASSWORD from Streamlit secrets (or the environment)."""
+    import os
+    try:
+        value = st.secrets.get("MARKET_DESK_PASSWORD", "")
+    except Exception:          # no secrets file at all (the laptop)
+        value = ""
+    return _clean_pw(value or os.environ.get("MARKET_DESK_PASSWORD", ""))
+
+
 def password_ok() -> bool:
     """MARKET_DESK_PASSWORD (a Streamlit secret) closes the page with a password."""
     import hmac
-    import os
-    want = os.environ.get("MARKET_DESK_PASSWORD", "")
+    want = page_password()
     if not want or st.session_state.get("desk_ok"):
         return True
     st.title("🧭 Market Desk")
-    pw = st.text_input("Password", type="password")
-    if pw and hmac.compare_digest(pw, want):
-        st.session_state["desk_ok"] = True
-        st.rerun()
-    elif pw:
+    with st.form("desk_login"):
+        pw = st.text_input("Password", type="password")
+        sent = st.form_submit_button("Log in", type="primary")
+    if sent:
+        if hmac.compare_digest(_clean_pw(pw).encode(), want.encode()):
+            st.session_state["desk_ok"] = True
+            st.rerun()
         st.error("Wrong password.")
     return False
 
