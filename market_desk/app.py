@@ -40,9 +40,31 @@ def dark() -> bool:
         return False
 
 
-@st.cache_resource
-def get_desk() -> Desk:
+SECRET_KEYS = ("MARKET_DESK_DB_URL", "MARKET_DESK_MODE", "MARKET_DESK_PASSWORD")
+
+
+def sync_secrets() -> None:
+    """Copy the Streamlit secrets into os.environ on every run, so a secret
+    added or changed while the app runs is used at once."""
+    import os
+    try:
+        for key in SECRET_KEYS:
+            if key in st.secrets:
+                os.environ[key] = str(st.secrets[key])
+    except Exception:          # no secrets file at all (the laptop)
+        pass
+
+
+@st.cache_resource(show_spinner=False)
+def _desk_for(target: str) -> Desk:
     return Desk()
+
+
+def get_desk() -> Desk:
+    """One Desk per database: new secrets give a new connection, never a
+    cached one from before they were set."""
+    from market_desk.settings import Settings
+    return _desk_for(str(Settings.load().db_target))
 
 
 def chart_link(symbol: str) -> str:
@@ -80,9 +102,14 @@ def load_quotes(symbols: tuple[str, ...]) -> dict:
         return {}
 
 
+_INVISIBLE = dict.fromkeys(map(ord, "​‌‍⁠﻿"), None)
+
+
 def _clean_pw(value: str) -> str:
-    """Spaces, quotes and the < > of the README's example are not part of it."""
-    value = str(value or "").strip()
+    """Spaces, quotes, invisible characters and the < > of the README's
+    example are not part of it."""
+    import unicodedata
+    value = unicodedata.normalize("NFKC", str(value or "")).translate(_INVISIBLE).strip()
     while len(value) >= 2 and (value[0], value[-1]) in (("<", ">"), ('"', '"'), ("'", "'")):
         value = value[1:-1].strip()
     return value
@@ -106,13 +133,19 @@ def password_ok() -> bool:
         return True
     st.title("🧭 Market Desk")
     with st.form("desk_login"):
-        pw = st.text_input("Password", type="password")
+        # new-password: Chrome's autofill can show text the page never gets.
+        pw = st.text_input("Password", type="password", autocomplete="new-password")
         sent = st.form_submit_button("Log in", type="primary")
     if sent:
-        if hmac.compare_digest(_clean_pw(pw).encode(), want.encode()):
+        typed = _clean_pw(pw)
+        if typed and hmac.compare_digest(typed.encode(), want.encode()):
             st.session_state["desk_ok"] = True
             st.rerun()
-        st.error("Wrong password.")
+        if not typed:
+            st.error("The page got an empty box. If the browser filled it in, click in "
+                     "the box, type the password by hand, then click Log in.")
+        else:
+            st.error(f"Wrong password. (The page got {len(typed)} characters.)")
     return False
 
 
@@ -130,6 +163,7 @@ def sidebar(desk: Desk) -> None:
         st.sidebar.divider()
         for key, name in (("night", "Night"), ("morning", "Morning"), ("tick", "Tick")):
             st.sidebar.caption(f"{name}: {when(desk.store.get_meta(f'last_{key}'))}")
+        st.sidebar.caption(f"Data: {desk.store.where}")
         return
     if st.sidebar.button("🌙 Night: backtest + news", width="stretch",
                          help="Tests every rule with fees and reads the headlines. "
@@ -488,9 +522,14 @@ def alerts_tab(desk: Desk) -> None:
 
 
 def main() -> None:
+    sync_secrets()
     if not password_ok():
         return
     desk = get_desk()
+    if desk.settings.view_only and not desk.store.pg:
+        st.error("This page is in view mode but has no database. Add MARKET_DESK_DB_URL "
+                 "(the viewer line from .env) to the Streamlit secrets, then reload.")
+        return
     sidebar(desk)
     tabs = st.tabs(["🗺️ Heatmap", "🏁 Screen", "🧪 Backtest", "📝 Plans & paper",
                     "📰 News & sentiment", "🔔 Alerts"])
