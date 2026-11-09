@@ -527,9 +527,14 @@ def main() -> None:
         return
     desk = get_desk()
     if desk.settings.view_only and not desk.store.pg:
-        st.error("This page is in view mode but has no database. Add MARKET_DESK_DB_URL "
-                 "(the viewer line from .env) to the Streamlit secrets, then reload.")
+        st.error(f"This page is in view mode but has no database: "
+                 f"{desk.settings.db_problem}. In the Streamlit secrets it must read "
+                 'MARKET_DESK_DB_URL = "postgresql://desk_viewer...", the text after the '
+                 "= of the MARKET_DESK_VIEW_DB_URL line in .env. Save, then reload.")
         return
+    if desk.settings.view_only and "desk_writer." in str(desk.settings.db_target):
+        st.sidebar.warning("This page uses the writer login. Use the viewer line "
+                           "(MARKET_DESK_VIEW_DB_URL) in the Streamlit secrets.")
     sidebar(desk)
     tabs = st.tabs(["🗺️ Heatmap", "🏁 Screen", "🧪 Backtest", "📝 Plans & paper",
                     "📰 News & sentiment", "🔔 Alerts"])

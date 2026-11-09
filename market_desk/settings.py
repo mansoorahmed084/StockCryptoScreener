@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +30,16 @@ def load_dotenv(path: str | Path | None = None) -> None:
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
             os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_DB_URL = re.compile(r"postgres(?:ql)?://[^\s\"'<>]+")
+
+
+def db_url(raw: str) -> str:
+    """The postgresql:// link inside a secret, even when it was pasted with
+    its .env name (MARKET_DESK_VIEW_DB_URL=...), quotes or spaces."""
+    m = _DB_URL.search(str(raw or ""))
+    return m.group(0) if m else ""
 
 
 def to_symbol(market: str, item: str) -> str:
@@ -146,10 +157,22 @@ class Settings:
 
     @property
     def db_target(self) -> str | Path:
-        """Supabase when MARKET_DESK_DB_URL is set (in .env or the
-        environment), else the local SQLite file."""
+        """Supabase when MARKET_DESK_DB_URL holds a postgresql:// link (in
+        .env or the environment), else the local SQLite file."""
         load_dotenv()
-        return os.environ.get("MARKET_DESK_DB_URL", "").strip() or self.db_path
+        return db_url(os.environ.get("MARKET_DESK_DB_URL", "")) or self.db_path
+
+    @property
+    def db_problem(self) -> str:
+        """Why there is no database link, in words ('' when there is one)."""
+        load_dotenv()
+        raw = os.environ.get("MARKET_DESK_DB_URL", "").strip()
+        if not raw:
+            return "the MARKET_DESK_DB_URL secret is missing or empty"
+        if not db_url(raw):
+            return ("MARKET_DESK_DB_URL has no postgresql:// link in it "
+                    f"(it starts with {raw[:12]!r})")
+        return ""
 
     @property
     def view_only(self) -> bool:

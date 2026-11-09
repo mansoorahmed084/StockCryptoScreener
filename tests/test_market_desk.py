@@ -430,6 +430,21 @@ def test_store_heatmap_quotes_and_numpy_values(tmp_path):
     assert pid == 1 and store.plans("pending")[0]["valid_from"] == 7
 
 
+def test_db_url_found_inside_a_pasted_secret(monkeypatch):
+    from market_desk.settings import db_url
+    url = "postgresql://desk_viewer.abc:Pw123@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require"
+    for raw in (url, f"  {url} ", f"MARKET_DESK_VIEW_DB_URL={url}", f'"{url}"', f"<{url}>"):
+        assert db_url(raw) == url
+    assert db_url("") == "" and db_url("not a link") == ""
+    s = settings()
+    monkeypatch.setenv("MARKET_DESK_DB_URL", f"MARKET_DESK_VIEW_DB_URL={url}")
+    assert s.db_target == url and s.db_problem == ""
+    monkeypatch.setenv("MARKET_DESK_DB_URL", "oops")
+    assert "no postgresql://" in s.db_problem and s.db_target == s.db_path
+    monkeypatch.setenv("MARKET_DESK_DB_URL", "")
+    assert "missing" in s.db_problem
+
+
 def test_db_target_from_env(monkeypatch):
     s = settings()
     monkeypatch.setenv("MARKET_DESK_DB_URL", "postgresql://u:p@h:5432/postgres")
