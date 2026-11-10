@@ -535,6 +535,15 @@ def main() -> None:
     if desk.settings.view_only and "desk_writer." in str(desk.settings.db_target):
         st.sidebar.warning("This page uses the writer login. Use the viewer line "
                            "(MARKET_DESK_VIEW_DB_URL) in the Streamlit secrets.")
+    nav = st.navigation([
+        st.Page(desk_page, title="Market Desk", icon="🧭", default=True),
+        st.Page(screener_page, title="Screener", icon="📊", url_path="screener"),
+    ])
+    nav.run()
+
+
+def desk_page() -> None:
+    desk = get_desk()
     sidebar(desk)
     tabs = st.tabs(["🗺️ Heatmap", "🏁 Screen", "🧪 Backtest", "📝 Plans & paper",
                     "📰 News & sentiment", "🔔 Alerts"])
@@ -550,6 +559,12 @@ def main() -> None:
         news_tab(desk)
     with tabs[5]:
         alerts_tab(desk)
+
+
+def screener_page() -> None:
+    """The screener's results, saved by the server (market_desk/screener_snap.py)."""
+    from market_desk.screener_page import render
+    render(get_desk().store)
 
 
 main()

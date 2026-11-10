@@ -8,6 +8,7 @@
   python -m market_desk backtest         only the backtest
   python -m market_desk screen           only the screen (saves nothing)
   python -m market_desk news             only the news research
+  python -m market_desk screener-snap    save screener results for the cloud page
   python -m market_desk alert add NSE:RELIANCE above 1500 --note "breakout"
   python -m market_desk alert list | alert rm 3
 
@@ -72,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("backtest")
     sub.add_parser("screen")
     sub.add_parser("news")
+    snap = sub.add_parser("screener-snap", help="save screener results for the cloud page")
+    snap.add_argument("--parts", default="rs,btc,patterns,liq")
     al = sub.add_parser("alert")
     alsub = al.add_subparsers(dest="alert_cmd", required=True)
     a_add = alsub.add_parser("add")
@@ -144,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{short(r['symbol']):12} 24h {r['headlines_24h']:>3}  7d {r['headlines_7d']:>3}"
                   f"  buzz {buzz}  tone {r['tone']:+.2f} {r['label']:8}"
                   f"{' SPIKE' if r['spike'] else ''}{fund}")
+    elif args.cmd == "screener-snap":
+        from .screener_snap import run
+        out = run(desk.store, parts=tuple(p.strip() for p in args.parts.split(",") if p.strip()))
+        for part, state in out.items():
+            print(f"{part:9} {state}")
+        if any(s.startswith("failed") for s in out.values()):
+            return 1
     elif args.cmd == "alert":
         from . import alerts
         if args.alert_cmd == "add":

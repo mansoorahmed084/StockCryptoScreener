@@ -62,7 +62,9 @@ def main() -> None:
             raise SystemExit(f"SQL failed ({r.status_code}): {r.text[:300]}")
         return r.json()
 
-    sql((Path(__file__).with_name("001_schema.sql")).read_text(encoding="utf-8"))
+    for f in sorted(Path(__file__).parent.glob("0*.sql")):
+        if f.name.startswith("001"):
+            sql(f.read_text(encoding="utf-8"))
     print("schema desk: tables ready")
 
     pw = {"desk_writer": _password(), "desk_viewer": _password()}
@@ -87,6 +89,10 @@ alter role desk_viewer set search_path = desk;
 alter role desk_viewer set statement_timeout = '20s';
 """)
     print("logins desk_writer + desk_viewer: ready")
+    for f in sorted(Path(__file__).parent.glob("0*.sql")):
+        if not f.name.startswith("001"):     # later files grant to the logins
+            sql(f.read_text(encoding="utf-8"))
+            print(f"{f.name}: done")
 
     r = client.get(f"{API}/projects/{ref}/config/database/pooler")
     r.raise_for_status()

@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS heatmap (
   chg_1d REAL, chg_1w REAL, chg_1m REAL);
 CREATE TABLE IF NOT EXISTS quotes (
   symbol TEXT PRIMARY KEY, last REAL, change_pct REAL, ts INTEGER);
+CREATE TABLE IF NOT EXISTS snapshots (
+  name TEXT PRIMARY KEY, ts INTEGER, payload TEXT);
 """
 
 
@@ -319,6 +321,24 @@ class DeskStore:
 
     def quotes(self) -> dict[str, dict]:
         return {r["symbol"]: r for r in self.rows("SELECT * FROM quotes")}
+
+    # --- screener snapshots (market_desk/screener_snap.py) -------------------
+    def save_snapshot(self, name: str, payload: dict, ts: int | None = None) -> None:
+        import json
+        ts = now_s() if ts is None else ts
+        text = json.dumps(payload, default=str)
+        with self._db() as db:
+            db.execute("INSERT INTO snapshots (name, ts, payload) VALUES (?, ?, ?) "
+                       "ON CONFLICT(name) DO UPDATE SET ts = excluded.ts, "
+                       "payload = excluded.payload", (name, ts, text))
+
+    def snapshot(self, name: str) -> dict | None:
+        """The saved payload plus its ``ts``, or None."""
+        import json
+        rows = self.rows("SELECT ts, payload FROM snapshots WHERE name = ?", (name,))
+        if not rows:
+            return None
+        return {"ts": rows[0]["ts"], **json.loads(rows[0]["payload"])}
 
     # --- alerts --------------------------------------------------------------
     def add_alert(self, symbol: str, op: str, price: float, note: str = "") -> int:

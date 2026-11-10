@@ -430,6 +430,36 @@ def test_store_heatmap_quotes_and_numpy_values(tmp_path):
     assert pid == 1 and store.plans("pending")[0]["valid_from"] == 7
 
 
+def test_screener_snapshots_save_and_isolate_failures(tmp_path, monkeypatch):
+    from market_desk import screener_snap as snap
+    store = DeskStore(tmp_path / "d.db")
+    df = pd.DataFrame({"coin": ["SOL"], "base": ["USDT"], "timeframe": ["1d"],
+                       "direction": ["bull"], "strength": [np.float64(1.5)]})
+    monkeypatch.setitem(snap.BUILDERS, "rs", lambda svc: {"matrix": snap.frame_json(df),
+                                                          "bases": ["USDT"]})
+
+    def boom(svc):
+        raise RuntimeError("Binance down")
+    monkeypatch.setitem(snap.BUILDERS, "btc", boom)
+    out = snap.run(store, svc=object(), parts=("rs", "btc"))
+    assert out["rs"].startswith("ok") and out["btc"].startswith("failed: RuntimeError")
+    got = store.snapshot("rs")
+    assert got["bases"] == ["USDT"] and got["ts"] > 0
+    back = snap.frame_from(got["matrix"])
+    assert back.loc[0, "coin"] == "SOL" and back.loc[0, "strength"] == 1.5
+    assert store.snapshot("btc") is None and store.get_meta("last_screener_snap")
+    store.save_snapshot("rs", {"bases": ["BTC"]}, ts=5)            # replaces
+    assert store.snapshot("rs") == {"ts": 5, "bases": ["BTC"]}
+
+
+def test_screener_page_cells():
+    from market_desk import screener_page as sp
+    assert sp._cell("bull", 1.234) == "▲ 1.2" and sp._cell("bear", -0.5) == "▼ 0.5"
+    assert sp._cell("neutral", 0.1) == "·" and sp._cell("unknown", None) == "—"
+    assert "37,106,191" in sp._css("bull", 3) and "227,73,72" in sp._css("bear", 1)
+    assert sp.tv_link("SOLUSDT").endswith("BINANCE%3ASOLUSDT.P")
+
+
 def test_db_url_found_inside_a_pasted_secret(monkeypatch):
     from market_desk.settings import db_url
     url = "postgresql://desk_viewer.abc:Pw123@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require"

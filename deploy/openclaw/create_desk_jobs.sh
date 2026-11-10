@@ -10,6 +10,8 @@
 #   desk-night    21:30 UTC        backtest + news (03:00 IST), no Telegram
 #                                  card (it would wake the owner)
 #   desk-morning  03:15 UTC        screen + trade plans (08:45 IST)
+#   screener-snap :10 and :40      the screener's results for the cloud
+#                                  page's Screener tab (needs config.yaml)
 set -e
 D=/home/node/.openclaw/workspace/desk
 # env -u: the container's empty TELEGRAM_* would hide the ones in desk/.env
@@ -31,6 +33,12 @@ openclaw cron add --declaration-key desk-morning --name desk-morning \
   --description "Market Desk: screen the watchlist + write trade plans (Python, no model)" \
   --cron "15 3 * * *" --tz UTC --exact \
   --command "$PY morning" \
+  --command-cwd "$D" --timeout-seconds 900 --no-deliver
+
+openclaw cron add --declaration-key screener-snap --name screener-snap \
+  --description "Screener results (matrix, BTC strength, patterns, liquidations) for the cloud page (Python, no model)" \
+  --cron "10,40 * * * *" --tz UTC --exact \
+  --command "$PY screener-snap" \
   --command-cwd "$D" --timeout-seconds 900 --no-deliver
 
 openclaw cron list

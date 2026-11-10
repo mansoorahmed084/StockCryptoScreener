@@ -146,6 +146,7 @@ Its jobs are plain Python command jobs (`create_desk_jobs.sh`), paper only:
 | `desk-tick` | every 5 min | paper fills / stops / targets, price alerts, last prices, heatmap every 15 min |
 | `desk-night` | 21:30 (03:00 IST) | backtest + news, `--quiet` (no Telegram card at night) |
 | `desk-morning` | 03:15 (08:45 IST) | screen + trade plans, morning card to Telegram |
+| `screener-snap` | :10 and :40 | the screener's matrix, BTC strength, patterns and liquidations for the cloud page's Screener tab (about 30 s) |
 
 They write to the Supabase project MarketDesk (`desk/.env`:
 `MARKET_DESK_DB_URL`, the `desk_writer` login, plus the `TELEGRAM_*` lines

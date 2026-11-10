@@ -56,6 +56,16 @@ Since 2026-11-10 the desk runs without the laptop:
 | Data | Supabase project **MarketDesk** (`kblyeideezamwokclqno`, org "Automation", the AutomatedPosting account, free plan, Mumbai) | schema `desk`, not exposed by the REST API |
 | Jobs | EC2 server, OpenClaw, `workspace/desk/` | `desk-tick` every 5 min, `desk-night` 03:00 IST (no Telegram card), `desk-morning` 08:45 IST |
 | Page | Streamlit Community Cloud, `market_desk/app.py` | view mode: reads Supabase, runs no jobs |
+| Screener page | same app, second page "Screener" (`screener_page.py`) | the screener's own results, saved by the `screener-snap` job (`screener_snap.py`) every 30 min |
+
+The **Screener** page shows four parts of the laptop dashboard, read-only:
+the relative-strength matrix with the market regime, BTC Strength for the
+top 50 coins, the Pattern Scanner over the top 50 Binance perpetuals
+(15m / 1h / 4h / 1d) and the liquidation levels + market read for the top
+10. The server runs the screener's code (it needs `config.yaml` in
+`workspace/desk/`), because Binance refuses Streamlit Cloud's US servers.
+Not on the cloud: the Trade page (CoinDCX keys stay on the server), the
+Chart Workspace and chart drawing, and the per-coin Chart Patterns page.
 
 Two database logins (made by `market_desk/sql/setup.py`):
 
