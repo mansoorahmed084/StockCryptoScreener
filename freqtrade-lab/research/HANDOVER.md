@@ -207,6 +207,7 @@ engines agree within 2 points; positive at all 6 oversold/trigger settings
 | stacking the two proven books | correlation +0.300, same losing years; ratio helped in 1 of 9 combinations and reversed on the slot limit |
 | cross-sectional RS as a return engine | correlation is genuinely low (+0.105) and Sharpe improves, but ex-2021 the best ratio anywhere is 0.26 against 0.91 for the core book, and the two coin baskets disagree in sign. A diversifier, not an engine |
 | SuperTrend AI (Clustering) [LuxAlgo] as a flip system (2026-11-13) | 40 configs, 1h/4h/1d, 203 unseen coins: 1h −0.04 to −0.08R; best daily +0.16R but −0.09R without its top 1% trades, lives on 2021; LuxAlgo's signal score is inverse. [SUPERTREND_AI_RESEARCH.md](SUPERTREND_AI_RESEARCH.md) |
+| Liquidity Swings [LuxAlgo] (2026-11-13) | standalone sweep reversal: all 72 configs −0.08 to −0.18R on unseen coins. As the sweep level inside SMC B_final: every swap is worse than the k=5 fractal (len 14: +0.11R vs +0.245R); union adds trades at lower R. [LIQUIDITY_SWINGS_RESEARCH.md](LIQUIDITY_SWINGS_RESEARCH.md) |
 | volatility targeting the cross-sectional book | every targeted config worse than untargeted; two reached -100% as a short window re-levered into the recovery. Its drawdown is the signal's, not the exposure's |
 
 **Long + short combined:** shorts have negative expectancy but win in exactly
