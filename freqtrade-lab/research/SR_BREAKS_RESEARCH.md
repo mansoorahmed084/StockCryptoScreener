@@ -1,8 +1,10 @@
 # Support and Resistance Levels with Breaks [LuxAlgo] — tested 2026-11-13
 
 **Verdict: LuxAlgo's own signal (the volume-confirmed "B") adds nothing. One
-plain variant is a weak but steady CANDIDATE: 4h break, stop at support, hold
-up to 7 days. Not proven. Weaker per trade than SMC sweep-break.**
+plain variant (4h break, stop at support, hold up to 7 days) has a small,
+stable edge, but round 2 shows it moves with SMC sweep-break (monthly
+correlation 0.66) and adding it does not improve return per unit of
+drawdown. Not worth trading next to B_final.** See "Round 2" at the end.
 
 Code: [sr_breaks.py](sr_breaks.py). Tests: `tests/test_sr_breaks.py` (no
 lookahead, level shows one bar after the pivot confirms, break rules, Pine
@@ -53,6 +55,37 @@ Why it is only a candidate:
   the new coins (+0.09 / +0.09 / +0.08), which is the good sign the others
   lacked, but it still needs a fresh check.
 
-Next, if wanted: correlation with SMC sweep-break (a diversifier?), a time-stop
-and stop-distance plateau check on the old 76 only, then a freqtrade
-cross-check.
+## Round 2 — plateau and the SMC book ([sr_check.py](sr_check.py))
+
+**Plateau, old 76 coins only (one dial at a time):** every neighbour stays
+positive and the two hash halves agree. Pivot width 10 / 15 / 20: +0.074 /
++0.093 / +0.116R. Target 2 / 3 / 4 / 6R: +0.090 to +0.103R. Time stop 24 / 42
+/ 84 bars: +0.087 / +0.093 / +0.100R. Stop buffer 0 / 0.1 / 0.5 ATR: +0.095 /
++0.093 / +0.088R. Long only: +0.108R. So the edge is real-looking, not a
+spike. It is just small.
+
+**Against SMC sweep-break (B_final):**
+
+| | all 279 coins | new 203 coins |
+|---|---|---|
+| monthly R correlation | **0.66** | **0.65** |
+| months both lose / months S&R loses | 23 / 31 | 19 / 32 |
+| S&R total R in sweep-break's losing months | −17.6 | −6.2 |
+
+Shared account, 0.5% risk per trade, 10 slots (CAGR / worst-case DD):
+
+| | all 279 coins | new 203 coins |
+|---|---|---|
+| sweep-break alone | 22.6% / 18.4% (ratio 1.23) | 15.4% / 17.6% (0.88) |
+| S&R alone | 22.2% / 32.6% (0.68) | 16.6% / 25.4% (0.65) |
+| both | 27.1% / 27.1% (1.00) | 22.8% / 26.7% (0.85) |
+| sweep-break alone, 20 slots | 32.9% / 29.4% (1.12) | 17.8% / 25.0% (0.71) |
+
+Adding S&R raises CAGR, but drawdown rises as much or more. The ratio gets
+worse on all coins and stays flat on new coins. They lose in the same months,
+so S&R is not a diversifier. S&R also skips most of its signals (11,527 of
+14,904 on all coins) because 10 slots fill up, so its account result depends
+on which signals happen to come first.
+
+Not done: a freqtrade cross-check. Not worth it unless the user wants a second
+book for more signals (sweep-break had no signal above $5M from 7–11 Nov).

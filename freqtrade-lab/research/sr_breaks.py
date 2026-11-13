@@ -117,9 +117,9 @@ def indicator(df: pd.DataFrame, left: int = 15, right: int = 15,
 
 
 @lru_cache(maxsize=None)
-def frame(coin: str, tf: str) -> pd.DataFrame:
+def frame(coin: str, tf: str, width: int = 15) -> pd.DataFrame:
     df = smc.bars(coin, tf, BASE)
-    out = df.join(indicator(df))
+    out = df.join(indicator(df, width, width))
     out["atr"] = smc._atr(df["high"].to_numpy(float), df["low"].to_numpy(float),
                           df["close"].to_numpy(float), 14)
     return out
@@ -128,7 +128,7 @@ def frame(coin: str, tf: str) -> pd.DataFrame:
 # ------------------------------------------------------------- simulator
 @njit(cache=True)
 def _sim(o, h, l, c, atr, res, sup, up, dn, side, stop_mode, exit_mode,
-         tp_r, max_hold, min_risk, max_risk, cost):
+         tp_r, max_hold, min_risk, max_risk, cost, sl_buf=0.1):
     n = len(c)
     ti = np.empty(n, np.int64)
     tx = np.empty(n, np.int64)
@@ -151,13 +151,13 @@ def _sim(o, h, l, c, atr, res, sup, up, dn, side, stop_mode, exit_mode,
             continue
         ep = o[t + 1]
         if stop_mode == 0:
-            stop = l[t] - 0.1 * atr[t] if d > 0 else h[t] + 0.1 * atr[t]
+            stop = l[t] - sl_buf * atr[t] if d > 0 else h[t] + sl_buf * atr[t]
         else:
             ref = sup[t] if d > 0 else res[t]
             if np.isnan(ref):
                 t += 1
                 continue
-            stop = ref - 0.1 * atr[t] if d > 0 else ref + 0.1 * atr[t]
+            stop = ref - sl_buf * atr[t] if d > 0 else ref + sl_buf * atr[t]
         risk = (ep - stop) * d
         if risk <= 0 or risk / ep < min_risk or risk / ep > max_risk:
             t += 1
@@ -235,6 +235,8 @@ class Cfg:
     min_risk: float = 0.005
     max_risk: float = 0.15
     cost: float = smc.COST
+    width: int = 15           # pivot bars each side (LuxAlgo default 15)
+    sl_buf: float = 0.1       # stop buffer beyond the bar / level, in ATR
 
     @property
     def name(self) -> str:
@@ -243,7 +245,7 @@ class Cfg:
 
 
 def run(coin: str, cfg: Cfg) -> pd.DataFrame:
-    F = frame(coin, cfg.tf)
+    F = frame(coin, cfg.tf, cfg.width)
     up = F["x_up"].to_numpy()
     dn = F["x_dn"].to_numpy()
     if cfg.vol:
@@ -258,7 +260,8 @@ def run(coin: str, cfg: Cfg) -> pd.DataFrame:
         F["atr"].to_numpy(float), F["res"].to_numpy(float),
         F["sup"].to_numpy(float), up, dn, 2 if cfg.side == "both" else 1,
         0 if cfg.stop == "bar" else 1, 0 if cfg.exit == "3R" else 1,
-        cfg.tp_r, cfg.max_hold, cfg.min_risk, cfg.max_risk, cfg.cost)
+        cfg.tp_r, cfg.max_hold, cfg.min_risk, cfg.max_risk, cfg.cost,
+        cfg.sl_buf)
     idx = F.index
     return pd.DataFrame({"coin": coin, "entry_time": idx[ti],
                          "exit_time": idx[tx], "dir": d, "entry": px,
