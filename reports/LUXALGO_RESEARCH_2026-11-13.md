@@ -24,7 +24,7 @@ All are free and open-source. We can read the Pine code and port it. We do not n
 | # | Indicator | Why test it | Repaint risk | Status here |
 |---|---|---|---|---|
 | 1 | **SuperTrend AI (Clustering)** | Adaptive SuperTrend. Runs factors 1.0–5.0, k-means groups them into best/avg/worst, uses the best group. New family for us (trend follow). | Low — uses only past bars | **Tested 2026-11-13: no edge** ([results](../freqtrade-lab/research/SUPERTREND_AI_RESEARCH.md)) |
-| 2 | **Support & Resistance Levels with Breaks** | 2nd most popular LuxAlgo script. Pivot S/R + volume oscillator must confirm the break. | Low — pivots are confirmed late, which adds lag | Not built |
+| 2 | **Support & Resistance Levels with Breaks** | 2nd most popular LuxAlgo script. Pivot S/R + volume oscillator must confirm the break. | Low — pivots are confirmed late, which adds lag | **Tested 2026-11-13: LuxAlgo's volume "B" signal adds nothing; one plain 4h variant is a weak, steady candidate** ([results](../freqtrade-lab/research/SR_BREAKS_RESEARCH.md)) |
 | 3 | **Liquidity Swings** | Marks swing-high/low liquidity zones, counts touches and volume. Can give better levels to our 4h sweep-break (the only setup that survived). | Low | **Tested 2026-11-13: no edge, no gain in sweep-break** ([results](../freqtrade-lab/research/LIQUIDITY_SWINGS_RESEARCH.md)) |
 | 4 | Trendlines with Breaks | Short pivot trendlines, slope from ATR. | **High** unless "backpaint" is off | Our TrendlineBreakout is a different, long-term line |
 
