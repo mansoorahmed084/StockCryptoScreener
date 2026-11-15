@@ -208,6 +208,35 @@ def vumanchu(body: BarsBody) -> dict:
         raise HTTPException(400, f"bad candles or settings: {exc}") from exc
 
 
+SENTIMENT_PARAMS = {"rsi_len", "stoch_len", "stoch_smooth", "stoch_rsi_len", "cci_len",
+                    "bbp_len", "ma_len", "bb_len", "bb_mult", "st_len", "st_mult",
+                    "vwap_mult", "linreg_len", "structure_len", "norm_smooth",
+                    "pivot_lookback", "bullish", "bearish", "strong_bullish",
+                    "strong_bearish"}
+MATRIX_PARAMS = {"wave_len", "signal_type", "signal_len", "flow_len", "flow_smooth",
+                 "reversal_factor", "div_min_gap", "overbought", "oversold"}
+
+
+def _run_study(fn, body: BarsBody, allowed: set[str]) -> dict:
+    params = {k: v for k, v in body.params.items() if k in allowed}
+    try:
+        return fn(body.bars[-5000:], **params)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"bad candles or settings: {exc}") from exc
+
+
+@router.post("/studies/sentiment")
+def sentiment(body: BarsBody) -> dict:
+    """Technical Sentiment Composite on the candles the chart has."""
+    return _run_study(studies.sentiment, body, SENTIMENT_PARAMS)
+
+
+@router.post("/studies/matrix")
+def matrix(body: BarsBody) -> dict:
+    """Wave & Flow Matrix on the candles the chart has."""
+    return _run_study(studies.matrix, body, MATRIX_PARAMS)
+
+
 @router.get("/analysis")
 def analysis(symbol: str, tf: str, n: int = 300, order_blocks: bool = True,
              md: MarketData = Depends(get_market)) -> dict:

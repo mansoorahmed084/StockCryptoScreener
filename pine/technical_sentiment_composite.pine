@@ -1,0 +1,279 @@
+//@version=6
+// Technical Sentiment Composite
+//
+// One 0-100 reading of how bullish or bearish the chart's own technicals are.
+// A set of well-known tools is put on a common scale and averaged; 50 is neutral.
+//
+//   Momentum oscillators (RSI, Stochastic %K, Stochastic RSI, CCI, Bull Bear Power)
+//     are zone-scaled: oversold zone -> 0-25, lower half -> 25-50, upper half -> 50-75,
+//     overbought zone -> 75-100.
+//   Trend tools (moving average, Bollinger Bands, Supertrend, session VWAP bands,
+//     market structure) give buy / sell flips; the score is where price sits between
+//     the low and the high it has made around the latest flip, lightly smoothed.
+//   Linear regression is scored from the correlation of price with time.
+//
+// This is the Pine version of backend/indicators/sentiment.py in the StockCryptoScreener
+// repository and follows the same method. Readings agree once the averages have warmed
+// up (a few hundred bars); the first bars differ because Pine seeds its averages
+// differently and Bull Bear Power needs 100 bars here.
+//
+// Independent implementation of the confluence-scoring idea, written from the public
+// description of the method. Not affiliated with LuxAlgo and not expected to match any
+// LuxAlgo script bar for bar.
+indicator("Technical Sentiment Composite", shorttitle = "Sentiment", overlay = false, precision = 1)
+
+// ---- inputs ------------------------------------------------------------------------
+string G_MOM = "Momentum oscillators"
+string G_TREND = "Trend tools"
+string G_BANDS = "Rating bands"
+string G_VIEW = "Display"
+
+int rsiLen = input.int(14, "RSI length", minval = 1, group = G_MOM)
+int stochLen = input.int(14, "Stochastic length", minval = 1, group = G_MOM)
+int stochSmooth = input.int(3, "Stochastic smoothing", minval = 1, group = G_MOM)
+int stochRsiLen = input.int(14, "Stochastic RSI length", minval = 1, group = G_MOM)
+int cciLen = input.int(20, "CCI length", minval = 1, group = G_MOM)
+int bbpLen = input.int(13, "Bull Bear Power length", minval = 1, group = G_MOM)
+
+int maLen = input.int(20, "Moving average length", minval = 1, group = G_TREND)
+int bbLen = input.int(20, "Bollinger length", minval = 1, group = G_TREND)
+float bbMult = input.float(2.0, "Bollinger StdDev", minval = 0.1, step = 0.1, group = G_TREND)
+int stLen = input.int(10, "Supertrend ATR length", minval = 1, group = G_TREND)
+float stMult = input.float(3.0, "Supertrend factor", minval = 0.1, step = 0.1, group = G_TREND)
+float vwapMult = input.float(2.0, "VWAP band StdDev", minval = 0.1, step = 0.1, group = G_TREND)
+int linregLen = input.int(25, "Linear regression length", minval = 2, group = G_TREND)
+int structLen = input.int(5, "Market structure swing length", minval = 1, group = G_TREND)
+int normSmooth = input.int(3, "Trend score smoothing", minval = 1, group = G_TREND)
+
+float strongBull = input.float(75.0, "Strong bullish from", group = G_BANDS)
+float bull = input.float(60.0, "Bullish from", group = G_BANDS)
+float bear = input.float(40.0, "Bearish up to", group = G_BANDS)
+float strongBear = input.float(25.0, "Strong bearish up to", group = G_BANDS)
+
+bool showGroups = input.bool(true, "Momentum and trend lines", group = G_VIEW)
+bool showDivs = input.bool(true, "Divergences", group = G_VIEW)
+int divLb = input.int(5, "Divergence pivot lookback", minval = 1, group = G_VIEW)
+bool showPanel = input.bool(true, "Component panel", group = G_VIEW)
+string panelWhere = input.string("Top right", "Panel position", options = ["Top right", "Middle right", "Bottom right", "Top left", "Bottom left"], group = G_VIEW)
+
+color C_UP = #089981
+color C_UP_SOFT = #5fbf9f
+color C_FLAT = #9598a1
+color C_DOWN_SOFT = #f28b94
+color C_DOWN = #f23645
+int DIV_MAX_GAP = 60
+
+// ---- scaling helpers ------------------------------------------------------------------
+clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+// Piecewise-linear map of an oscillator onto 0-100: each of its own zones becomes a quarter.
+zoneScale(float v, float b0, float b1, float b2, float b3, float b4) =>
+    float x = clamp(v, b0, b4)
+    na(v) ? na : x <= b1 ? 25 * (x - b0) / (b1 - b0) : x <= b2 ? 25 + 25 * (x - b1) / (b2 - b1) : x <= b3 ? 50 + 25 * (x - b2) / (b3 - b2) : 75 + 25 * (x - b3) / (b4 - b3)
+
+// Zone-scale a zero-centred oscillator against its own bands: 0 -> 50, the upper band -> 75,
+// half as far again -> 100, and the mirror below.
+bandScale(float v, float upper, float lower) =>
+    float up = math.max(upper, 1e-12)
+    float lo = math.min(lower, -1e-12)
+    float pos = 50 + 25 * clamp(v / up, 0, 1) + 25 * clamp((v - up) / (0.5 * up), 0, 1)
+    float neg = 50 - 25 * clamp(v / lo, 0, 1) - 25 * clamp((v - lo) / (0.5 * lo), 0, 1)
+    na(v) or na(upper) or na(lower) ? na : v >= 0 ? pos : neg
+
+// 0-100 position of price between its running low and high. A fresh buy flip restarts the
+// high at the close and a fresh sell flip restarts the low, so a new up-signal reads 100 and
+// decays as price gives ground; a new down-signal reads 0 and recovers as price bounces.
+anchoredScore(bool buy, bool sell, int smooth) =>
+    var int state = 0
+    var float hi = na
+    var float lo = na
+    int prev = state
+    if buy
+        state := 1
+    else if sell
+        state := -1
+    if na(hi)
+        hi := close
+        lo := close
+    else if state > prev
+        lo := math.min(lo, close)
+        hi := close
+    else if state < prev
+        hi := math.max(hi, close)
+        lo := close
+    else
+        hi := math.max(hi, close)
+        lo := math.min(lo, close)
+    // a flip beyond the old range leaves no range to measure: read it as the top or bottom
+    float raw = hi > lo ? (close - lo) / (hi - lo) : state > 0 ? 1.0 : state < 0 ? 0.0 : na
+    100 * ta.sma(raw, smooth)
+
+// Closes through the last confirmed swing high (buy) / swing low (sell). A swing is only
+// used once it is `len` bars old, when it is known, and each swing is broken once.
+structureBreaks(int len) =>
+    var float top = na
+    var float bot = na
+    float ph = ta.pivothigh(high, len, len)
+    float pl = ta.pivotlow(low, len, len)
+    if not na(ph)
+        top := ph
+    if not na(pl)
+        bot := pl
+    bool buy = false
+    bool sell = false
+    if not na(top) and close > top
+        buy := true
+        top := na
+    if not na(bot) and close < bot
+        sell := true
+        bot := na
+    [buy, sell]
+
+// ---- momentum oscillators ----------------------------------------------------------
+float rsi = ta.rsi(close, rsiLen)
+float sRsi = zoneScale(rsi, 0, 30, 50, 70, 100)
+float sStoch = zoneScale(ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth), 0, 20, 50, 80, 100)
+float sStochRsi = zoneScale(ta.sma(ta.stoch(rsi, rsi, rsi, stochRsiLen), stochSmooth), 0, 20, 50, 80, 100)
+float sCci = zoneScale(ta.cci(hlc3, cciLen), -300, -100, 0, 100, 300)
+
+// Bull Bear Power has no fixed range, so its own 2-sigma bands stand in for the zones.
+float bbp = high + low - 2 * ta.ema(close, bbpLen)
+float bbpMid = ta.sma(bbp, 100)
+float bbpDev = 2 * ta.stdev(bbp, 100)
+float sBbp = bandScale(bbp, bbpMid + bbpDev, bbpMid - bbpDev)
+
+// ---- trend tools ---------------------------------------------------------------------
+float ma = ta.sma(close, maLen)
+float sMa = anchoredScore(close > ma, close < ma, normSmooth)
+
+float bbMid = ta.sma(close, bbLen)
+float bbDev = bbMult * ta.stdev(close, bbLen)
+float sBb = anchoredScore(close > bbMid + bbDev, close < bbMid - bbDev, normSmooth)
+
+[stLine, stDir] = ta.supertrend(stMult, stLen)
+float sSt = anchoredScore(close > stLine, close < stLine, normSmooth)
+
+// Session VWAP with volume-weighted deviation bands, restarting each day. It only means
+// something on intraday candles with volume.
+var float dayVolume = 0.0
+var float dayValue = 0.0
+var float dayValueSq = 0.0
+if timeframe.change("D")
+    dayVolume := 0.0
+    dayValue := 0.0
+    dayValueSq := 0.0
+dayVolume += nz(volume)
+dayValue += hlc3 * nz(volume)
+dayValueSq += hlc3 * hlc3 * nz(volume)
+float vwapLine = dayVolume > 0 ? dayValue / dayVolume : na
+float vwapDev = dayVolume > 0 ? math.sqrt(math.max(dayValueSq / dayVolume - vwapLine * vwapLine, 0)) : na
+float vwapUpper = vwapLine + vwapMult * vwapDev
+float vwapLower = vwapLine - vwapMult * vwapDev
+float sVwap = anchoredScore(close > vwapUpper, close < vwapLower, normSmooth)
+bool useVwap = timeframe.isintraday and ta.cum(nz(volume)) > 0
+
+float sLinreg = 50 * ta.correlation(close, bar_index, linregLen) + 50
+
+[structBuy, structSell] = structureBreaks(structLen)
+float sStruct = anchoredScore(structBuy, structSell, normSmooth)
+
+// ---- the composite -------------------------------------------------------------------
+// A sum is na while any member is still warming up, so there is no reading until every
+// tool has one.
+float momentumSum = sRsi + sStoch + sStochRsi + sCci + sBbp
+float trendSum = sMa + sBb + sSt + sLinreg + sStruct + (useVwap ? sVwap : 0.0)
+int trendCount = useVwap ? 6 : 5
+
+float sentiment = (momentumSum + trendSum) / (5 + trendCount)
+float momentum = na(sentiment) ? na : momentumSum / 5
+float trend = na(sentiment) ? na : trendSum / trendCount
+
+ratingColor(float v) =>
+    na(v) ? C_FLAT : v >= strongBull ? C_UP : v >= bull ? C_UP_SOFT : v > bear ? C_FLAT : v > strongBear ? C_DOWN_SOFT : C_DOWN
+
+ratingText(float v) =>
+    na(v) ? "" : v >= strongBull ? "Strong bullish" : v >= bull ? "Bullish" : v > bear ? "Neutral" : v > strongBear ? "Bearish" : "Strong bearish"
+
+// ---- divergences: consecutive sentiment pivots against price -------------------------
+// A pivot is only known `divLb` bars after it prints, so the mark appears that much later
+// and is drawn back on the pivot bar.
+float pivotLow = ta.pivotlow(sentiment, divLb, divLb)
+float pivotHigh = ta.pivothigh(sentiment, divLb, divLb)
+var float lastLowOsc = na
+var float lastLowPrice = na
+var int lastLowBar = na
+var float lastHighOsc = na
+var float lastHighPrice = na
+var int lastHighBar = na
+bool bullDiv = false
+bool bearDiv = false
+if not na(pivotLow)
+    int lowBar = bar_index - divLb
+    float lowPrice = low[divLb]
+    if not na(lastLowOsc) and lowBar - lastLowBar <= DIV_MAX_GAP and lowPrice < lastLowPrice and pivotLow > lastLowOsc and pivotLow < 50
+        bullDiv := true
+    lastLowBar := lowBar
+    lastLowOsc := pivotLow
+    lastLowPrice := lowPrice
+if not na(pivotHigh)
+    int highBar = bar_index - divLb
+    float highPrice = high[divLb]
+    if not na(lastHighOsc) and highBar - lastHighBar <= DIV_MAX_GAP and highPrice > lastHighPrice and pivotHigh < lastHighOsc and pivotHigh > 50
+        bearDiv := true
+    lastHighBar := highBar
+    lastHighOsc := pivotHigh
+    lastHighPrice := highPrice
+
+// ---- plots ---------------------------------------------------------------------------
+hline(strongBull, "Strong bullish", color = color.new(C_UP, 40), linestyle = hline.style_dashed)
+hline(bull, "Bullish", color = color.new(C_UP, 75), linestyle = hline.style_dotted)
+hline(50, "Neutral", color = color.new(C_FLAT, 50), linestyle = hline.style_dotted)
+hline(bear, "Bearish", color = color.new(C_DOWN, 75), linestyle = hline.style_dotted)
+hline(strongBear, "Strong bearish", color = color.new(C_DOWN, 40), linestyle = hline.style_dashed)
+
+plot(momentum, "Momentum average", color = #5b9cf6, linewidth = 1, display = showGroups ? display.all : display.none)
+plot(trend, "Trend average", color = #f7a600, linewidth = 1, display = showGroups ? display.all : display.none)
+plot(sentiment, "Sentiment", color = ratingColor(sentiment), linewidth = 2)
+
+plotshape(showDivs and bullDiv ? pivotLow : na, "Bullish divergence", style = shape.labelup, location = location.absolute, color = C_UP, text = "Bull div", textcolor = color.white, size = size.tiny, offset = -divLb)
+plotshape(showDivs and bearDiv ? pivotHigh : na, "Bearish divergence", style = shape.labeldown, location = location.absolute, color = C_DOWN, text = "Bear div", textcolor = color.white, size = size.tiny, offset = -divLb)
+
+// ---- component panel -----------------------------------------------------------------
+panelPosition(string where) =>
+    switch where
+        "Middle right" => position.middle_right
+        "Bottom right" => position.bottom_right
+        "Top left" => position.top_left
+        "Bottom left" => position.bottom_left
+        => position.top_right
+
+panelRow(table t, int row, string name, float v) =>
+    table.cell(t, 0, row, name, text_color = chart.fg_color, text_size = size.small, text_halign = text.align_left)
+    table.cell(t, 1, row, na(v) ? "-" : str.tostring(v, "#"), text_color = color.white, text_size = size.small, bgcolor = na(v) ? color.new(C_FLAT, 60) : color.new(ratingColor(v), 15))
+
+var table panel = table.new(panelPosition(panelWhere), 2, 15, border_width = 1, border_color = color.new(C_FLAT, 80), frame_width = 1, frame_color = color.new(C_FLAT, 60))
+if showPanel and barstate.islast
+    table.cell(panel, 0, 0, "Sentiment", text_color = chart.fg_color, text_size = size.normal, text_halign = text.align_left)
+    table.cell(panel, 1, 0, na(sentiment) ? "-" : str.tostring(sentiment, "#") + "  " + ratingText(sentiment), text_color = color.white, text_size = size.normal, bgcolor = color.new(ratingColor(sentiment), 0))
+    panelRow(panel, 1, "Momentum average", momentum)
+    panelRow(panel, 2, "RSI", sRsi)
+    panelRow(panel, 3, "Stochastic %K", sStoch)
+    panelRow(panel, 4, "Stochastic RSI", sStochRsi)
+    panelRow(panel, 5, "CCI", sCci)
+    panelRow(panel, 6, "Bull Bear Power", sBbp)
+    panelRow(panel, 7, "Trend average", trend)
+    panelRow(panel, 8, "Moving average", sMa)
+    panelRow(panel, 9, "Bollinger Bands", sBb)
+    panelRow(panel, 10, "Supertrend", sSt)
+    panelRow(panel, 11, "Linear regression", sLinreg)
+    panelRow(panel, 12, "Market structure", sStruct)
+    panelRow(panel, 13, "VWAP bands", useVwap ? sVwap : na)
+
+// ---- alerts (set them to "Once Per Bar Close": the forming bar can still change) ------
+alertcondition(ta.crossover(sentiment, bull), "Sentiment turns bullish", "Technical sentiment crossed above the bullish band")
+alertcondition(ta.crossunder(sentiment, bear), "Sentiment turns bearish", "Technical sentiment crossed below the bearish band")
+alertcondition(ta.crossover(sentiment, strongBull), "Sentiment strong bullish", "Technical sentiment crossed into strong bullish")
+alertcondition(ta.crossunder(sentiment, strongBear), "Sentiment strong bearish", "Technical sentiment crossed into strong bearish")
+alertcondition(bullDiv, "Bullish divergence", "Bullish divergence between price and technical sentiment")
+alertcondition(bearDiv, "Bearish divergence", "Bearish divergence between price and technical sentiment")

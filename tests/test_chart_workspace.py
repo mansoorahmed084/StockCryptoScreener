@@ -342,6 +342,27 @@ def test_vumanchu_study_matches_the_screener_indicator():
     assert {m["kind"] for m in out["markers"]} <= {"buy", "sell", "bull_div", "bear_div"}
 
 
+def test_sentiment_and_matrix_studies_match_the_indicators():
+    from backend.indicators.sentiment import TechnicalSentiment
+    from backend.indicators.wave_flow import WaveFlowMatrix
+    bars = _wave_bars()
+    df = cs.frame(bars)
+
+    out = cs.sentiment(bars)
+    ref = TechnicalSentiment().compute(df).panes["sentiment"].dropna()
+    assert {"sentiment", "momentum", "trend", "rsi", "structure"} <= set(out["series"])
+    assert out["series"]["sentiment"][-1]["value"] == pytest.approx(float(ref.iloc[-1]))
+    assert out["value"] == pytest.approx(float(ref.iloc[-2]))      # the last closed candle
+    assert out["rating"] in ("Strong bearish", "Bearish", "Neutral", "Bullish", "Strong bullish")
+    assert cs.sentiment(bars[:10]) == {"series": {}, "markers": [], "value": None, "rating": ""}
+
+    out = cs.matrix(bars, signal_type="trail")
+    ref = WaveFlowMatrix(signal_type="trail").compute(df)
+    assert set(out["series"]) == set(ref.panes)
+    assert out["series"]["wave"][-1]["value"] == pytest.approx(float(ref.panes["wave"].iloc[-1]))
+    assert out["markers"] and all(m["time"] != bars[-1]["time"] for m in out["markers"])
+
+
 def test_analysis_shapes_use_times_not_indexes():
     bars = _wave_bars()
     daily = _wave_bars(120, step=86400)
@@ -362,6 +383,17 @@ def test_study_routes(md, monkeypatch):
                                                            "params": {"average_len": 10, "bogus": 1}})
     assert r.status_code == 200 and r.json()["wt1"]
     assert client.post("/api/chart/studies/vumanchu", json={"bars": [{"x": 1}]}).status_code == 400
+    r = client.post("/api/chart/studies/sentiment", json={"bars": _wave_bars(),
+                                                            "params": {"rsi_len": 10, "bogus": 1}})
+    assert r.status_code == 200 and r.json()["series"]["sentiment"] and r.json()["rating"]
+    assert client.post("/api/chart/studies/sentiment",
+                       json={"bars": _wave_bars(), "params": {"rsi_len": 0}}).status_code == 400
+    r = client.post("/api/chart/studies/matrix", json={"bars": _wave_bars(),
+                                                         "params": {"wave_len": 9, "bogus": 1}})
+    assert r.status_code == 200 and r.json()["series"]["wave"] and r.json()["markers"]
+    assert client.post("/api/chart/studies/matrix",
+                       json={"bars": _wave_bars(), "params": {"signal_type": "nope"}}).status_code == 400
+    assert client.post("/api/chart/studies/matrix", json={"bars": [{"x": 1}]}).status_code == 400
     a = client.get("/api/chart/analysis", params={"symbol": "BTCUSDT.P", "tf": "1m", "n": 200})
     assert a.status_code == 200 and "order_blocks" in a.json()
 

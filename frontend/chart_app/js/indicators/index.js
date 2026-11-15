@@ -7,7 +7,7 @@ import { INDICATORS } from './registry.js';
 import { StudyManager } from './studies.js';
 
 const GROUPS = [
-  ['Screener', ['vumanchu', 'auto']],
+  ['Screener', ['vumanchu', 'sentiment', 'matrix', 'auto']],
   ['Trend', ['ema', 'sma', 'wma', 'vwap', 'bb']],
   ['Oscillators', ['rsi', 'macd', 'stoch', 'atr']],
   ['Volume', ['vprofile']],

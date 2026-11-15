@@ -1,0 +1,321 @@
+//@version=6
+// Wave & Flow Matrix
+//
+// A momentum wave and a money-flow gauge in one 0-100 pane, cross-checked against each other.
+//
+//   Wave         Where price sits in its recent range, smoothed adaptively: fast when price
+//                travels in a straight line, slow when it chops. The wave crossing its signal
+//                line is a turning point (a strong one in the oversold / overbought zone).
+//   Money flow   Share of recent traded value that went through on rising bars, around 50.
+//                Its two thresholds are learned from how far flow usually travels each side.
+//   Overflow     Flow beyond its threshold in a run that has already outlasted the usual run:
+//                late money, which tends to be exhaustion.
+//   Reversals    A turning point right after an activity climax (volume, or bar range when
+//                there is no volume). Major when the climax is large and the wave turned from
+//                the oversold / overbought zone. A higher factor means fewer signals.
+//   Divergences  Read at each turning point from the swing just finished against the one
+//                before, so they need no bars to the right and never move.
+//   Confluence   How many of wave and flow are on the same side, and a 0-100 meter that folds
+//                the lot into one reading.
+//
+// This is the Pine version of backend/indicators/wave_flow.py in the StockCryptoScreener
+// repository and follows the same method. Readings agree once the averages have warmed up;
+// the first bars differ because Pine seeds its averages differently.
+//
+// Original design. It covers the same ground as multi-component oscillator suites such as
+// LuxAlgo's Oscillator Matrix, whose calculations are not published; it does not reproduce
+// them, is not affiliated with LuxAlgo, and will not match that product's values.
+indicator("Wave & Flow Matrix", shorttitle = "Wave/Flow", overlay = false, precision = 1, max_lines_count = 200)
+
+// ---- inputs ------------------------------------------------------------------------
+string G_WAVE = "Wave"
+string G_FLOW = "Money flow"
+string G_SIG = "Signals"
+string G_VIEW = "Display"
+string SIG_AVG = "Average"
+string SIG_TRAIL = "Trailing stop"
+
+int waveLen = input.int(7, "Wave length", minval = 1, group = G_WAVE)
+string signalType = input.string(SIG_AVG, "Signal line", options = [SIG_AVG, SIG_TRAIL], group = G_WAVE)
+int signalLen = input.int(3, "Signal length / stop distance", minval = 1, group = G_WAVE)
+float overbought = input.float(80.0, "Overbought", group = G_WAVE)
+float oversold = input.float(20.0, "Oversold", group = G_WAVE)
+
+int flowLen = input.int(35, "Money flow length", minval = 1, group = G_FLOW)
+int flowSmooth = input.int(6, "Money flow smoothing", minval = 1, group = G_FLOW)
+
+float revFactor = input.float(5.0, "Reversal factor (higher = fewer)", minval = 0.5, step = 0.5, group = G_SIG)
+float divMinGap = input.float(10.0, "Divergence: least wave difference", minval = 0, step = 1, group = G_SIG)
+
+bool showFlow = input.bool(true, "Money flow and overflow", group = G_VIEW)
+bool showThresholds = input.bool(true, "Money flow thresholds", group = G_VIEW)
+bool showConfluence = input.bool(true, "Confluence strips", group = G_VIEW)
+bool showMeter = input.bool(false, "Confluence meter", group = G_VIEW)
+bool showTurns = input.bool(true, "Turning points", group = G_VIEW)
+bool showReversals = input.bool(true, "Reversals", group = G_VIEW)
+bool showDivs = input.bool(true, "Divergences", group = G_VIEW)
+
+color C_UP = #089981
+color C_DOWN = #f23645
+color C_FLAT = #9598a1
+color C_WAVE = #2962ff
+color C_SIGNAL = #f7a600
+int DIV_MAX_GAP = 60        // bars between the two swings of a divergence
+int DIV_MEMORY = 10         // bars a divergence keeps counting in the meter
+int CLIMAX_WINDOW = 3       // bars back a climax still backs a turning point
+
+// ---- wave: range position through an efficiency-weighted average ----------------------
+// Efficiency is net move / path travelled over the length: 1 for a straight line, near 0
+// for chop. It sets the smoothing between a 2-bar and a (4 x length)-bar average.
+float rangeTop = ta.highest(high, waveLen)
+float rangeBottom = ta.lowest(low, waveLen)
+float rangePos = rangeTop == rangeBottom ? 50.0 : 100 * (close - rangeBottom) / (rangeTop - rangeBottom)
+float path = math.sum(math.abs(close - close[1]), waveLen)
+float efficiency = path > 0 ? math.min(1.0, math.abs(close - close[waveLen]) / path) : 0.0
+float fastAlpha = 2.0 / 3.0
+float slowAlpha = 2.0 / (4.0 * waveLen + 1.0)
+float alpha = nz(efficiency) * (fastAlpha - slowAlpha) + slowAlpha
+var float wave = na
+if not na(rangePos)
+    wave := na(wave) ? rangePos : wave + alpha * (rangePos - wave)
+
+// ---- signal line: an average, or a stop that ratchets behind the wave -----------------
+float signalAvg = ta.sma(wave, signalLen)
+float stopGap = ta.ema(math.abs(wave - wave[1]), 10) * signalLen
+var float stop = na
+var bool stopBelow = true
+if not na(wave) and not na(stopGap)
+    if na(stop)
+        stop := wave - stopGap
+    else if stopBelow
+        if wave < stop
+            stopBelow := false
+            stop := wave + stopGap
+        else
+            stop := math.max(stop, wave - stopGap)
+    else
+        if wave > stop
+            stopBelow := true
+            stop := wave - stopGap
+        else
+            stop := math.min(stop, wave + stopGap)
+float signalTrail = na(stop) ? na : math.min(100.0, math.max(0.0, stop))
+float signal = signalType == SIG_AVG ? signalAvg : signalTrail
+
+// ---- money flow ------------------------------------------------------------------------
+// Without volume, the size of the move stands in for it.
+bool hasVolume = ta.cum(nz(volume)) > 0
+float step = hlc3 - hlc3[1]
+float weight = hasVolume ? hlc3 * nz(volume) : math.abs(step)
+float upValue = math.sum(step > 0 ? weight : 0.0, flowLen)
+float downValue = math.sum(step < 0 ? weight : 0.0, flowLen)
+float traded = upValue + downValue
+float flowRaw = na(traded) ? na : traded == 0 ? 50.0 : 100 * upValue / traded
+float flow = ta.ema(flowRaw, flowSmooth)
+
+// Thresholds: 50 plus the usual excursion on that side plus its usual spread, each an
+// average that only updates while flow is on that side.
+float learn = 2.0 / (flowLen + 1.0)
+var float reachUp = na
+var float spreadUp = 0.0
+var float reachDown = na
+var float spreadDown = 0.0
+if not na(flow) and flow != 50
+    float reach = math.abs(flow - 50)
+    if flow > 50
+        if na(reachUp)
+            reachUp := reach
+        else
+            spreadUp += learn * (math.abs(reach - reachUp) - spreadUp)
+            reachUp += learn * (reach - reachUp)
+    else
+        if na(reachDown)
+            reachDown := reach
+        else
+            spreadDown += learn * (math.abs(reach - reachDown) - spreadDown)
+            reachDown += learn * (reach - reachDown)
+float flowUpper = na(flow) ? na : 50 + reachUp + spreadUp
+float flowLower = na(flow) ? na : 50 - reachDown - spreadDown
+
+// Overflow: signed excess beyond the threshold, counted only once the current run on that
+// side of 50 has outlasted the average finished run.
+var int flowSide = 0
+var int flowRun = 0
+var float usualRun = float(flowLen)
+float overflow = na
+if not na(flow)
+    overflow := 0.0
+    int sideNow = flow > 50 ? 1 : flow < 50 ? -1 : flowSide
+    if sideNow != flowSide
+        if flowSide != 0 and flowRun > 0
+            usualRun += 0.25 * (flowRun - usualRun)
+        flowSide := sideNow
+        flowRun := 0
+    flowRun += 1
+    if flowRun > usualRun
+        if flowSide > 0 and flow > flowUpper
+            overflow := flow - flowUpper
+        else if flowSide < 0 and flow < flowLower
+            overflow := flow - flowLower
+
+// ---- turning points -------------------------------------------------------------------
+bool above = wave > signal
+bool known = not na(signal) and not na(signal[1])
+bool turnUp = above and not above[1] and known
+bool turnDown = not above and above[1] and known and not na(wave)
+// the zone the wave turned from: its extreme over the last few bars
+float trough = ta.lowest(wave, CLIMAX_WINDOW)
+float crest = ta.highest(wave, CLIMAX_WINDOW)
+bool strongUp = turnUp and trough <= oversold
+bool strongDown = turnDown and crest >= overbought
+
+// ---- reversals: a turning point on the heels of an activity climax ---------------------
+float activity = hasVolume ? nz(volume) : ta.tr(true)
+float averageActivity = ta.sma(activity, flowLen)
+float usualActivity = averageActivity[1]               // the level before this bar
+float relative = usualActivity > 0 ? activity / usualActivity : na
+float climax = ta.highest(relative, CLIMAX_WINDOW)
+// factor 5: activity 2x its usual level is a climax, 3x a major one
+bool minorClimax = climax >= 1 + 0.2 * revFactor
+bool majorClimax = climax >= 1 + 0.4 * revFactor
+bool majorRevUp = strongUp and majorClimax
+bool majorRevDown = strongDown and majorClimax
+bool minorRevUp = turnUp and minorClimax and trough < 50 and not majorRevUp
+bool minorRevDown = turnDown and minorClimax and crest > 50 and not majorRevDown
+
+// ---- divergences, read at the turn -----------------------------------------------------
+// Running extremes of the swing in progress (it starts on the previous turning bar).
+var float swingWaveHigh = na
+var float swingWaveLow = na
+var float swingPriceHigh = na
+var float swingPriceLow = na
+var int swingWaveHighBar = na
+var int swingWaveLowBar = na
+if not na(wave)
+    if na(swingWaveHigh) or wave > swingWaveHigh
+        swingWaveHigh := wave
+        swingWaveHighBar := bar_index
+    if na(swingWaveLow) or wave < swingWaveLow
+        swingWaveLow := wave
+        swingWaveLowBar := bar_index
+swingPriceHigh := na(swingPriceHigh) ? high : math.max(swingPriceHigh, high)
+swingPriceLow := na(swingPriceLow) ? low : math.min(swingPriceLow, low)
+
+var int lastTopBar = na
+var float lastTopWave = na
+var float lastTopPrice = na
+var int lastTopWaveBar = na
+var int lastBottomBar = na
+var float lastBottomWave = na
+var float lastBottomPrice = na
+var int lastBottomWaveBar = na
+bool bullDiv = false
+bool bearDiv = false
+if turnDown
+    if not na(lastTopBar) and bar_index - lastTopBar <= DIV_MAX_GAP and lastTopWave > 50 and swingPriceHigh > lastTopPrice and swingWaveHigh <= lastTopWave - divMinGap
+        bearDiv := true
+        if showDivs
+            line.new(lastTopWaveBar, lastTopWave, swingWaveHighBar, swingWaveHigh, color = C_DOWN, width = 2)
+    lastTopBar := bar_index
+    lastTopWaveBar := swingWaveHighBar
+    lastTopWave := swingWaveHigh
+    lastTopPrice := swingPriceHigh
+if turnUp
+    if not na(lastBottomBar) and bar_index - lastBottomBar <= DIV_MAX_GAP and lastBottomWave < 50 and swingPriceLow < lastBottomPrice and swingWaveLow >= lastBottomWave + divMinGap
+        bullDiv := true
+        if showDivs
+            line.new(lastBottomWaveBar, lastBottomWave, swingWaveLowBar, swingWaveLow, color = C_UP, width = 2)
+    lastBottomBar := bar_index
+    lastBottomWaveBar := swingWaveLowBar
+    lastBottomWave := swingWaveLow
+    lastBottomPrice := swingPriceLow
+if turnUp or turnDown
+    // the next swing starts on this bar
+    swingWaveHigh := wave
+    swingWaveLow := wave
+    swingWaveHighBar := bar_index
+    swingWaveLowBar := bar_index
+    swingPriceHigh := high
+    swingPriceLow := low
+
+// ---- confluence ------------------------------------------------------------------------
+bool ready = not na(wave) and not na(flow)
+int confluenceUp = ready ? (wave > 50 ? 1 : 0) + (flow > 50 ? 1 : 0) : na
+int confluenceDown = ready ? (wave < 50 ? 1 : 0) + (flow < 50 ? 1 : 0) : na
+
+var int lastBullDivBar = na
+var int lastBearDivBar = na
+if bullDiv
+    lastBullDivBar := bar_index
+if bearDiv
+    lastBearDivBar := bar_index
+bool bearRecent = not na(lastBearDivBar) and bar_index - lastBearDivBar < DIV_MEMORY
+bool bullRecent = not na(lastBullDivBar) and bar_index - lastBullDivBar < DIV_MEMORY
+float voteDiv = bearRecent ? -1.0 : bullRecent ? 1.0 : 0.0
+float voteOverflow = -math.sign(nz(overflow))          // late money argues for the other side
+float votes = math.sign(wave - signal) + math.sign(wave - 50) + math.sign(flow - 50) + voteOverflow + voteDiv
+int cast = 3 + (voteOverflow != 0 ? 1 : 0) + (voteDiv != 0 ? 1 : 0)
+float meter = ready and not na(signal) ? 50 + 50 * votes / cast : na
+
+// ---- plots -----------------------------------------------------------------------------
+hline(overbought, "Overbought", color = color.new(C_DOWN, 50), linestyle = hline.style_dashed)
+hline(50, "Midline", color = color.new(C_FLAT, 50), linestyle = hline.style_dotted)
+hline(oversold, "Oversold", color = color.new(C_UP, 50), linestyle = hline.style_dashed)
+
+plot(showFlow ? flow : na, "Money flow", color = color.new(flow > 50 ? C_UP : C_DOWN, 65), style = plot.style_area, histbase = 50)
+plot(showFlow ? 50 + overflow : na, "Overflow", color = color.new(overflow > 0 ? C_UP : C_DOWN, 20), style = plot.style_area, histbase = 50)
+plot(showThresholds ? flowUpper : na, "Money flow upper threshold", color = color.new(C_UP, 30), style = plot.style_circles, linewidth = 1)
+plot(showThresholds ? flowLower : na, "Money flow lower threshold", color = color.new(C_DOWN, 30), style = plot.style_circles, linewidth = 1)
+
+// Confluence strips outside the 0-100 scale: light for one of wave / flow, solid for both.
+color clear = color.new(C_FLAT, 100)
+stripUpFrom = plot(100, "Upper confluence base", color = clear, editable = false)
+stripUpTo = plot(108, "Upper confluence top", color = clear, editable = false)
+stripDownFrom = plot(0, "Lower confluence base", color = clear, editable = false)
+stripDownTo = plot(-8, "Lower confluence bottom", color = clear, editable = false)
+color stripUp = not showConfluence ? na : confluenceUp == 2 ? color.new(C_UP, 15) : confluenceUp == 1 ? color.new(C_UP, 75) : na
+color stripDown = not showConfluence ? na : confluenceDown == 2 ? color.new(C_DOWN, 15) : confluenceDown == 1 ? color.new(C_DOWN, 75) : na
+fill(stripUpFrom, stripUpTo, color = stripUp, title = "Upper confluence")
+fill(stripDownFrom, stripDownTo, color = stripDown, title = "Lower confluence")
+
+plot(meter, "Confluence meter", color = #ab47bc, linewidth = 1, display = showMeter ? display.all : display.none)
+signalPlot = plot(signal, "Signal", color = C_SIGNAL, linewidth = 1)
+wavePlot = plot(wave, "Wave", color = C_WAVE, linewidth = 2)
+fill(wavePlot, signalPlot, color = color.new(wave > signal ? C_UP : C_DOWN, 80), title = "Wave vs signal")
+
+plot(showTurns and turnUp and not strongUp ? wave : na, "Turn up", color = color.new(C_UP, 30), style = plot.style_circles, linewidth = 2)
+plot(showTurns and turnDown and not strongDown ? wave : na, "Turn down", color = color.new(C_DOWN, 30), style = plot.style_circles, linewidth = 2)
+plot(showTurns and strongUp ? wave : na, "Strong turn up", color = C_UP, style = plot.style_circles, linewidth = 4)
+plot(showTurns and strongDown ? wave : na, "Strong turn down", color = C_DOWN, style = plot.style_circles, linewidth = 4)
+
+plotshape(showReversals and minorRevUp, "Reversal up", style = shape.circle, location = location.bottom, color = C_UP, size = size.tiny)
+plotshape(showReversals and minorRevDown, "Reversal down", style = shape.circle, location = location.top, color = C_DOWN, size = size.tiny)
+plotshape(showReversals and majorRevUp, "Major reversal up", style = shape.triangleup, location = location.bottom, color = C_UP, size = size.small)
+plotshape(showReversals and majorRevDown, "Major reversal down", style = shape.triangledown, location = location.top, color = C_DOWN, size = size.small)
+
+plotshape(showDivs and bullDiv ? wave : na, "Bullish divergence", style = shape.labelup, location = location.absolute, color = C_UP, text = "Bull div", textcolor = color.white, size = size.tiny)
+plotshape(showDivs and bearDiv ? wave : na, "Bearish divergence", style = shape.labeldown, location = location.absolute, color = C_DOWN, text = "Bear div", textcolor = color.white, size = size.tiny)
+
+// ---- meter readout ---------------------------------------------------------------------
+var table readout = table.new(position.top_right, 2, 1, border_width = 1, border_color = color.new(C_FLAT, 80))
+if showMeter and barstate.islast
+    string verdict = na(meter) ? "" : meter >= 70 ? "Bullish" : meter <= 30 ? "Bearish" : "Mixed"
+    color tone = na(meter) ? C_FLAT : meter >= 70 ? C_UP : meter <= 30 ? C_DOWN : C_FLAT
+    table.cell(readout, 0, 0, "Confluence", text_color = chart.fg_color, text_size = size.small)
+    table.cell(readout, 1, 0, na(meter) ? "-" : str.tostring(meter, "#") + "  " + verdict, text_color = color.white, text_size = size.small, bgcolor = tone)
+
+// ---- alerts (set them to "Once Per Bar Close": the forming bar can still change) --------
+alertcondition(turnUp, "Turn up", "Wave crossed above its signal")
+alertcondition(turnDown, "Turn down", "Wave crossed below its signal")
+alertcondition(strongUp, "Strong turn up", "Wave crossed above its signal from the oversold zone")
+alertcondition(strongDown, "Strong turn down", "Wave crossed below its signal from the overbought zone")
+alertcondition(minorRevUp or majorRevUp, "Reversal up", "Turning point up after an activity climax")
+alertcondition(minorRevDown or majorRevDown, "Reversal down", "Turning point down after an activity climax")
+alertcondition(majorRevUp, "Major reversal up", "Major reversal up")
+alertcondition(majorRevDown, "Major reversal down", "Major reversal down")
+alertcondition(bullDiv, "Bullish divergence", "Bullish divergence between price and the wave")
+alertcondition(bearDiv, "Bearish divergence", "Bearish divergence between price and the wave")
+alertcondition(overflow > 0 and not (overflow[1] > 0), "Bullish overflow", "Money flow overflow on the buy side")
+alertcondition(overflow < 0 and not (overflow[1] < 0), "Bearish overflow", "Money flow overflow on the sell side")
+alertcondition(confluenceUp == 2 and confluenceUp[1] != 2, "Bullish confluence", "Wave and money flow both above 50")
+alertcondition(confluenceDown == 2 and confluenceDown[1] != 2, "Bearish confluence", "Wave and money flow both below 50")

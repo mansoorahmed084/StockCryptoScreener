@@ -2,6 +2,7 @@
 
 * VuManChu Cipher B on the candles the chart has loaded — the same code the
   screener uses (backend/indicators/vumanchu.py), so the numbers match.
+* The Technical Sentiment Composite and the Wave & Flow Matrix, the same way.
 * Auto analysis: the trendlines, levels, Fibonacci, patterns, swing labels
   and daily order blocks the Chart Patterns page finds
   (backend/screener/patterns.py), as JSON shapes with times instead of bar
@@ -14,7 +15,10 @@ import math
 import numpy as np
 import pandas as pd
 
+from backend.indicators.base import IndicatorResult
+from backend.indicators.sentiment import TechnicalSentiment
 from backend.indicators.vumanchu import VuManChuCipherB
+from backend.indicators.wave_flow import WaveFlowMatrix
 from backend.screener import patterns as pt
 
 
@@ -51,6 +55,39 @@ def vumanchu(bars: list[dict], **params) -> dict:
         "markers": [{"time": int(m.ts.timestamp()), "kind": m.kind, "price": m.price,
                      "label": m.label} for m in res.markers if m.ts != last],
     }
+
+
+def _study(res: IndicatorResult, df: pd.DataFrame) -> dict:
+    """Every pane series by name, plus markers. The forming (last) candle
+    gets lines but no markers: its signals can still change."""
+    last = df.index[-1] if len(df) else None
+    return {
+        "series": {name: _series(s) for name, s in res.panes.items()},
+        "markers": [{"time": int(m.ts.timestamp()), "kind": m.kind, "price": m.price,
+                     "label": m.label} for m in res.markers if m.ts != last],
+    }
+
+
+def sentiment(bars: list[dict], **params) -> dict:
+    """Technical Sentiment Composite: the 0-100 reading, its momentum and
+    trend halves, every component, divergences and the rating of the latest
+    closed candle."""
+    df = frame(bars)
+    ind = TechnicalSentiment(**params)
+    res = ind.compute(df)
+    out = _study(res, df)
+    closed = res.panes["sentiment"].iloc[:-1].dropna() if res.panes else pd.Series(dtype=float)
+    out["value"] = _num(closed.iloc[-1]) if len(closed) else None
+    out["rating"] = ind.rating(closed.iloc[-1]) if len(closed) else ""
+    return out
+
+
+def matrix(bars: list[dict], **params) -> dict:
+    """Wave & Flow Matrix: wave, signal, money flow with thresholds and
+    overflow, confluence, meter, and the turning / reversal / divergence
+    markers."""
+    df = frame(bars)
+    return _study(WaveFlowMatrix(**params).compute(df), df)
 
 
 def analysis(df: pd.DataFrame, daily: pd.DataFrame | None = None) -> dict:
