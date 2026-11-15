@@ -410,6 +410,7 @@ textarea.inp { height: 90px; padding: 6px 8px; resize: vertical; }
 .ind-row.added span { color: var(--up); }
 .legend-studies { margin-top: 2px; }
 .legend .study .st-vals b { margin-left: 4px; }
+.legend .study .st-vals .st-tag { margin-left: 8px; color: var(--text-muted); }
 
 /* ---- replay ---- */
 .replay-bar {

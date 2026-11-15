@@ -107,7 +107,9 @@ export class StudyManager {
 
   toggle(s) {
     s.hidden = !s.hidden;
-    for (const series of Object.values(s.series)) series.applyOptions({ visible: !s.hidden });
+    for (const [key, series] of Object.entries(s.series)) {
+      series.applyOptions({ visible: !s.hidden && s.on?.[key] !== false });
+    }
     s.custom?.setVisible?.(!s.hidden);
     this._renderLegend();
     this._changed();
@@ -179,8 +181,9 @@ export class StudyManager {
         (byPlot[m.plot] ||= []).push({ time: v.toChart(m.time), position: m.position, shape: m.shape,
                                        color: m.color, text: m.text, size: m.size ?? 1 });
       }
-      const target = s.series.wt2 || Object.values(s.series)[0];
-      const list = (byPlot.wt2 || Object.values(byPlot).flat()).sort((a, b) => a.time - b.time);
+      const on = def.markerPlot || 'wt2';      // the line the markers sit on
+      const target = s.series[on] || Object.values(s.series)[0];
+      const list = (byPlot[on] || Object.values(byPlot).flat()).sort((a, b) => a.time - b.time);
       if (!s.markers) s.markers = createSeriesMarkers(target, list);
       else s.markers.setMarkers(list);
     }
@@ -192,21 +195,25 @@ export class StudyManager {
     const newPane = def.pane === 'new';
     const paneIndex = newPane ? this.chart.panes().length : 0;
     let first = null;
+    s.on = {};                                   // plots a settings checkbox switched off
     for (const plot of def.plots) {
       const color = plot.colorKey ? s.inputs[plot.colorKey] : plot.color;
       const lineWidth = plot.width ?? (+s.inputs.width || 2);
-      const common = { priceLineVisible: false, lastValueVisible: true, visible: !s.hidden,
-                       crosshairMarkerVisible: false, title: '' };
+      const on = plot.hideKey ? s.inputs[plot.hideKey] !== false : true;
+      s.on[plot.key] = on;
+      const common = { priceLineVisible: false, lastValueVisible: plot.lastValue !== false,
+                       visible: !s.hidden && on, crosshairMarkerVisible: false, title: '' };
+      const base = plot.base ?? 0;               // the level an area / histogram grows from
       let series;
       if (plot.type === 'histogram') {
-        series = this.chart.addSeries(HistogramSeries, { ...common, lastValueVisible: false }, paneIndex);
+        series = this.chart.addSeries(HistogramSeries, { ...common, lastValueVisible: false, base }, paneIndex);
       } else if (plot.type === 'area') {
-        const on = plot.hideKey ? s.inputs[plot.hideKey] !== false : true;
+        const fill = plot.opacity ?? 0.35;
         series = this.chart.addSeries(BaselineSeries, {
-          ...common, visible: !s.hidden && on, lastValueVisible: false, baseValue: { type: 'price', price: 0 },
+          ...common, lastValueVisible: false, baseValue: { type: 'price', price: base },
           topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)',
-          topFillColor1: rgba(plot.color, 0.35), topFillColor2: rgba(plot.color, 0.35),
-          bottomFillColor1: rgba(plot.negColor, 0.35), bottomFillColor2: rgba(plot.negColor, 0.35),
+          topFillColor1: rgba(plot.color, fill), topFillColor2: rgba(plot.color, fill),
+          bottomFillColor1: rgba(plot.negColor, fill), bottomFillColor2: rgba(plot.negColor, fill),
         }, paneIndex);
       } else if (plot.area) {
         series = this.chart.addSeries(BaselineSeries, {
@@ -216,7 +223,8 @@ export class StudyManager {
           bottomFillColor1: rgba(color, 0.15), bottomFillColor2: rgba(color, 0.5),
         }, paneIndex);
       } else {
-        series = this.chart.addSeries(LineSeries, { ...common, color, lineWidth }, paneIndex);
+        series = this.chart.addSeries(LineSeries, { ...common, color, lineWidth,
+                                                    lineStyle: plot.lineStyle ?? 0 }, paneIndex);
       }
       s.series[plot.key] = series;
       first ||= series;
@@ -274,12 +282,14 @@ export class StudyManager {
     for (const s of this.studies) {
       const el = this.legend.querySelector(`.study[data-uid="${s.uid}"] .st-vals`);
       if (!el || !s.result) continue;
-      el.innerHTML = s.def.plots.filter(pl => s.result[pl.key]).map(pl => {
+      const shown = s.def.plots.filter(pl => pl.legend !== false && s.on?.[pl.key] !== false && s.result[pl.key]);
+      el.innerHTML = shown.map(pl => {
         const val = s.result[pl.key][i];
         const color = pl.colorFn ? pl.colorFn(val, s.result[pl.key][i - 1] ?? val)
           : pl.colorKey ? s.inputs[pl.colorKey] : pl.color;
         return `<b style="color:${esc(color)}">${fmtVal(val)}</b>`;
-      }).join(' ');
+      }).join(' ') + (s.def.legendText ? s.def.legendText(s.result, i, s.inputs) : []).map(t =>
+        `<span class="st-tag"${t.color ? ` style="color:${esc(t.color)}"` : ''}>${esc(t.text)}</span>`).join('');
     }
   }
 }
