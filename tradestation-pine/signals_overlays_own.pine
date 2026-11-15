@@ -1,0 +1,538 @@
+//@version=5
+// Signals & Overlays Toolkit — OWN BUILD. This is not LuxAlgo code.
+//
+// LuxAlgo's Signals & Overlays is a paid, closed script. Its formulas are not public. This file has
+// the same feature list and the same settings layout, taken from LuxAlgo's public documentation
+// (docs.luxalgo.com). Every formula below is our own choice of a standard public method, so the
+// lines and signals will NOT match LuxAlgo's bar for bar. Personal use.
+//
+// What each part is made of:
+//   Confirmation signals  ATR band flip (SuperTrend). Band width = sensitivity x 0.25 x ATR.
+//                         Strong (+) = the flip agrees with the 200 EMA trend.
+//   Contrarian signals    RSI (length = sensitivity) leaves oversold / overbought.
+//                         Strong (+) = RSI went past the strong level first.
+//   Exits                 Confirmation: RSI(14) drops back from overbought while the trade is in profit.
+//                         Contrarian: RSI is back at 50 while the trade is in profit (one exit only).
+//   Optimal Sensitivity   Grid search: sensitivities 10..20, best close-to-close result, last 250 bars.
+//   Autopilot             The same grid search picks the sensitivity on every bar (5..10 / 10..20 / 20..30).
+//   ML Signal Classifier  Class 1..4 from where (close - 200 EMA) / ATR sits in its own last 200 bars.
+//   Smart Trail           ATR trailing stop that only moves in the trend's favour, with a zone next to it.
+//   Reversal Zones        Mean +/- 2.0 / 2.5 / 3.0 standard deviations.
+//   Trend Tracer          Step line: it moves only when price moves more than a smoothed range away.
+//   Trend Catcher         Kaufman adaptive moving average, coloured by its slope.
+//   Neo Cloud             Two Donchian mid-lines (lead and lag).
+//   TP/SL Points          2 take profits + 2 stop losses at ATR multiples from the trigger close.
+//   Dashboard             Trend Strength = ADX x 2. Volatility = ATR against its 100-bar mean.
+//                         Squeeze = how narrow the Bollinger width is. Volume Sentiment = buy/sell split.
+//
+// Not built: Custom Alert Creator, Alert Scripting, External Conditions.
+indicator("Signals & Overlays Toolkit (own build)", "S&O own", overlay=true, max_labels_count=500)
+
+// ───────────────────────── Inputs ─────────────────────────
+gB = "Basic Settings"
+preset = input.string("None", "Presets / Filters", options=["None", "Trend Trader", "Scalper", "Swing Trader", "Contrarian Trader", "Smart Trail", "Trend Tracer", "Trend Catcher", "Neo Cloud", "Trend Strength"], group=gB, tooltip="The first four are presets: they switch on a set of features. The last five are filters: they hide signals that disagree with that overlay.")
+modeIn = input.string("Confirmation + Exits", "Signal Mode", options=["Confirmation + Exits", "Contrarian + Exits", "None"], group=gB)
+useML = input.bool(false, "ML Signal Classifier", group=gB, tooltip="Shows a class 1 to 4 in place of the arrow.")
+sensIn = input.int(12, "Signals Sensitivity", minval=2, maxval=50, group=gB, tooltip="Higher = longer-term signals. No effect while Autopilot is on.")
+colorIn = input.string("Confirmation Simple", "Candle Coloring", options=["Confirmation Simple", "Confirmation Gradient", "Contrarian Gradient", "None"], group=gB)
+
+gO = "Indicator Overlay"
+showTrailIn = input.bool(true, "Smart Trail", inline="o1", group=gO)
+trailP = input.int(3, "Smart Trail Period", minval=1, maxval=5, inline="o1", group=gO)
+showRZIn = input.bool(false, "Reversal Zones", inline="o2", group=gO)
+rzP = input.int(3, "Reversal Zones Period", minval=1, maxval=5, inline="o2", group=gO)
+showCatcherIn = input.bool(false, "Trend Catcher", inline="o3", group=gO)
+catcherP = input.int(3, "Trend Catcher Period", minval=1, maxval=5, inline="o3", group=gO)
+showTracerIn = input.bool(false, "Trend Tracer", inline="o4", group=gO)
+tracerP = input.int(3, "Trend Tracer Period", minval=1, maxval=5, inline="o4", group=gO)
+showNeoIn = input.bool(false, "Neo Cloud", inline="o5", group=gO)
+neoP = input.int(2, "Neo Cloud Period", minval=1, maxval=5, inline="o5", group=gO)
+
+gP = "Take Profits / Stop Losses"
+tpslIn = input.string("None", "TP/SL Levels", options=["None", "Signals", "Smart Trail", "Reversal Zones", "Trend Catcher", "Trend Tracer", "Neo Cloud"], group=gP)
+tpDist = input.float(5, "Distance", minval=0.5, step=0.5, group=gP, tooltip="Higher = levels farther from price. TP1/SL1 = 0.4 x Distance x ATR, TP2/SL2 = 0.8 x Distance x ATR.")
+
+gA = "Advanced Settings"
+mlFilter = input.int(1234, "ML Classifier Filter", minval=1, group=gA, tooltip="Classes to keep. 12 = show only classes 1 and 2.")
+autoIn = input.string("Off", "Autopilot Sensitivity", options=["Off", "Short-Term", "Medium-Term", "Long-Term"], group=gA)
+waitClose = input.bool(true, "Signals On Candle Close Only", group=gA, tooltip="On = a signal shows only when its candle is closed, so it does not come and go.")
+
+gD = "Dashboard"
+dashLoc = input.string("Bottom Right", "Dashboard Location", options=["Hidden", "Top Right", "Bottom Right", "Bottom Left"], group=gD)
+dashSize = input.string("Tiny", "Dashboard Size", options=["Tiny", "Small", "Normal", "Large"], group=gD)
+dOpt = input.bool(true, "Optimal Sensitivity", group=gD)
+dTrend = input.bool(true, "Trend Strength", group=gD)
+dVol = input.bool(false, "Volatility", group=gD)
+dSqz = input.bool(false, "Squeeze", group=gD)
+dVs = input.bool(false, "Volume Sentiment", group=gD)
+
+gT = "Own Build Tuning"
+atrLen = input.int(10, "Signal ATR Length", minval=1, group=gT)
+facPer = input.float(0.25, "Band Width Per Sensitivity Point", minval=0.01, step=0.05, group=gT, tooltip="Sensitivity 12 x 0.25 = a band 3 ATR wide.")
+baseLen = input.int(200, "Trend Baseline Length", minval=2, group=gT)
+osLvl = input.float(30, "Contrarian Oversold", minval=1, maxval=49, group=gT)
+obLvl = input.float(70, "Contrarian Overbought", minval=51, maxval=99, group=gT)
+osStrong = input.float(20, "Contrarian Strong Oversold", minval=1, maxval=49, group=gT)
+obStrong = input.float(80, "Contrarian Strong Overbought", minval=51, maxval=99, group=gT)
+rzMult = input.float(2.0, "Reversal Zone Inner Width", minval=0.5, step=0.25, group=gT)
+gridBars = input.int(250, "Optimal Sensitivity Bars", minval=50, maxval=1000, group=gT)
+mlLen = input.int(200, "Classifier Look-Back", minval=20, group=gT)
+
+gC = "Colors"
+bullCss = input.color(#089981, "Bullish", group=gC)
+bearCss = input.color(#f23645, "Bearish", group=gC)
+neutCss = input.color(#9c27b0, "Neutral", group=gC)
+upCss = input.color(#2157f3, "Up-Trend / Bullish Exit", group=gC)
+dnCss = input.color(#ff9800, "Down-Trend / Bearish Exit", group=gC)
+
+// ───────────────────────── Presets ─────────────────────────
+isPre = preset == "Trend Trader" or preset == "Scalper" or preset == "Swing Trader" or preset == "Contrarian Trader"
+mode = preset == "Contrarian Trader" ? "Contrarian + Exits" : isPre ? "Confirmation + Exits" : modeIn
+isConf = mode == "Confirmation + Exits"
+isCont = mode == "Contrarian + Exits"
+auto = preset == "Swing Trader" ? "Long-Term" : preset == "Contrarian Trader" ? "Medium-Term" : autoIn
+useAuto = auto != "Off"
+coloring = preset == "Scalper" ? "Confirmation Gradient" : preset == "Swing Trader" ? "Confirmation Simple" : preset == "Contrarian Trader" ? "Contrarian Gradient" : colorIn
+showTrail = isPre ? preset == "Trend Trader" : showTrailIn
+showRZ = isPre ? (preset == "Scalper" or preset == "Contrarian Trader") : showRZIn
+showCatcher = isPre ? preset == "Trend Trader" : showCatcherIn
+showTracer = isPre ? false : showTracerIn
+showNeo = isPre ? preset == "Swing Trader" : showNeoIn
+tpsl = preset == "Scalper" and tpslIn == "None" ? "Signals" : tpslIn
+
+// ───────────────────────── Shared series ─────────────────────────
+pc = close[1]
+mid = hl2
+atrS = ta.atr(atrLen)
+atr14 = ta.atr(14)
+baseline = ta.ema(close, baseLen)
+
+// ───────────────────────── Signal engines ─────────────────────────
+// One ATR band flip for each sensitivity in `sens`. All the state is in the arrays, so the same
+// code runs the user's sensitivity and the grid.
+f_conf(sens, up, lo, dir) =>
+    n = array.size(sens)
+    if not na(atrS) and not na(pc)
+        for k = 0 to n - 1
+            w = array.get(sens, k) * facPer * atrS
+            u = mid + w
+            l = mid - w
+            pu = array.get(up, k)
+            pl = array.get(lo, k)
+            nu = na(pu) or u < pu or pc > pu ? u : pu
+            nl = na(pl) or l > pl or pc < pl ? l : pl
+            d = array.get(dir, k)
+            d := d == 1 ? (close < nl ? -1 : 1) : (close > nu ? 1 : -1)
+            array.set(up, k, nu)
+            array.set(lo, k, nl)
+            array.set(dir, k, d)
+    n
+
+// One RSI reversal engine for each length in `lens`. `sig` gets +1 when RSI leaves oversold and -1
+// when it leaves overbought; 2 / -2 when RSI went past the strong level during that visit.
+f_cont(lens, au, ad, rs, ext, sig) =>
+    n = array.size(lens)
+    ch = close - pc
+    for k = 0 to n - 1
+        s = 0
+        if not na(ch)
+            len = array.get(lens, k)
+            gain = math.max(ch, 0)
+            loss = math.max(-ch, 0)
+            pau = array.get(au, k)
+            pad = array.get(ad, k)
+            nau = na(pau) ? gain : pau + (gain - pau) / len
+            nad = na(pad) ? loss : pad + (loss - pad) / len
+            r = nad == 0 ? (nau == 0 ? 50.0 : 100.0) : 100 - 100 / (1 + nau / nad)
+            pr = array.get(rs, k)
+            e = array.get(ext, k)
+            if bar_index > 3 * len and not na(pr)
+                if pr < osLvl and r >= osLvl
+                    s := nz(e, pr) <= osStrong ? 2 : 1
+                else if pr > obLvl and r <= obLvl
+                    s := nz(e, pr) >= obStrong ? -2 : -1
+            // the extreme RSI of the current visit below oversold or above overbought
+            if r < osLvl
+                e := na(e) or pr >= osLvl ? r : math.min(e, r)
+            else if r > obLvl
+                e := na(e) or pr <= obLvl ? r : math.max(e, r)
+            else
+                e := na
+            array.set(au, k, nau)
+            array.set(ad, k, nad)
+            array.set(rs, k, r)
+            array.set(ext, k, e)
+        array.set(sig, k, s)
+    n
+
+// the user's sensitivity: both engines always run, because candle coloring can use either one
+var mSens = array.new_float(1, sensIn)
+var mUp = array.new_float(1, na)
+var mLo = array.new_float(1, na)
+var mDir = array.new_int(1, 1)
+var cAu = array.new_float(1, na)
+var cAd = array.new_float(1, na)
+var cRs = array.new_float(1, na)
+var cExt = array.new_float(1, na)
+var cSig = array.new_int(1, 0)
+f_conf(mSens, mUp, mLo, mDir)
+f_cont(mSens, cAu, cAd, cRs, cExt, cSig)
+
+// ───────────────────────── Grid search (Optimal Sensitivity, Autopilot) ─────────────────────────
+// Every sensitivity in the range runs side by side for the selected signal mode. Each one holds
+// +1 after its bullish signal and -1 after its bearish signal. Its score is the sum of
+// position x close-to-close return over the last `gridBars` bars. The best score wins.
+gFrom = auto == "Short-Term" ? 5 : auto == "Long-Term" ? 20 : 10
+gTo = auto == "Short-Term" ? 10 : auto == "Long-Term" ? 30 : 20
+gN = gTo - gFrom + 1
+var gSens = array.new_float(gN, 0)
+var gUp = array.new_float(gN, na)
+var gLo = array.new_float(gN, na)
+var gDir = array.new_int(gN, 1)
+var gAu = array.new_float(gN, na)
+var gAd = array.new_float(gN, na)
+var gRs = array.new_float(gN, na)
+var gExt = array.new_float(gN, na)
+var gSig = array.new_int(gN, 0)
+var gPos = array.new_int(gN, 0)
+var gSum = array.new_float(gN, 0.0)
+var gRet = array.new_float(gN * gridBars, 0.0)
+var int best = 0
+if barstate.isfirst
+    for k = 0 to gN - 1
+        array.set(gSens, k, gFrom + k)
+
+gridOn = isConf or isCont
+gridReady = gridOn and bar_index >= gridBars
+if gridOn
+    // The return is kept as a whole number (millionths). Sums of whole numbers are exact, so two
+    // sensitivities that held the same positions tie exactly, and the lower one wins every time.
+    ret = na(pc) ? 0.0 : math.round(1e6 * (close - pc) / pc)
+    slot = bar_index % gridBars
+    // score the position each one held into this bar, and drop the bar that left the window
+    for k = 0 to gN - 1
+        c = array.get(gPos, k) * ret
+        i = k * gridBars + slot
+        array.set(gSum, k, array.get(gSum, k) + c - array.get(gRet, i))
+        array.set(gRet, i, c)
+    if isConf
+        f_conf(gSens, gUp, gLo, gDir)
+        for k = 0 to gN - 1
+            array.set(gPos, k, array.get(gDir, k))
+    else
+        f_cont(gSens, gAu, gAd, gRs, gExt, gSig)
+        for k = 0 to gN - 1
+            gs = array.get(gSig, k)
+            if gs != 0
+                array.set(gPos, k, gs > 0 ? 1 : -1)
+    b = 0
+    for k = 1 to gN - 1
+        if array.get(gSum, k) > array.get(gSum, b)
+            b := k
+    best := b
+
+autoOn = useAuto and gridReady
+optSens = gridReady ? array.get(gSens, best) : na
+optDir = gridReady ? array.get(gPos, best) : 0
+
+// ───────────────────────── Raw signals ─────────────────────────
+confDir = isConf and autoOn ? array.get(gDir, best) : array.get(mDir, 0)
+contSig = isCont and autoOn ? array.get(gSig, best) : array.get(cSig, 0)
+contRsi = isCont and autoOn ? array.get(gRs, best) : array.get(cRs, 0)
+
+var int pConfDir = na
+confSig = na(pConfDir) ? 0 : confDir == 1 and pConfDir == -1 ? (close > baseline ? 2 : 1) : confDir == -1 and pConfDir == 1 ? (close < baseline ? -2 : -1) : 0
+pConfDir := confDir
+rawSig = isConf ? confSig : isCont ? contSig : 0
+
+// ───────────────────────── Classifier ─────────────────────────
+// How far price is from the baseline, against that distance's own last `mlLen` bars. The quartile
+// lines move with the market: this is the "adaptive threshold".
+gz = (close - baseline) / atr14
+q1 = ta.percentile_nearest_rank(gz, mlLen, 25)
+q2 = ta.percentile_nearest_rank(gz, mlLen, 50)
+q3 = ta.percentile_nearest_rank(gz, mlLen, 75)
+// class 1 until the window holds `mlLen` real values
+clsHi = na(gz[mlLen - 1]) ? 1 : 1 + (gz > q1 ? 1 : 0) + (gz > q2 ? 1 : 0) + (gz > q3 ? 1 : 0)
+sigUp = rawSig > 0
+// Confirmation: a high class = the signal goes with the main trend. Contrarian: a high class = the
+// trend it goes against is well developed.
+cls = rawSig == 0 ? 0 : (isConf and sigUp) or (isCont and not sigUp) ? clsHi : 5 - clsHi
+mlPass = not useML or str.contains(str.tostring(mlFilter), str.tostring(cls))
+
+// ───────────────────────── Overlays ─────────────────────────
+// Smart Trail
+trW = (trailP + 1) * atr14
+var float trail = na
+var int trailDir = 1
+pTrailDir = trailDir
+if not na(trW)
+    if na(trail)
+        trail := close - trW
+    else if trailDir == 1
+        if close < trail
+            trailDir := -1
+            trail := close + trW
+        else
+            trail := math.max(trail, close - trW)
+    else
+        if close > trail
+            trailDir := 1
+            trail := close - trW
+        else
+            trail := math.min(trail, close + trW)
+trailUp = trailDir == 1 and pTrailDir == -1
+trailDn = trailDir == -1 and pTrailDir == 1
+trailZone = trail + trailDir * 0.25 * trW
+
+// Reversal Zones
+rzLen = 20 + 30 * (rzP - 1)
+rzBasis = ta.sma(close, rzLen)
+rzDev = ta.stdev(close, rzLen)
+r1 = rzBasis + rzMult * rzDev
+r2 = rzBasis + (rzMult + 0.5) * rzDev
+r3 = rzBasis + (rzMult + 1.0) * rzDev
+s1 = rzBasis - rzMult * rzDev
+s2 = rzBasis - (rzMult + 0.5) * rzDev
+s3 = rzBasis - (rzMult + 1.0) * rzDev
+inUpper = high >= r1
+inLower = low <= s1
+enterUpper = inUpper and not inUpper[1]
+enterLower = inLower and not inLower[1]
+xR3 = ta.crossover(close, r3)
+xS3 = ta.crossunder(close, s3)
+
+// Trend Tracer
+absCh = nz(math.abs(close - pc))
+ttRng = ta.ema(absCh, 20 * tracerP) * 3.0
+var float tracer = na
+var int tracerDir = 0
+pTracer = tracer
+pTracerDir = tracerDir
+if not na(ttRng)
+    tracer := na(tracer) ? close : close > tracer ? math.max(tracer, close - ttRng) : math.min(tracer, close + ttRng)
+    tracerDir := na(pTracer) ? 0 : tracer > pTracer ? 1 : tracer < pTracer ? -1 : tracerDir
+tracerUp = tracerDir == 1 and pTracerDir != 1
+tracerDn = tracerDir == -1 and pTracerDir != -1
+
+// Trend Catcher
+tcLen = 10 * catcherP
+tcNoise = math.sum(absCh, tcLen)
+tcEr = nz(tcNoise > 0 ? math.abs(close - close[tcLen]) / tcNoise : 0)
+tcSc = math.pow(tcEr * (2.0 / 3 - 2.0 / 31) + 2.0 / 31, 2)
+var float catcher = na
+var int catcherDir = 0
+pCatcher = catcher
+pCatcherDir = catcherDir
+catcher := na(catcher) ? close : catcher + tcSc * (close - catcher)
+tcMove = catcher - nz(pCatcher, catcher)
+tcMin = 0.02 * nz(atr14)
+catcherDir := tcMove > tcMin ? 1 : tcMove < -tcMin ? -1 : catcherDir
+catcherUp = catcherDir == 1 and pCatcherDir != 1
+catcherDn = catcherDir == -1 and pCatcherDir != -1
+
+// Neo Cloud
+ncFast = 13 * neoP
+lead = (ta.highest(high, ncFast) + ta.lowest(low, ncFast)) / 2
+lag = (ta.highest(high, 2 * ncFast) + ta.lowest(low, 2 * ncFast)) / 2
+var int neoDir = 0
+var int neoAge = 0
+pNeoDir = neoDir
+neoDir := lead > lag ? 1 : lead < lag ? -1 : neoDir
+neoAge := neoDir != pNeoDir ? 0 : neoAge + 1
+neoUp = neoDir == 1 and pNeoDir != 1
+neoDn = neoDir == -1 and pNeoDir != -1
+cloudTop = math.max(lead, lag)
+cloudBot = math.min(lead, lag)
+
+// ───────────────────────── Dashboard metrics ─────────────────────────
+[diPlus, diMinus, adx] = ta.dmi(14, 14)
+trendStr = math.min(100, nz(adx) * 2)
+volRatio = atr14 / ta.sma(atr14, 100)
+volRising = atr14 > atr14[5]
+bbw = ta.stdev(close, 20) / ta.sma(close, 20)
+squeeze = 100 - ta.percentrank(bbw, 100)
+hlRange = high - low
+buyVol = hlRange > 0 ? volume * (close - low) / hlRange : volume / 2
+volAvg = ta.ema(volume, 14)
+buyAvg = ta.ema(buyVol, 14)
+volSent = volAvg > 0 ? 100 * (2 * buyAvg - volAvg) / volAvg : 0
+
+// ───────────────────────── Filters and final signals ─────────────────────────
+passBull = preset == "Smart Trail" ? close > trail : preset == "Trend Tracer" ? tracerDir == 1 : preset == "Trend Catcher" ? catcherDir == 1 : preset == "Neo Cloud" ? close > cloudTop : preset == "Trend Strength" ? trendStr > 50 : true
+passBear = preset == "Smart Trail" ? close < trail : preset == "Trend Tracer" ? tracerDir == -1 : preset == "Trend Catcher" ? catcherDir == -1 : preset == "Neo Cloud" ? close < cloudBot : preset == "Trend Strength" ? trendStr > 50 : true
+okBar = not waitClose or barstate.isconfirmed
+bull = rawSig > 0 and passBull and mlPass and okBar
+bear = rawSig < 0 and passBear and mlPass and okBar
+strong = math.abs(rawSig) == 2
+
+// ───────────────────────── Exits ─────────────────────────
+rsiX = ta.rsi(close, 14)
+xDn = ta.crossunder(rsiX, 70)
+xUp = ta.crossover(rsiX, 30)
+var int pos = 0
+var float entry = na
+var bool exitDone = false
+exitBull = false
+exitBear = false
+if bull
+    pos := 1
+    entry := close
+    exitDone := false
+else if bear
+    pos := -1
+    entry := close
+    exitDone := false
+else if pos == 1 and close > entry and okBar
+    if isConf and xDn
+        exitBull := true
+    else if isCont and not exitDone and contRsi >= 50
+        exitBull := true
+        exitDone := true
+else if pos == -1 and close < entry and okBar
+    if isConf and xUp
+        exitBear := true
+    else if isCont and not exitDone and contRsi <= 50
+        exitBear := true
+        exitDone := true
+
+if bull
+    label.new(bar_index, low, useML ? str.tostring(cls) : strong ? "▲+" : "▲", yloc=yloc.belowbar, style=label.style_label_up, color=bullCss, textcolor=color.white, size=size.small)
+if bear
+    label.new(bar_index, high, useML ? str.tostring(cls) : strong ? "▼+" : "▼", yloc=yloc.abovebar, style=label.style_label_down, color=bearCss, textcolor=color.white, size=size.small)
+plotshape(exitBull, "Exit Bullish", shape.xcross, location.abovebar, upCss, size=size.tiny)
+plotshape(exitBear, "Exit Bearish", shape.xcross, location.belowbar, dnCss, size=size.tiny)
+
+// ───────────────────────── TP/SL points ─────────────────────────
+tBull = tpsl == "Signals" ? bull : tpsl == "Smart Trail" ? trailUp : tpsl == "Reversal Zones" ? xR3 : tpsl == "Trend Catcher" ? catcherUp : tpsl == "Trend Tracer" ? tracerUp : tpsl == "Neo Cloud" ? neoUp : false
+tBear = tpsl == "Signals" ? bear : tpsl == "Smart Trail" ? trailDn : tpsl == "Reversal Zones" ? xS3 : tpsl == "Trend Catcher" ? catcherDn : tpsl == "Trend Tracer" ? tracerDn : tpsl == "Neo Cloud" ? neoDn : false
+var int tpDir = 0
+var float tp1 = na
+var float tp2 = na
+var float sl1 = na
+var float sl2 = na
+var bool tpDone = false
+var bool slDone = false
+tpUnit = tpDist * atr14
+// hits are checked against the levels set on an earlier bar
+tpHit = tpDir != 0 and not tpDone and (tpDir == 1 ? high >= tp1 : low <= tp1)
+slHit = tpDir != 0 and not slDone and (tpDir == 1 ? low <= sl1 : high >= sl1)
+if tpHit
+    tpDone := true
+if slHit
+    slDone := true
+// price ran past the far level: move the levels to the new price
+tpPast = tpDir != 0 and (tpDir * (close - tp2) > 0 or tpDir * (close - sl2) < 0)
+tpMoved = tpsl != "None" and not na(tpUnit) and okBar and (tBull or tBear or tpPast)
+if tpMoved
+    tpDir := tBull ? 1 : tBear ? -1 : tpDir
+    tp1 := close + tpDir * 0.4 * tpUnit
+    tp2 := close + tpDir * 0.8 * tpUnit
+    sl1 := close - tpDir * 0.4 * tpUnit
+    sl2 := close - tpDir * 0.8 * tpUnit
+    tpDone := false
+    slDone := false
+tpShow = tpsl != "None" and tpDir != 0 and not tpMoved
+
+// ───────────────────────── Candle coloring ─────────────────────────
+var int barVal = 0
+var bool hasSig = false
+if confSig != 0
+    hasSig := true
+    barVal := confSig == 2 ? 1 : confSig == -2 ? -1 : 0
+color simpleCol = not hasSig ? na : barVal == 1 ? bullCss : barVal == -1 ? bearCss : neutCss
+gradV = 0.5 * confDir + 0.5 * math.max(-1, math.min(1, nz((close - baseline) / (3 * atr14))))
+color confGrad = gradV >= 0 ? color.from_gradient(gradV, 0, 1, neutCss, bullCss) : color.from_gradient(gradV, -1, 0, bearCss, neutCss)
+color contGrad = na(contRsi) ? na : contRsi <= 50 ? color.from_gradient(contRsi, osStrong, 50, bullCss, neutCss) : color.from_gradient(contRsi, 50, obStrong, neutCss, bearCss)
+barcolor(coloring == "Confirmation Simple" ? simpleCol : coloring == "Confirmation Gradient" ? confGrad : coloring == "Contrarian Gradient" ? contGrad : na)
+
+// ───────────────────────── Overlay plots ─────────────────────────
+pTrail = plot(showTrail and not (trailUp or trailDn) ? trail : na, "Smart Trail", color=trailDir == 1 ? upCss : bearCss, style=plot.style_linebr, linewidth=2)
+pTrailZ = plot(showTrail and not (trailUp or trailDn) ? trailZone : na, "Smart Trail Zone", color=color.new(color.gray, 100), style=plot.style_linebr)
+fill(pTrail, pTrailZ, color=showTrail ? color.new(trailDir == 1 ? upCss : bearCss, 80) : na, title="Smart Trail Area")
+
+pR1 = plot(showRZ ? r1 : na, "R1", color=color.new(bearCss, 60))
+plot(showRZ ? r2 : na, "R2", display=display.none)
+pR3 = plot(showRZ ? r3 : na, "R3", color=color.new(bearCss, 60))
+pS1 = plot(showRZ ? s1 : na, "S1", color=color.new(bullCss, 60))
+plot(showRZ ? s2 : na, "S2", display=display.none)
+pS3 = plot(showRZ ? s3 : na, "S3", color=color.new(bullCss, 60))
+fill(pR1, pR3, color=showRZ ? color.new(bearCss, 85) : na, title="Upper Reversal Zone")
+fill(pS1, pS3, color=showRZ ? color.new(bullCss, 85) : na, title="Lower Reversal Zone")
+
+plot(showTracer ? tracer : na, "Trend Tracer", color=tracerDir == 1 ? upCss : tracerDir == -1 ? dnCss : color.gray, linewidth=2)
+plot(showCatcher ? catcher : na, "Trend Catcher", color=catcherDir == 1 ? bullCss : catcherDir == -1 ? bearCss : color.gray, linewidth=2)
+
+neoCss = neoDir == 1 ? bullCss : bearCss
+pLead = plot(showNeo ? lead : na, "Neo Cloud Lead", color=color.new(neoCss, 40))
+pLag = plot(showNeo ? lag : na, "Neo Cloud Lag", color=color.new(neoCss, 70))
+// an older trend is drawn brighter
+fill(pLead, pLag, color=showNeo ? color.new(neoCss, math.max(50, 90 - neoAge)) : na, title="Neo Cloud")
+
+plot(tpShow ? tp1 : na, "TP 1", color=bullCss, style=plot.style_linebr)
+plot(tpShow ? tp2 : na, "TP 2", color=bullCss, style=plot.style_linebr)
+plot(tpShow ? sl1 : na, "SL 1", color=bearCss, style=plot.style_linebr)
+plot(tpShow ? sl2 : na, "SL 2", color=bearCss, style=plot.style_linebr)
+
+// ───────────────────────── Dashboard ─────────────────────────
+var table dash = na
+if barstate.islast and dashLoc != "Hidden"
+    dashPos = dashLoc == "Top Right" ? position.top_right : dashLoc == "Bottom Left" ? position.bottom_left : position.bottom_right
+    dashTxt = dashSize == "Tiny" ? size.tiny : dashSize == "Small" ? size.small : dashSize == "Normal" ? size.normal : size.large
+    if na(dash)
+        dash := table.new(dashPos, 2, 5, bgcolor=color.new(color.black, 20), border_color=color.new(color.gray, 60), border_width=1)
+    sigCss = pos == 1 ? bullCss : pos == -1 ? bearCss : color.gray
+    row = 0
+    if dOpt and gridOn
+        table.cell(dash, 0, row, "Optimal Sensitivity", text_color=color.white, text_size=dashTxt, text_halign=text.align_left)
+        table.cell(dash, 1, row, useAuto ? "Autopilot" : na(optSens) ? "Need " + str.tostring(gridBars) + " bars" : str.tostring(optSens, "#"), text_color=color.white, text_size=dashTxt, bgcolor=color.new(optDir == 1 ? bullCss : optDir == -1 ? bearCss : color.gray, 30))
+        row += 1
+    if dTrend
+        table.cell(dash, 0, row, "Trend Strength", text_color=color.white, text_size=dashTxt, text_halign=text.align_left)
+        table.cell(dash, 1, row, str.tostring(trendStr, "#") + "% " + (trendStr > 50 ? "🔥" : "❄️"), text_color=color.white, text_size=dashTxt, bgcolor=color.new(sigCss, 30))
+        row += 1
+    if dVol
+        table.cell(dash, 0, row, "Volatility", text_color=color.white, text_size=dashTxt, text_halign=text.align_left)
+        table.cell(dash, 1, row, (volRatio > 1 ? "Volatile " : "Stable ") + (volRising ? "📈" : "📉") + (volRatio > 2 or volRatio < 0.5 ? " ⚠️" : ""), text_color=color.white, text_size=dashTxt)
+        row += 1
+    if dSqz
+        table.cell(dash, 0, row, "Squeeze", text_color=color.white, text_size=dashTxt, text_halign=text.align_left)
+        table.cell(dash, 1, row, str.tostring(squeeze, "#") + "%", text_color=color.white, text_size=dashTxt)
+        row += 1
+    if dVs
+        table.cell(dash, 0, row, "Volume Sentiment", text_color=color.white, text_size=dashTxt, text_halign=text.align_left)
+        table.cell(dash, 1, row, str.tostring(volSent, "#") + "%", text_color=color.white, text_size=dashTxt, bgcolor=color.new(volSent >= 0 ? bullCss : bearCss, 30))
+
+// ───────────────────────── Values for alerts, the data window and checks ─────────────────────────
+plot(bull ? (strong ? 2 : 1) : bear ? (strong ? -2 : -1) : 0, "sig", display=display.none)
+plot(exitBull ? 1 : exitBear ? -1 : 0, "exit", display=display.none)
+plot(cls, "ml_class", display=display.none)
+plot(hasSig ? barVal : na, "Bar Color Value", display=display.none)
+plot(optSens, "Optimal Sensitivity", display=display.none)
+plot(trendStr, "Trend Strength", display=display.none)
+plot(trail, "trail", display=display.none)
+plot(trailDir, "trail_dir", display=display.none)
+plot(tracerDir, "tracer_dir", display=display.none)
+plot(catcherDir, "catcher_dir", display=display.none)
+plot(neoDir, "neo_dir", display=display.none)
+plot(tpShow ? tp1 : na, "Take Profit", display=display.none)
+plot(tpShow ? sl1 : na, "Stop Loss", display=display.none)
+
+// ───────────────────────── Alerts ─────────────────────────
+// TradingView allows 64 plots in one script, and each alert counts as one. So the three slower
+// overlays have one alert each for both directions; the message gives the new direction.
+alertcondition(bull, "Any Bullish Signal", "{{ticker}}: bullish signal")
+alertcondition(bear, "Any Bearish Signal", "{{ticker}}: bearish signal")
+alertcondition(bull and strong, "Bullish Signal +", "{{ticker}}: strong bullish signal")
+alertcondition(bear and strong, "Bearish Signal +", "{{ticker}}: strong bearish signal")
+alertcondition(exitBull, "Exit Bullish", "{{ticker}}: exit the bullish signal")
+alertcondition(exitBear, "Exit Bearish", "{{ticker}}: exit the bearish signal")
+alertcondition(trailUp, "Smart Trail Switch Bullish", "{{ticker}}: Smart Trail turned bullish")
+alertcondition(trailDn, "Smart Trail Switch Bearish", "{{ticker}}: Smart Trail turned bearish")
+alertcondition(tracerUp or tracerDn, "Trend Tracer Switch", "{{ticker}}: Trend Tracer switched (1 = bullish, -1 = bearish): {{plot(\"tracer_dir\")}}")
+alertcondition(catcherUp or catcherDn, "Trend Catcher Switch", "{{ticker}}: Trend Catcher switched (1 = bullish, -1 = bearish): {{plot(\"catcher_dir\")}}")
+alertcondition(neoUp or neoDn, "Neo Cloud Switch", "{{ticker}}: Neo Cloud switched (1 = bullish, -1 = bearish): {{plot(\"neo_dir\")}}")
+alertcondition(enterUpper, "Entering Upper Reversal Zone", "{{ticker}}: price entered the upper reversal zone")
+alertcondition(enterLower, "Entering Lower Reversal Zone", "{{ticker}}: price entered the lower reversal zone")
+alertcondition(tpHit, "Take Profit", "{{ticker}}: take profit 1 reached")
+alertcondition(slHit, "Stop Loss", "{{ticker}}: stop loss 1 reached")
