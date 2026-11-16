@@ -24,7 +24,9 @@ def rsi(series: pd.Series, length: int = 14) -> pd.Series:
     roll_up = up.ewm(alpha=1 / length, adjust=False).mean()
     roll_down = down.ewm(alpha=1 / length, adjust=False).mean()
     rs = roll_up / roll_down.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    out = 100 - (100 / (1 + rs))
+    # no down moves at all is 100 (a straight rally), no moves either way is 50
+    return out.where(roll_down != 0, np.where(roll_up > 0, 100.0, 50.0)).where(roll_up.notna())
 
 
 def vumanchu_moneyflow(df: pd.DataFrame, period: int = 60,

@@ -59,9 +59,9 @@ def anchored_range_score(close: pd.Series, buy: np.ndarray, sell: np.ndarray,
         if np.isnan(hi):
             hi = lo = price
         elif state > prev:
-            hi, lo = price, min(lo, price)
+            hi = price                   # a buy flip restarts the high; the low carries over
         elif state < prev:
-            lo, hi = price, max(hi, price)
+            lo = price                   # a sell flip restarts the low; the high carries over
         else:
             hi, lo = max(hi, price), min(lo, price)
         if hi > lo:
@@ -85,12 +85,63 @@ def band_scale(value: pd.Series, upper: pd.Series, lower: pd.Series) -> pd.Serie
     return pd.Series(np.where(bad, np.nan, out), index=value.index)
 
 
+def _session_vwap_bands(df: pd.DataFrame, mult: float) -> tuple[pd.Series, pd.Series]:
+    """Upper and lower bands of the UTC-day VWAP of the *close*, as LuxAlgo draws them.
+
+    (``common.session_vwap_bands`` uses the typical price, hlc3; the reference passes ``close``.)
+    The bands are the volume-weighted mean plus or minus ``mult`` volume-weighted standard
+    deviations. A session's first bar has one sample, so its bands are exactly the close:
+    dividing the sums back out would leave rounding noise that can flip the trend state.
+    """
+    close = df["close"].to_numpy(dtype=float)
+    vol = df["volume"].to_numpy(dtype=float)
+    day = df.index.floor("D").asi8
+    n = len(close)
+    upper, lower = np.full(n, np.nan), np.full(n, np.nan)
+    cv = cpv = cp2v = 0.0
+    for i in range(n):
+        first = i == 0 or day[i] != day[i - 1]
+        if first:
+            cv = cpv = cp2v = 0.0
+        cv += vol[i]
+        cpv += close[i] * vol[i]
+        cp2v += close[i] * close[i] * vol[i]
+        if cv == 0.0:
+            continue
+        if first:
+            upper[i] = lower[i] = close[i]
+            continue
+        vwap = cpv / cv
+        band = math.sqrt(max(cp2v / cv - vwap * vwap, 0.0)) * mult
+        upper[i], lower[i] = vwap + band, vwap - band
+    return pd.Series(upper, index=df.index), pd.Series(lower, index=df.index)
+
+
+def _pine_pivots(values: np.ndarray, length: int, top: bool) -> np.ndarray:
+    """Swing highs (``top``) or lows, found the way Pine's ``ta.pivothigh`` / ``ta.pivotlow`` do.
+
+    A bar is a swing if it is at least as extreme as each of the ``length`` bars before it and
+    strictly more extreme than each of the ``length`` bars after it. (Requiring it to be strictly
+    unique, as ``common.pivot_highs`` does, drops swings that have an equal neighbour on the left
+    and made this component differ from LuxAlgo's on about 1 bar in 40.)
+    """
+    n = len(values)
+    out = np.zeros(n, dtype=bool)
+    for i in range(length, n - length):
+        left, right = values[i - length:i], values[i + 1:i + length + 1]
+        if top:
+            out[i] = values[i] >= left.max() and values[i] > right.max()
+        else:
+            out[i] = values[i] <= left.min() and values[i] < right.min()
+    return out
+
+
 def structure_breaks(df: pd.DataFrame, length: int) -> tuple[np.ndarray, np.ndarray]:
     """Closes through the last confirmed swing high (buy) / swing low (sell).
     A swing is only used once it is ``length`` bars old, when it is known."""
     high, low, close = (df[k].to_numpy(dtype=float) for k in ("high", "low", "close"))
-    is_top = common.pivot_highs(df["high"], length, length).to_numpy()
-    is_bot = common.pivot_lows(df["low"], length, length).to_numpy()
+    is_top = _pine_pivots(high, length, top=True)
+    is_bot = _pine_pivots(low, length, top=False)
     n = len(close)
     buy, sell = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
     top = bot = np.nan
@@ -201,7 +252,7 @@ class TechnicalSentiment(Indicator):
         out["supertrend"] = flips(close > st, close < st)
 
         if self._vwap_applies(df):
-            _, upper, lower = common.session_vwap_bands(df, self.vwap_mult)
+            upper, lower = _session_vwap_bands(df, self.vwap_mult)
             out["vwap"] = flips(close > upper, close < lower)
 
         out["linreg"] = 50 * common.time_correlation(close, self.linreg_len) + 50

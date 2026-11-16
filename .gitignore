@@ -31,3 +31,6 @@ data_cache/
 Thumbs.db
 .vscode/
 .idea/
+
+# Reference data and third-party scripts used for calibration (not redistributed)
+calibration/data/
