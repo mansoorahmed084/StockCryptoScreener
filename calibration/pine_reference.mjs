@@ -41,7 +41,10 @@ const klines = rows.map((r, i) => ({
 }));
 
 const t0 = Date.now();
-const ctx = await new PineTS(klines, 'SYMBOL', `${step / 60000}`).run(readFileSync(scriptPath, 'utf8'));
+// Pine timeframe strings: minutes for intraday, "D" / "W" for daily and weekly
+const minutes = Math.round(step / 60000);
+const timeframe = minutes === 1440 ? 'D' : minutes === 10080 ? 'W' : String(minutes);
+const ctx = await new PineTS(klines, 'SYMBOL', timeframe).run(readFileSync(scriptPath, 'utf8'));
 const titles = Object.keys(ctx.plots ?? {}).filter((t) => !t.startsWith('__')); // PineTS's own drawing buckets
 if (titles.length === 0) {
     console.error('the script produced no plots');

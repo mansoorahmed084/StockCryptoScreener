@@ -225,8 +225,8 @@ def _anchored(close, buy, sell, smooth):
         elif sell[i]:
             state = -1
         if np.isnan(hi):
-            hi = p
-            lo = p
+            hi = p                      # seeded from the first bar (LuxAlgo leaves it empty
+            lo = p                      # until a buy and a sell flip have both happened)
         elif state > prev:
             hi = p                      # a buy flip restarts the high; the low carries over
         elif state < prev:
@@ -356,7 +356,7 @@ def _time_corr(c, length):
 
 
 @njit(cache=True)
-def _vwap_bands(h, l, c, v, day, mult):
+def _vwap_bands(h, l, c, v, anchor, mult):
     n = len(c)
     up = np.full(n, np.nan)
     dn = np.full(n, np.nan)
@@ -364,7 +364,7 @@ def _vwap_bands(h, l, c, v, day, mult):
     cpv = 0.0
     cp2v = 0.0
     for i in range(n):
-        first = i == 0 or day[i] != day[i - 1]
+        first = i == 0 or anchor[i] != anchor[i - 1]
         if first:
             cv = 0.0
             cpv = 0.0
@@ -409,7 +409,7 @@ def _band_scale(x, upper, lower):
 
 
 @njit(cache=True)
-def components_kernel(h, l, c, v, day, use_vwap, p):
+def components_kernel(h, l, c, v, anchor, use_vwap, p):
     """The 11 component series (columns follow ``COMPONENTS``) for parameter vector ``p``."""
     n = len(c)
     rsi_len = int(np.rint(p[0]))
@@ -462,7 +462,7 @@ def components_kernel(h, l, c, v, day, use_vwap, p):
     out[:, 7] = _anchored(c, buy, sell, smooth)
 
     if use_vwap:
-        up, dn = _vwap_bands(h, l, c, v, day, vwap_mult)
+        up, dn = _vwap_bands(h, l, c, v, anchor, vwap_mult)
         buy, sell = _flags_above_below(c, up, dn)
         out[:, 8] = _anchored(c, buy, sell, smooth)
 
@@ -474,31 +474,34 @@ def components_kernel(h, l, c, v, day, use_vwap, p):
 
 
 @njit(cache=True)
-def score_from_components(comps, use_vwap):
-    """Mean of the components; NaN until every one in use has warmed up."""
+def score_from_components(comps):
+    """Mean of the 11 components; NaN until every one except the VWAP has warmed up.
+
+    A VWAP that is not available (no volume, or before its first trend flips) counts as a neutral
+    50, as in LuxAlgo's ``nz(vwapValue, 50)``.
+    """
     n, m = comps.shape
     out = np.full(n, np.nan)
     for i in range(n):
         s = 0.0
-        k = 0
         ok = True
         for j in range(m):
-            if j == 8 and not use_vwap:
-                continue
             x = comps[i, j]
             if np.isnan(x):
-                ok = False
-                break
+                if j == 8:
+                    x = 50.0
+                else:
+                    ok = False
+                    break
             s += x
-            k += 1
-        if ok and k > 0:
-            out[i] = s / k
+        if ok:
+            out[i] = s / m
     return out
 
 
 @njit(cache=True)
-def sentiment_kernel(h, l, c, v, day, use_vwap, p):
-    return score_from_components(components_kernel(h, l, c, v, day, use_vwap, p), use_vwap)
+def sentiment_kernel(h, l, c, v, anchor, use_vwap, p):
+    return score_from_components(components_kernel(h, l, c, v, anchor, use_vwap, p))
 
 
 # ---- loss -------------------------------------------------------------------------------
@@ -552,10 +555,10 @@ def loss_value(score, ref, warm, delta, w_corr, w_diff):
 
 
 @njit(parallel=True, cache=True)
-def batch_loss(P, h, l, c, v, day, use_vwap, ref, warm, delta, w_corr, w_diff):
+def batch_loss(P, h, l, c, v, anchor, use_vwap, ref, warm, delta, w_corr, w_diff):
     """Loss of every row of ``P`` (candidates x parameters), evaluated in parallel."""
     out = np.empty(P.shape[0])
     for k in prange(P.shape[0]):
-        s = sentiment_kernel(h, l, c, v, day, use_vwap, P[k])
+        s = sentiment_kernel(h, l, c, v, anchor, use_vwap, P[k])
         out[k] = loss_value(s, ref, warm, delta, w_corr, w_diff)
     return out

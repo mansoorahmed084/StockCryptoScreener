@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-DAY_NS = 86_400 * 10 ** 9
+from backend.indicators.sentiment import vwap_anchor_ids
 
 
 @dataclass
@@ -18,8 +18,8 @@ class Candles:
     l: np.ndarray
     c: np.ndarray
     v: np.ndarray
-    day: np.ndarray          # UTC day number per bar, for the session VWAP
-    use_vwap: bool           # intraday candles with volume (same rule as the pandas indicator)
+    anchor: np.ndarray       # VWAP session number per bar (day, week, month... by timeframe)
+    use_vwap: bool           # the candles have volume (same rule as the pandas indicator)
 
     @property
     def n(self) -> int:
@@ -31,7 +31,7 @@ class Candles:
                              "volume": self.v}, index=self.index)
 
     def args(self):
-        return (self.h, self.l, self.c, self.v, self.day, self.use_vwap)
+        return (self.h, self.l, self.c, self.v, self.anchor, self.use_vwap)
 
 
 def candles_from_frame(df: pd.DataFrame) -> Candles:
@@ -41,9 +41,7 @@ def candles_from_frame(df: pd.DataFrame) -> Candles:
     df = df.copy()
     df.index = idx
     vol = df["volume"].to_numpy(dtype=np.float64) if "volume" in df else np.zeros(len(df))
-    use_vwap = False
-    if len(df) >= 3 and (vol > 0).any():
-        use_vwap = bool(np.median(np.diff(idx.asi8)) / 1e9 < 86400)
+    use_vwap = bool(len(df) >= 3 and (vol > 0).any())
     return Candles(
         index=idx,
         o=df["open"].to_numpy(dtype=np.float64),
@@ -51,7 +49,7 @@ def candles_from_frame(df: pd.DataFrame) -> Candles:
         l=df["low"].to_numpy(dtype=np.float64),
         c=df["close"].to_numpy(dtype=np.float64),
         v=vol,
-        day=(idx.floor("D").asi8 // DAY_NS).astype(np.int64),
+        anchor=vwap_anchor_ids(idx),
         use_vwap=use_vwap,
     )
 

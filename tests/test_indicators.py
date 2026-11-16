@@ -116,9 +116,10 @@ def test_sentiment_reads_trends():
     assert up.panes["trend"].iloc[-150:].mean() > down.panes["trend"].iloc[-150:].mean() + 30
 
 
-def test_sentiment_vwap_only_intraday_with_volume():
+def test_sentiment_vwap_needs_volume_on_any_timeframe():
+    # LuxAlgo anchors the VWAP by timeframe (day, week, month, quarter), so daily charts have one too
     assert "vwap" in TechnicalSentiment().compute(_noisy(volume_seed=1)).panes
-    assert "vwap" not in TechnicalSentiment().compute(_noisy(timeframe="1d", volume_seed=1)).panes
+    assert "vwap" in TechnicalSentiment().compute(_noisy(timeframe="1d", volume_seed=1)).panes
     flat = _noisy()
     flat["volume"] = 0.0
     res = TechnicalSentiment().compute(flat)

@@ -42,8 +42,16 @@ def anchored_range_score(close: pd.Series, buy: np.ndarray, sell: np.ndarray,
                          smooth: int = 3) -> pd.Series:
     """0–100 position of price between its running low and high, where a fresh
     buy flip restarts the high at the close and a fresh sell flip restarts the
-    low. So a new up-signal reads 100 and decays as price gives ground; a new
-    down-signal reads 0 and recovers as price bounces."""
+    low (the other side carries over). So a new up-signal reads 100 and decays
+    as price gives ground; a new down-signal reads 0 and recovers as price
+    bounces.
+
+    The range is seeded from the first bar, so there is a reading from the start.
+    (LuxAlgo's ``normalize`` shows nothing until a buy flip and a sell flip have
+    both happened, which on a slow chart leaves its first few hundred bars blank
+    and in a one-sided trend can leave them blank for good. After that point the
+    two agree exactly.)
+    """
     c = close.to_numpy(dtype=float)
     out = np.full(len(c), np.nan)
     state = 0
@@ -85,17 +93,55 @@ def band_scale(value: pd.Series, upper: pd.Series, lower: pd.Series) -> pd.Serie
     return pd.Series(np.where(bad, np.nan, out), index=value.index)
 
 
-def _session_vwap_bands(df: pd.DataFrame, mult: float) -> tuple[pd.Series, pd.Series]:
-    """Upper and lower bands of the UTC-day VWAP of the *close*, as LuxAlgo draws them.
+_DAY_NS = 86_400 * 10 ** 9
+
+
+def vwap_anchor_ids(index: pd.DatetimeIndex) -> np.ndarray:
+    """The VWAP session each bar belongs to: a different number for each new session.
+
+    Follows LuxAlgo's "Auto" anchor, which depends on the chart's timeframe:
+
+    ============================  =========
+    15 minutes or shorter         day
+    intraday above 15 minutes     week (Monday start)
+    daily                         month
+    weekly                        quarter
+    monthly or longer             year
+    ============================  =========
+
+    Sessions are cut on each bar's open time in UTC, which matches PineTS's ``timeframe.change``
+    on every timeframe tried (the exchange's own time zone would differ for stocks).
+    """
+    idx = index.tz_convert("UTC") if index.tz is not None else index
+    if len(idx) < 2:
+        return np.zeros(len(idx), dtype=np.int64)
+    step = float(np.median(np.diff(idx.asi8))) / 1e9           # seconds per bar
+    days = idx.floor("D").asi8 // _DAY_NS
+    if step <= 15 * 60:
+        ids = days
+    elif step < 86400:
+        ids = (days + 3) // 7                                  # 1970-01-01 was a Thursday
+    elif step < 7 * 86400:
+        ids = idx.year * 12 + idx.month
+    elif step < 28 * 86400:
+        ids = idx.year * 4 + (idx.month - 1) // 3
+    else:
+        ids = idx.year
+    return np.asarray(ids, dtype=np.int64)
+
+
+def _anchored_vwap_bands(df: pd.DataFrame, mult: float) -> tuple[pd.Series, pd.Series]:
+    """Upper and lower bands of the anchored VWAP of the *close*, as LuxAlgo draws them.
 
     (``common.session_vwap_bands`` uses the typical price, hlc3; the reference passes ``close``.)
     The bands are the volume-weighted mean plus or minus ``mult`` volume-weighted standard
-    deviations. A session's first bar has one sample, so its bands are exactly the close:
-    dividing the sums back out would leave rounding noise that can flip the trend state.
+    deviations, restarting at each anchor (see ``vwap_anchor_ids``). A session's first bar has one
+    sample, so its bands are exactly the close: dividing the sums back out would leave rounding
+    noise that can flip the trend state.
     """
     close = df["close"].to_numpy(dtype=float)
     vol = df["volume"].to_numpy(dtype=float)
-    day = df.index.floor("D").asi8
+    day = vwap_anchor_ids(df.index)
     n = len(close)
     upper, lower = np.full(n, np.nan), np.full(n, np.nan)
     cv = cpv = cp2v = 0.0
@@ -252,7 +298,7 @@ class TechnicalSentiment(Indicator):
         out["supertrend"] = flips(close > st, close < st)
 
         if self._vwap_applies(df):
-            upper, lower = _session_vwap_bands(df, self.vwap_mult)
+            upper, lower = _anchored_vwap_bands(df, self.vwap_mult)
             out["vwap"] = flips(close > upper, close < lower)
 
         out["linreg"] = 50 * common.time_correlation(close, self.linreg_len) + 50
@@ -263,11 +309,8 @@ class TechnicalSentiment(Indicator):
 
     @staticmethod
     def _vwap_applies(df: pd.DataFrame) -> bool:
-        """Session VWAP only means something on intraday candles with volume."""
-        if len(df) < 3 or not (df["volume"] > 0).any():
-            return False
-        step = np.median(np.diff(df.index.asi8)) / 1e9
-        return step < 86400
+        """The VWAP needs volume. On any timeframe it is anchored per ``vwap_anchor_ids``."""
+        return len(df) >= 3 and bool((df["volume"] > 0).any())
 
     # -------------------------------------------------------------------------
     def compute(self, df: pd.DataFrame) -> IndicatorResult:
@@ -277,6 +320,9 @@ class TechnicalSentiment(Indicator):
 
         parts = self.components(df)
         table = pd.DataFrame(parts)
+        # LuxAlgo averages a VWAP it cannot compute (no volume, or before its first flips) in as a
+        # neutral 50 rather than leaving it out
+        table["vwap"] = table["vwap"].fillna(50.0) if "vwap" in table else 50.0
         enough = table.notna().all(axis=1)      # no reading until every tool has warmed up
         sentiment = table.mean(axis=1).where(enough)
         momentum = table[[c for c in MOMENTUM if c in table]].mean(axis=1).where(enough)

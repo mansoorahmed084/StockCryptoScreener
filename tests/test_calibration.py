@@ -24,7 +24,7 @@ def _theta(over: dict) -> np.ndarray:
     return snap(t)
 
 
-@pytest.mark.parametrize("step_minutes", [15, 1440])      # with and without the session VWAP
+@pytest.mark.parametrize("step_minutes", [15, 240, 1440, 10080])   # 15m, 4h, daily, weekly
 @pytest.mark.parametrize("over", CASES)
 def test_kernel_matches_pandas(over, step_minutes):
     candles = synthetic_candles(2500, step_minutes=step_minutes, seed=3)
@@ -54,13 +54,13 @@ def test_swings_follow_pines_tie_rule():
 
 def test_vwap_uses_close_and_first_bar_is_exact():
     """The session's first bar has one sample: both bands are the close itself, with no rounding."""
-    from backend.indicators.sentiment import _session_vwap_bands
+    from backend.indicators.sentiment import _anchored_vwap_bands
 
     idx = pd.date_range("2024-03-01 23:15", periods=6, freq="15min", tz="UTC")   # bar 3 is 00:00
     close = np.array([83083.99, 83100.5, 83090.1, 83083.99, 83120.7, 83111.3])   # bar 3 opens a new day
     df = pd.DataFrame({"open": close, "high": close + 5, "low": close - 5, "close": close,
                        "volume": [3.1, 7.7, 2.9, 4.4, 5.6, 1.3]}, index=idx)
-    upper, lower = _session_vwap_bands(df, 2.0)
+    upper, lower = _anchored_vwap_bands(df, 2.0)
     assert idx[3].floor("D") != idx[2].floor("D")
     assert upper.iloc[3] == lower.iloc[3] == close[3]
     assert upper.iloc[0] == lower.iloc[0] == close[0]
@@ -69,3 +69,33 @@ def test_vwap_uses_close_and_first_bar_is_exact():
     mean = (p * v).sum() / v.sum()
     sd = np.sqrt((p * p * v).sum() / v.sum() - mean * mean)
     assert upper.iloc[4] == pytest.approx(mean + 2 * sd) and lower.iloc[4] == pytest.approx(mean - 2 * sd)
+
+
+def test_vwap_anchor_follows_the_timeframe():
+    """LuxAlgo's Auto anchor: day (<=15m), week (intraday above), month (daily), quarter (weekly)."""
+    from backend.indicators.sentiment import vwap_anchor_ids
+
+    def changes(start, periods, freq):
+        ids = vwap_anchor_ids(pd.date_range(start, periods=periods, freq=freq, tz="UTC"))
+        return (np.flatnonzero(ids[1:] != ids[:-1]) + 1).tolist()
+
+    assert changes("2024-03-03 22:30", 8, "15min") == [6]        # midnight, Sunday -> Monday
+    assert changes("2024-03-03 12:00", 12, "4h") == [3]          # Monday 00:00 only, not Tuesday's
+    assert changes("2024-01-29", 6, "D") == [3]                  # 1 February
+    assert changes("2024-03-11", 6, "7D") == [3]                 # the week opening Monday 1 April
+
+
+def test_missing_vwap_counts_as_a_neutral_50():
+    """Without volume there is no VWAP; LuxAlgo averages in 50 for it instead of dropping it."""
+    from backend.indicators.sentiment import COMPONENTS, TechnicalSentiment
+
+    df = synthetic_candles(1500, seed=5).frame()
+    df["volume"] = 0.0
+    res = TechnicalSentiment().compute(df)
+    assert "vwap" not in res.panes
+    parts = [res.panes[n] for n in COMPONENTS if n in res.panes]
+    assert len(parts) == 10
+    expected = (sum(parts) + 50.0) / 11
+    ok = res.panes["sentiment"].notna()
+    assert ok.sum() > 300
+    np.testing.assert_allclose(res.panes["sentiment"][ok], expected[ok], atol=1e-9)
