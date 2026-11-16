@@ -3,28 +3,30 @@
 //
 // A momentum wave and a money-flow gauge in one 0-100 pane, cross-checked against each other.
 //
-//   Wave         Where price sits in its recent range, smoothed adaptively: fast when price
-//                travels in a straight line, slow when it chops. The wave crossing its signal
-//                line is a turning point (a strong one in the oversold / overbought zone).
-//   Money flow   Share of recent traded value that went through on rising bars, around 50.
-//                Its two thresholds are learned from how far flow usually travels each side.
-//   Overflow     Flow beyond its threshold in a run that has already outlasted the usual run:
-//                late money, which tends to be exhaustion.
-//   Reversals    A turning point right after an activity climax (volume, or bar range when
-//                there is no volume). Major when the climax is large and the wave turned from
-//                the oversold / overbought zone. A higher factor means fewer signals.
+//   Wave         A smoothed RSI of a lightly smoothed close, stretched a little around 50. A
+//                signal line trails it; the wave crossing its signal is a turning point (a strong
+//                one in the oversold / overbought zone).
+//   Money flow   Up closes against down closes over the last N bars, around 50, smoothed. It
+//                needs no volume. Its two thresholds follow the recent extremes of flow.
+//   Overflow     Flow beyond its threshold: crowded one-sided activity.
+//   Reversals    A turning point right after an activity climax (volume, or bar range when there
+//                is no volume), with the wave on the far side of 50. Major when the climax is
+//                large and the wave turned from the oversold / overbought zone. A higher factor
+//                means fewer signals.
 //   Divergences  Read at each turning point from the swing just finished against the one
 //                before, so they need no bars to the right and never move.
 //   Confluence   How many of wave and flow are on the same side, and a 0-100 meter that folds
 //                the lot into one reading.
 //
 // This is the Pine version of backend/indicators/wave_flow.py in the StockCryptoScreener
-// repository and follows the same method. Readings agree once the averages have warmed up;
-// the first bars differ because Pine seeds its averages differently.
+// repository and follows the same method. The wave, signal, money flow and its thresholds were
+// fitted to readings taken from LuxAlgo's Oscillator Matrix on BTCUSDT 15m (about 90 bars):
+// money flow within about 1 point of it on average, the wave within about 2, and turning points
+// on the same bar about three times in four. Reversals, overflow and divergences are original
+// designs and are not calibrated. Readings agree with the Python version once the averages have
+// warmed up; the first bars differ because Pine seeds its averages differently.
 //
-// Original design. It covers the same ground as multi-component oscillator suites such as
-// LuxAlgo's Oscillator Matrix, whose calculations are not published; it does not reproduce
-// them, is not affiliated with LuxAlgo, and will not match that product's values.
+// Not LuxAlgo's code, not affiliated with LuxAlgo, and will not match that product bar for bar.
 indicator("Wave & Flow Matrix", shorttitle = "Wave/Flow", overlay = false, precision = 1, max_lines_count = 200)
 
 // ---- inputs ------------------------------------------------------------------------
@@ -63,21 +65,18 @@ color C_SIGNAL = #f7a600
 int DIV_MAX_GAP = 60        // bars between the two swings of a divergence
 int DIV_MEMORY = 10         // bars a divergence keeps counting in the meter
 int CLIMAX_WINDOW = 3       // bars back a climax still backs a turning point
+float WAVE_STRETCH = 1.07   // how far the smoothed RSI is stretched around 50
 
-// ---- wave: range position through an efficiency-weighted average ----------------------
-// Efficiency is net move / path travelled over the length: 1 for a straight line, near 0
-// for chop. It sets the smoothing between a 2-bar and a (4 x length)-bar average.
-float rangeTop = ta.highest(high, waveLen)
-float rangeBottom = ta.lowest(low, waveLen)
-float rangePos = rangeTop == rangeBottom ? 50.0 : 100 * (close - rangeBottom) / (rangeTop - rangeBottom)
-float path = math.sum(math.abs(close - close[1]), waveLen)
-float efficiency = path > 0 ? math.min(1.0, math.abs(close - close[waveLen]) / path) : 0.0
-float fastAlpha = 2.0 / 3.0
-float slowAlpha = 2.0 / (4.0 * waveLen + 1.0)
-float alpha = nz(efficiency) * (fastAlpha - slowAlpha) + slowAlpha
-var float wave = na
-if not na(rangePos)
-    wave := na(wave) ? rangePos : wave + alpha * (rangePos - wave)
+// ---- wave: smoothed RSI of a lightly smoothed close, stretched about 50 ----------------
+// For the default length of 7: the close is averaged over 2 bars, run through a 5-bar RSI,
+// averaged over 5 bars and stretched by 7 %.
+int priceSpan = math.max(1, math.round(waveLen / 3.5))
+int rsiLen = math.max(2, waveLen - 2)
+int waveSmooth = math.max(1, waveLen - 2)
+float priceSmooth = priceSpan > 1 ? ta.ema(close, priceSpan) : close
+float rsiRaw = ta.rsi(priceSmooth, rsiLen)
+float waveRaw = waveSmooth > 1 ? ta.ema(rsiRaw, waveSmooth) : rsiRaw
+float wave = math.max(0.0, math.min(100.0, 50 + WAVE_STRETCH * (waveRaw - 50)))
 
 // ---- signal line: an average, or a stop that ratchets behind the wave -----------------
 float signalAvg = ta.sma(wave, signalLen)
@@ -103,60 +102,25 @@ float signalTrail = na(stop) ? na : math.min(100.0, math.max(0.0, stop))
 float signal = signalType == SIG_AVG ? signalAvg : signalTrail
 
 // ---- money flow ------------------------------------------------------------------------
-// Without volume, the size of the move stands in for it.
-bool hasVolume = ta.cum(nz(volume)) > 0
-float step = hlc3 - hlc3[1]
-float weight = hasVolume ? hlc3 * nz(volume) : math.abs(step)
-float upValue = math.sum(step > 0 ? weight : 0.0, flowLen)
-float downValue = math.sum(step < 0 ? weight : 0.0, flowLen)
-float traded = upValue + downValue
-float flowRaw = na(traded) ? na : traded == 0 ? 50.0 : 100 * upValue / traded
-float flow = ta.ema(flowRaw, flowSmooth)
+// Up closes minus down closes over the last N bars, as a 0-100 reading around 50, smoothed.
+// No volume is involved.
+float stepSign = math.sign(close - close[1])
+float flowRaw = 50 + 50 * math.sum(stepSign, flowLen) / flowLen
+float flow = flowSmooth > 1 ? ta.ema(flowRaw, flowSmooth) : flowRaw
 
-// Thresholds: 50 plus the usual excursion on that side plus its usual spread, each an
-// average that only updates while flow is on that side.
-float learn = 2.0 / (flowLen + 1.0)
-var float reachUp = na
-var float spreadUp = 0.0
-var float reachDown = na
-var float spreadDown = 0.0
-if not na(flow) and flow != 50
-    float reach = math.abs(flow - 50)
-    if flow > 50
-        if na(reachUp)
-            reachUp := reach
-        else
-            spreadUp += learn * (math.abs(reach - reachUp) - spreadUp)
-            reachUp += learn * (reach - reachUp)
-    else
-        if na(reachDown)
-            reachDown := reach
-        else
-            spreadDown += learn * (math.abs(reach - reachDown) - spreadDown)
-            reachDown += learn * (reach - reachDown)
-float flowUpper = na(flow) ? na : 50 + reachUp + spreadUp
-float flowLower = na(flow) ? na : 50 - reachDown - spreadDown
+// Thresholds: the recent highest and lowest flow (over about 1.4x the flow length), each
+// averaged over about 2.9x the flow length.
+int thresholdWindow = math.max(2, math.round(flowLen * 10.0 / 7.0))
+int thresholdSmooth = math.max(2, math.round(flowLen * 20.0 / 7.0))
+float flowUpper = na(flow) ? na : ta.ema(ta.highest(flow, thresholdWindow), thresholdSmooth)
+float flowLower = na(flow) ? na : ta.ema(ta.lowest(flow, thresholdWindow), thresholdSmooth)
 
-// Overflow: signed excess beyond the threshold, counted only once the current run on that
-// side of 50 has outlasted the average finished run.
-var int flowSide = 0
-var int flowRun = 0
-var float usualRun = float(flowLen)
+// Overflow: signed excess of flow beyond its threshold: below the lower level, or above its
+// mirror image around 50. Zero in between.
 float overflow = na
-if not na(flow)
-    overflow := 0.0
-    int sideNow = flow > 50 ? 1 : flow < 50 ? -1 : flowSide
-    if sideNow != flowSide
-        if flowSide != 0 and flowRun > 0
-            usualRun += 0.25 * (flowRun - usualRun)
-        flowSide := sideNow
-        flowRun := 0
-    flowRun += 1
-    if flowRun > usualRun
-        if flowSide > 0 and flow > flowUpper
-            overflow := flow - flowUpper
-        else if flowSide < 0 and flow < flowLower
-            overflow := flow - flowLower
+if not na(flow) and not na(flowLower)
+    float mirror = 100 - flowLower
+    overflow := flow < flowLower ? flow - flowLower : flow > mirror ? flow - mirror : 0.0
 
 // ---- turning points -------------------------------------------------------------------
 bool above = wave > signal
@@ -170,6 +134,7 @@ bool strongUp = turnUp and trough <= oversold
 bool strongDown = turnDown and crest >= overbought
 
 // ---- reversals: a turning point on the heels of an activity climax ---------------------
+bool hasVolume = ta.cum(nz(volume)) > 0
 float activity = hasVolume ? nz(volume) : ta.tr(true)
 float averageActivity = ta.sma(activity, flowLen)
 float usualActivity = averageActivity[1]               // the level before this bar

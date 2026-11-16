@@ -6,6 +6,13 @@ from backend.indicators.vumanchu import VuManChuCipherB
 from .util import make_ohlcv
 
 
+def test_rsi_of_a_straight_line_and_of_nothing():
+    rising = pd.Series(np.linspace(100, 110, 30)); falling = rising[::-1].reset_index(drop=True)
+    assert common.rsi(rising, 7).iloc[-1] == 100 and common.rsi(falling, 7).iloc[-1] == 0
+    assert common.rsi(pd.Series([5.0] * 30), 7).iloc[-1] == 50          # no moves either way
+    assert common.rsi(rising, 7).iloc[0] != common.rsi(rising, 7).iloc[0]   # the first bar has no change yet
+
+
 def test_pivot_detection():
     s = pd.Series([5, 3, 1, 3, 5, 4, 2, 4, 6])
     lows = common.pivot_lows(s, 2, 2)
@@ -154,8 +161,8 @@ def test_matrix_structure_and_ranges():
     assert set(res.panes["confluence_up"].dropna().unique()) <= {0, 1, 2}
     both = res.panes["confluence_up"] + res.panes["confluence_down"]
     assert (both.dropna() <= 2).all()                    # a side each, never both
-    assert (res.panes["flow_upper"].dropna() >= 50).all()
-    assert (res.panes["flow_lower"].dropna() <= 50).all()
+    both = res.panes["flow_upper"].dropna()
+    assert (both >= res.panes["flow_lower"].reindex(both.index)).all()    # upper level above lower
     assert all(k.startswith("matrix_") for k in res.signals) and len(res.signals) == 14
     kinds = {m.kind for m in res.markers}
     assert {"turn_up", "turn_down"} <= kinds
@@ -171,13 +178,33 @@ def test_matrix_reads_a_rally_and_a_slide():
     assert (up.panes["confluence_up"].iloc[-150:] == 2).mean() > 0.5
 
 
-def test_adaptive_wave_is_quick_in_trends_and_slow_in_chop():
-    line = make_ohlcv(list(np.linspace(100, 130, 60)), start="2026-01-01")
-    assert wf.adaptive_wave(line, 7).iloc[-1] > 95
+def test_rsi_wave_rises_in_rallies_and_stays_inside_the_scale():
+    up = wf.rsi_wave(make_ohlcv(list(np.linspace(100, 130, 60)), start="2026-01-01"), 7)
+    down = wf.rsi_wave(make_ohlcv(list(np.linspace(130, 100, 60)), start="2026-01-01"), 7)
+    assert up.iloc[-1] == 100 and down.iloc[-1] == 0          # a straight line saturates the scale
     chop = make_ohlcv([100 + (1 if i % 2 else -1) for i in range(60)], start="2026-01-01")
-    wave = wf.adaptive_wave(chop, 7)
-    raw = common.stochastic(chop["close"], chop["high"], chop["low"], 7)
-    assert wave.iloc[-20:].std() < raw.iloc[-20:].std() / 3
+    wave = wf.rsi_wave(chop, 7).dropna()
+    assert wave.between(0, 100).all() and 30 < wave.iloc[-20:].mean() < 70   # chop hovers around 50
+    # a longer length reacts more slowly: after a turn it sits further from the new extreme
+    swing = make_ohlcv(list(np.linspace(100, 120, 40)) + list(np.linspace(120, 118, 6)), start="2026-01-01")
+    assert wf.rsi_wave(swing, 14).iloc[-1] > wf.rsi_wave(swing, 5).iloc[-1]
+
+
+def test_money_flow_counts_up_and_down_closes():
+    up = make_ohlcv(list(np.linspace(100, 140, 80)), start="2026-01-01")
+    down = make_ohlcv(list(np.linspace(140, 100, 80)), start="2026-01-01")
+    zig = make_ohlcv([100 + (i % 2) for i in range(80)], start="2026-01-01")
+    assert wf.money_flow(up, 35, 6).iloc[-1] == pytest.approx(100)
+    assert wf.money_flow(down, 35, 6).iloc[-1] == pytest.approx(0)
+    assert wf.money_flow(zig, 35, 6).iloc[-1] == pytest.approx(50, abs=2)
+    flow = wf.money_flow(up, 35, 6)
+    assert flow.iloc[:35].isna().all() and flow.iloc[35:].notna().all()     # 35 price changes need 36 closes
+    # three up closes for every down close: 50 + 50 * (3 - 1) / 4 = 75
+    pattern = np.cumsum(np.tile([1.0, 1.0, 1.0, -1.0], 30)) + 100
+    assert wf.money_flow(make_ohlcv(list(pattern), start="2026-01-01"), 40, 1).iloc[-1] == pytest.approx(75)
+    # volume is irrelevant to it
+    loud = up.assign(volume=np.linspace(1, 1e6, len(up)))
+    pd.testing.assert_series_equal(wf.money_flow(loud, 35, 6), wf.money_flow(up, 35, 6))
 
 
 def test_swing_divergences_are_read_at_the_turn():
@@ -208,15 +235,20 @@ def test_matrix_reversal_after_a_volume_climax():
     assert revs and df.index[59] <= revs[0].ts <= df.index[63]
 
 
-def test_matrix_overflow_needs_a_long_one_sided_run():
-    flow = pd.Series([50.0] * 5 + [60.0] * 4 + [40.0] * 4 + [60.0] * 3 + [90.0] * 12)
-    upper = pd.Series(70.0, index=flow.index)
-    lower = pd.Series(30.0, index=flow.index)
-    over = wf.overflow(flow, upper, lower, length=6)
-    # runs of 4 and 4 bars pull the usual run from 6 down to 5.125, so the
-    # third run (from bar 13) only counts as late from its 6th bar
-    assert (over.iloc[:18] == 0).all()                   # beyond the level, but the run is young
-    assert (over.iloc[18:] == 20).all()                  # still beyond it once the run is old
+def test_matrix_thresholds_and_overflow():
+    flow = pd.Series([50.0, 45, 40, 36, 30, 25, 40, 50, 60, 68, 75, 80])
+    upper, lower = pd.Series(70.0, index=flow.index), pd.Series(35.0, index=flow.index)
+    over = wf.overflow(flow, upper, lower)
+    assert list(over.iloc[:3]) == [0, 0, 0]                    # inside the band
+    assert over.iloc[4] == -5 and over.iloc[5] == -10          # below the lower level
+    assert over.iloc[8] == 0 and over.iloc[9] == 3 and over.iloc[11] == 15   # above the mirror of 35, i.e. 65
+    assert wf.overflow(pd.Series([np.nan, 50.0]), pd.Series([35.0, 35.0]), pd.Series([35.0, 35.0])).isna().iloc[0]
+    # thresholds follow the recent extremes of flow and move slowly
+    wave = np.sin(np.arange(400) / 9) * 8 + 50
+    series = pd.Series(wave)
+    hi, lo = wf.flow_thresholds(series, 35)
+    assert hi.iloc[-1] > 50 > lo.iloc[-1] and abs(hi.iloc[-1] - 58) < 3 and abs(lo.iloc[-1] - 42) < 3
+    assert (hi.diff().abs().iloc[100:] < 0.5).all()           # averaged over a long window
 
 
 def test_matrix_options_and_fallbacks():

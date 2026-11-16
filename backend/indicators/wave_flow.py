@@ -1,32 +1,34 @@
 """Wave & Flow Matrix.
 
-A momentum wave and a money-flow gauge in one 0–100 pane, cross-checked
+A momentum wave and a money-flow gauge in one 0-100 pane, cross-checked
 against each other:
 
-* **Wave** — where price sits in its recent range, smoothed adaptively: fast
-  when price is travelling in a straight line, slow when it is chopping, so
-  trends show and noise mostly does not. A signal line trails it; the wave
+* **Wave** - a smoothed RSI of a lightly smoothed price, stretched a little
+  around 50 so trends reach the zones. A signal line trails it; the wave
   crossing its signal is a *turning point* (a strong one when it happens in
   the oversold / overbought zone).
-* **Money flow** — the share of recent traded value that went through on
-  rising bars, around a 50 midline. Its two thresholds are learned from how
-  far flow usually travels on each side; flow beyond a threshold is one-sided.
-* **Overflow** — flow beyond its threshold in a run that has already lasted
-  longer than runs usually do: late money, which tends to be exhaustion.
-* **Reversals** — a turning point that comes right after an activity climax
-  (volume, or bar range when there is no volume) with the wave on the far
-  side of 50. Major when the climax is large and the wave turned from the
-  oversold / overbought zone. A higher reversal factor asks for a bigger
-  climax, so fewer signals.
-* **Divergences** — found at each turning point from the swing just finished
+* **Money flow** - the balance of up closes against down closes over the
+  last ``flow_len`` bars, around a 50 midline, smoothed. It needs no volume,
+  so it works on any market. Its two thresholds follow the recent extremes of
+  flow, each averaged over a long window.
+* **Overflow** - flow beyond its threshold: crowded one-sided activity.
+* **Reversals** - a turning point right after an activity climax (volume, or
+  bar range when there is no volume) with the wave on the far side of 50.
+  Major when the climax is large and the wave turned from the oversold /
+  overbought zone. A higher reversal factor asks for a bigger climax.
+* **Divergences** - found at each turning point from the swing just finished
   against the one before, so they need no bars to the right and never move.
-* **Confluence** — how many of wave and flow are on the same side (0, 1, 2),
-  and a meter that folds the lot into one 0–100 reading.
+* **Confluence** - how many of wave and flow are on the same side (0, 1, 2),
+  and a meter that folds the lot into one 0-100 reading.
 
-This is an original design. It covers the same ground as multi-component
-oscillator suites such as LuxAlgo's "Oscillator Matrix", whose calculations
-are not published; it does not reproduce them, is not affiliated with
-LuxAlgo, and will not match that product's values.
+Calibration: the wave, signal line, money flow and its thresholds were fitted
+to readings taken from LuxAlgo's Oscillator Matrix on BTCUSDT 15m (about 90
+bars). Money flow follows it to under 1 point on average (it is a 35-bar
+count of up and down closes, smoothed over 6). The wave follows to about 2
+points on a 0-100 scale, and its turning points land on the same bar about
+three times in four. Reversals, overflow and divergences are original designs
+and are not calibrated. This is not LuxAlgo's code, is not affiliated with
+LuxAlgo, and will not match that product bar for bar.
 """
 from __future__ import annotations
 
@@ -42,27 +44,21 @@ DIV_MEMORY = 10           # bars a divergence keeps counting in the meter
 CLIMAX_WINDOW = 3         # bars back a climax still backs a turning point
 
 
-def adaptive_wave(df: pd.DataFrame, length: int) -> pd.Series:
-    """Range position (0–100) run through an efficiency-weighted average.
+WAVE_STRETCH = 1.07       # how far the smoothed RSI is stretched around 50
 
-    Efficiency is net move / path travelled over ``length`` bars: 1 for a
-    straight line, near 0 for chop. It sets the smoothing factor between a
-    2-bar and a ``4 * length``-bar average.
+
+def rsi_wave(df: pd.DataFrame, length: int) -> pd.Series:
+    """Smoothed RSI of a lightly smoothed close, stretched about 50 (0-100).
+
+    For the default ``length`` of 7: the close is averaged over 2 bars, run
+    through a 5-bar RSI, averaged over 5 bars and stretched by 7 %.
     """
-    close = df["close"]
-    raw = common.stochastic(close, df["high"], df["low"], length).to_numpy(dtype=float)
-    path = close.diff().abs().rolling(length).sum()
-    eff = ((close - close.shift(length)).abs() / path.replace(0, np.nan)).clip(0, 1)
-    fast, slow = 2 / 3, 2 / (4 * length + 1)
-    alpha = (eff.fillna(0) * (fast - slow) + slow).to_numpy(dtype=float)
-    out = np.full(len(raw), np.nan)
-    prev = np.nan
-    for i, v in enumerate(raw):
-        if np.isnan(v):
-            continue
-        prev = v if np.isnan(prev) else prev + alpha[i] * (v - prev)
-        out[i] = prev
-    return pd.Series(out, index=df.index)
+    price_span = max(1, round(length / 3.5))
+    rsi_len = max(2, length - 2)
+    smooth = max(1, length - 2)
+    price = common.ema(df["close"], price_span) if price_span > 1 else df["close"]
+    wave = common.ema(common.rsi(price, rsi_len), smooth) if smooth > 1 else common.rsi(price, rsi_len)
+    return (50 + WAVE_STRETCH * (wave - 50)).clip(0, 100)
 
 
 def trailing_signal(wave: pd.Series, mult: float, span: int = 10) -> pd.Series:
@@ -92,65 +88,31 @@ def trailing_signal(wave: pd.Series, mult: float, span: int = 10) -> pd.Series:
 
 
 def money_flow(df: pd.DataFrame, length: int, smooth: int) -> pd.Series:
-    """Share of the last ``length`` bars' traded value that printed on rising
-    bars (0–100), smoothed. Without volume, the size of the move stands in
-    for it."""
-    tp = common.hlc3(df)
-    step = tp.diff()
-    has_volume = bool((df["volume"] > 0).any())
-    weight = tp * df["volume"] if has_volume else step.abs()
-    up = weight.where(step > 0, 0.0).rolling(length).sum()
-    down = weight.where(step < 0, 0.0).rolling(length).sum()
-    total = up + down
-    flow = (100 * up / total.replace(0, np.nan)).where(total.isna() | (total != 0), 50.0)
-    return common.ema(flow, smooth).where(flow.notna())
+    """Up closes minus down closes over the last ``length`` bars, as a 0-100
+    reading around 50 (all up = 100), then smoothed."""
+    step = np.sign(df["close"].diff())
+    raw = 50 + 50 * step.rolling(length).sum() / length
+    return common.ema(raw, smooth).where(raw.notna()) if smooth > 1 else raw
 
 
 def flow_thresholds(flow: pd.Series, length: int) -> tuple[pd.Series, pd.Series]:
-    """Upper / lower one-sided levels: 50 plus the usual excursion on that
-    side plus its usual spread, each an average that only updates while flow
-    is on that side."""
+    """Upper / lower one-sided levels: the recent highest and lowest flow
+    (over ~1.4x the flow length), each averaged over ~2.9x the flow length."""
+    window = max(2, round(length * 10 / 7))
+    smooth = max(2, round(length * 20 / 7))
+    upper = common.ema(flow.rolling(window).max(), smooth)
+    lower = common.ema(flow.rolling(window).min(), smooth)
+    return upper.where(flow.notna()), lower.where(flow.notna())
+
+
+def overflow(flow: pd.Series, upper: pd.Series, lower: pd.Series) -> pd.Series:
+    """Signed excess of flow beyond its threshold: below the lower level, or
+    above its mirror image around 50. Zero in between."""
     f = flow.to_numpy(dtype=float)
-    a = 2 / (length + 1)
-    upper, lower = np.full(len(f), np.nan), np.full(len(f), np.nan)
-    mean = {1: np.nan, -1: np.nan}
-    spread = {1: 0.0, -1: 0.0}
-    for i, v in enumerate(f):
-        if not np.isnan(v) and v != 50:
-            side = 1 if v > 50 else -1
-            reach = abs(v - 50)
-            if np.isnan(mean[side]):
-                mean[side] = reach
-            else:
-                spread[side] += a * (abs(reach - mean[side]) - spread[side])
-                mean[side] += a * (reach - mean[side])
-        upper[i] = 50 + mean[1] + spread[1]
-        lower[i] = 50 - mean[-1] - spread[-1]
-    return pd.Series(upper, index=flow.index), pd.Series(lower, index=flow.index)
-
-
-def overflow(flow: pd.Series, upper: pd.Series, lower: pd.Series, length: int) -> pd.Series:
-    """Signed excess of flow beyond its threshold, counted only once the
-    current run on that side of 50 has outlasted the average finished run."""
-    f, up, lo = (s.to_numpy(dtype=float) for s in (flow, upper, lower))
-    out = np.zeros(len(f))
-    side, run, usual = 0, 0, float(length)
-    for i, v in enumerate(f):
-        if np.isnan(v):
-            out[i] = np.nan
-            continue
-        now = 1 if v > 50 else -1 if v < 50 else side
-        if now != side:
-            if side and run:
-                usual += 0.25 * (run - usual)
-            side, run = now, 0
-        run += 1
-        if run > usual:
-            if side > 0 and v > up[i]:
-                out[i] = v - up[i]
-            elif side < 0 and v < lo[i]:
-                out[i] = v - lo[i]
-    return pd.Series(out, index=flow.index)
+    low = lower.to_numpy(dtype=float)
+    high = 100 - low
+    out = np.where(f < low, f - low, np.where(f > high, f - high, 0.0))
+    return pd.Series(np.where(np.isnan(f) | np.isnan(low), np.nan, out), index=flow.index)
 
 
 def swing_divergences(wave: np.ndarray, high: np.ndarray, low: np.ndarray,
@@ -214,14 +176,14 @@ class WaveFlowMatrix(Indicator):
         if df.empty or len(df) < max(self.wave_len, self.flow_len) + 5:
             return result
 
-        wave = adaptive_wave(df, self.wave_len)
+        wave = rsi_wave(df, self.wave_len)
         if self.signal_type == "trail":
             signal = trailing_signal(wave, self.signal_len)
         else:
             signal = wave.rolling(self.signal_len).mean()
         flow = money_flow(df, self.flow_len, self.flow_smooth)
         upper, lower = flow_thresholds(flow, self.flow_len)
-        over = overflow(flow, upper, lower, self.flow_len)
+        over = overflow(flow, upper, lower)
 
         # ---- turning points --------------------------------------------------
         above = wave > signal
