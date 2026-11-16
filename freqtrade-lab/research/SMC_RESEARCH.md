@@ -291,6 +291,59 @@ smoother.
 The sweep is worth about +0.13 to +0.16R per trade on both sets. Trend
 following alone (no sweep) is positive but half as good.
 
+### Small coins — 2026-11-11: does the edge hold under the $5M floor?
+
+Why: the live scan trades only coins with 24h futures volume >= $5M, and
+from 7 to 11 Nov no such coin gave a signal (two did under it: SSV, CVC).
+[smc_volume.py](smc_volume.py) tags every B_final trade with the coin's
+24h dollar volume over the 24 hours before entry.
+
+**A. 279 coins, 2020 to now** (24h SPOT volume; costs per side):
+
+| 24h volume | trades | win | avg R 0.06% | PF | avg R 0.20% |
+|---|---|---|---|---|---|
+| < $1M | 623 | 36% | +0.173 | 1.34 | +0.125 |
+| $1-2M | 310 | 39% | +0.276 | 1.58 | +0.229 |
+| $2-5M | 328 | 41% | +0.362 | 1.82 | +0.317 |
+| $5-10M | 148 | 41% | +0.475 | 2.22 | +0.431 |
+| $10-50M | 202 | 33% | +0.168 | 1.33 | +0.119 |
+| >= $50M | 123 | 42% | +0.424 | 1.97 | +0.370 |
+| all under $5M | 1,261 | 38% | +0.248 | 1.51 | +0.201 |
+| all $5M and up | 473 | 38% | +0.330 | 1.73 | +0.282 |
+
+Last 3 years only: under $5M +0.262R (883 trades), $5M and up +0.380R
+(281); $2-5M +0.414R (215), < $1M +0.193R (459).
+
+**B. Live view, ~500 perps, last 5.5 months** (24h FUTURES volume, the
+number the live floor uses; 403 closed trades; a weak stretch for all):
+
+| 24h volume | trades | win | avg R | PF |
+|---|---|---|---|---|
+| < $1M | 138 | 39% | +0.032 | 1.07 |
+| $1-2M | 107 | 31% | +0.003 | 1.01 |
+| $2-5M | 76 | 46% | +0.361 | 1.80 |
+| $5-10M | 27 | 44% | +0.098 | 1.23 |
+| $10-50M | 32 | 31% | -0.127 | 0.75 |
+| >= $50M | 23 | 43% | +0.296 | 1.72 |
+| all under $5M | 321 | 38% | +0.100 | 1.20 |
+| all $5M and up | 82 | 39% | +0.066 | 1.14 |
+
+95% of the under-$5M trades were on coins CoinDCX lists.
+
+Lessons:
+- The edge does not need big coins: $2-5M was one of the best bands in
+  both tests (+0.36R long history, +0.41R last 3 years, +0.36R live view),
+  and it survives 0.20% cost per side.
+- Under $2M it fades: +0.17..0.28R in the long history but about 0R in the
+  live view, where real slippage on thin books would make it negative.
+- A floor of **$2M** roughly doubles the signals (live view: 82 -> 158
+  trades in 5.5 months) without lowering the average R.
+- Bands are noisy at these sizes ($10-50M is weak in both tests with no
+  reason to expect it); do not tune the floor finer than this.
+- Caveats: survivorship (coins delisted since are missing), spot volume in
+  A is not futures volume, and CoinDCX's own book on a small coin can be
+  thinner than Binance's (the 1.5% price-gap guard still applies).
+
 ### Where to go next
 
 1. **Cross-check B_final in freqtrade** (the repo rule). Needs a strategy
