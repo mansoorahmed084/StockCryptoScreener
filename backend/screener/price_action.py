@@ -196,6 +196,70 @@ def structure(o, h, l, c, v, k: int, scope: str) -> tuple[list[Break], list[Orde
     return breaks, obs, trend
 
 
+def structure_legs(o, h, l, c, v, k: int, scope: str) -> tuple[list[Break], list[OrderBlock], np.ndarray]:
+    """Breaks of structure found the way LuxAlgo's Price Action Concepts finds them.
+
+    Measured against the toolkit's internal structure on 1,250 bars of BTCUSDT 15m (about 60 events), this
+    rule with k = 5 reproduced 95 % of them bar for bar, every BOS / CHoCH label correct; the independent-pivot
+    rule in ``structure`` reproduced about 73 %. See calibration/pac_compare.py.
+
+    * A bar is a swing high when it is higher than every one of the k bars after it (nothing is required of the
+      bars before it). The first such bar after a swing low turns the leg bearish and registers the swing high;
+      mirrored for lows. So swing highs and lows alternate, and a swing is known k bars after it prints.
+    * A close that crosses the latest registered swing from the other side breaks structure, once per swing.
+    * It is a CHoCH when the trend was the other way and a BOS when it was the same way.
+    """
+    n = len(c)
+    trend = np.zeros(n, np.int8)
+    breaks: list[Break] = []
+    obs: list[OrderBlock] = []
+    leg = 0                                 # 0: bearish leg (the last swing registered was a high), 1: bullish
+    sh = sl = None                          # live (bar, price): latest registered swing, until it is broken
+    last_sh = np.full(n, np.nan)            # latest registered swing, broken or not
+    last_sl = np.full(n, np.nan)
+    ref_h = ref_l = np.nan
+    cur = 0
+    for t in range(n):
+        if t >= k:
+            new_leg = leg
+            if h[t - k] > h[t - k + 1:t + 1].max():
+                new_leg = 0
+            elif l[t - k] < l[t - k + 1:t + 1].min():
+                new_leg = 1
+            if new_leg != leg:
+                if new_leg == 1:
+                    sl = (t - k, float(l[t - k]))
+                    ref_l = sl[1]
+                else:
+                    sh = (t - k, float(h[t - k]))
+                    ref_h = sh[1]
+                leg = new_leg
+        last_sh[t], last_sl[t] = ref_h, ref_l
+        if t > 0 and sh is not None and c[t] > sh[1] >= c[t - 1]:
+            k0 = sh[0] + int(np.argmin(l[sh[0]:t + 1]))          # leg origin
+            b = next((j for j in range(k0, max(k0 - 6, -1), -1) if c[j] < o[j]), k0)
+            ref = last_sl[k0 - 1] if k0 > 0 else np.nan
+            swept = bool(np.isfinite(ref) and l[k0] < ref and c[k0] > ref)
+            breaks.append(Break(t, BULL, "BOS" if cur == BULL else "CHoCH", sh[1], sh[0], k0, swept, scope))
+            obs.append(OrderBlock(BULL, float(h[b]), float(l[b]), b, t, float(v[b]), scope))
+            cur, sh = BULL, None
+        elif t > 0 and sl is not None and c[t] < sl[1] <= c[t - 1]:
+            k0 = sl[0] + int(np.argmax(h[sl[0]:t + 1]))
+            b = next((j for j in range(k0, max(k0 - 6, -1), -1) if c[j] > o[j]), k0)
+            ref = last_sh[k0 - 1] if k0 > 0 else np.nan
+            swept = bool(np.isfinite(ref) and h[k0] > ref and c[k0] < ref)
+            breaks.append(Break(t, BEAR, "BOS" if cur == BEAR else "CHoCH", sl[1], sl[0], k0, swept, scope))
+            obs.append(OrderBlock(BEAR, float(h[b]), float(l[b]), b, t, float(v[b]), scope))
+            cur, sl = BEAR, None
+        trend[t] = cur
+    for ob in obs:                          # mitigation: a close through the far side
+        for t in range(ob.formed_i + 1, n):
+            if (ob.side == BULL and c[t] < ob.bottom) or (ob.side == BEAR and c[t] > ob.top):
+                ob.mitigated_i = t
+                break
+    return breaks, obs, trend
+
+
 def liquidity(h, l, c, v, k: int) -> list[Liquidity]:
     """Every swing high / low and what happened to it afterwards."""
     n = len(c)
@@ -291,15 +355,21 @@ def _arrays(df: pd.DataFrame):
     return o, h, l, c, v
 
 
-def analyse(df: pd.DataFrame, *, k_internal: int = 3, k_swing: int = 10,
+def analyse(df: pd.DataFrame, *, k_internal: int = 5, k_swing: int = 10,
             k_liq: int = 5, k_setup: int = 5, daily: pd.DataFrame | None = None,
             ltf_step: pd.Timedelta | None = None, drop_last: bool = True,
-            max_obs: int = 3, max_liq: int = 5, max_gaps: int = 4) -> Concepts:
+            max_obs: int = 3, max_liq: int = 5, max_gaps: int = 4,
+            internal_engine: str = "legs") -> Concepts:
     """Run every concept on one chart.
 
     `daily` adds the daily trend, previous day / week levels and the
     sweep-break style setups (a break whose origin swept liquidity, in the
     direction of the daily trend). `drop_last` removes the forming candle.
+
+    Internal structure follows LuxAlgo's Price Action Concepts (``structure_legs``, k = 5, its documented
+    internal sensitivity); pass ``internal_engine="pivots"`` for the earlier independent-pivot rule. Swing
+    structure still uses that earlier rule and has not been measured against the toolkit. The sweep-break
+    setups always use the earlier rule, which is what they were tested with.
     """
     closed = df.iloc[:-1] if drop_last and len(df) > 1 else df
     n = len(closed)
@@ -309,7 +379,10 @@ def analyse(df: pd.DataFrame, *, k_internal: int = 3, k_swing: int = 10,
     o, h, l, c, v = _arrays(closed)
     a = atr(h, l, c)
 
-    out.internal, obs_i, tr_i = structure(o, h, l, c, v, k_internal, "internal")
+    if internal_engine == "legs":
+        out.internal, obs_i, tr_i = structure_legs(o, h, l, c, v, k_internal, "internal")
+    else:
+        out.internal, obs_i, tr_i = structure(o, h, l, c, v, k_internal, "internal")
     out.swing, obs_s, tr_s = structure(o, h, l, c, v, k_swing, "swing")
     out.trend_internal, out.trend_swing = int(tr_i[-1]), int(tr_s[-1])
 
@@ -352,7 +425,7 @@ def analyse(df: pd.DataFrame, *, k_internal: int = 3, k_swing: int = 10,
         ht = htf_trend_on(closed.index, ltf_step, daily)
         out.htf_trend = int(ht[-1])
         out.htf_levels = daily_levels(daily, closed.index[-1] + ltf_step)
-        if k_setup == k_internal:
+        if k_setup == k_internal and internal_engine == "pivots":
             setup_breaks = out.internal
         elif k_setup == k_swing:
             setup_breaks = out.swing

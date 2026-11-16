@@ -54,8 +54,9 @@ def main():
         tf = st.radio("Timeframe", pv.TIMEFRAMES, key="pa_tf", horizontal=True)
         n = st.slider("Candles", 100, 1000, 300, step=50)
         with st.expander("Swing sizes"):
-            k_int = st.slider("Internal structure", 2, 6, 3,
-                              help="Candles each side for a small swing.")
+            k_int = st.slider("Internal structure", 2, 8, 5,
+                              help="How many candles a swing must hold for. 5 is LuxAlgo's internal "
+                                   "setting, and the rule here matches its internal structure at 5.")
             k_swing = st.slider("Swing structure", 5, 20, 10,
                                 help="Candles each side for a major swing.")
             k_liq = st.slider("Liquidity swings", 3, 15, 5,

@@ -46,6 +46,47 @@ def test_close_above_swing_high_is_choch_then_bos():
     assert c[ob.i] < o[ob.i] and ob.i <= br[0].origin_i
 
 
+def test_legs_structure_is_the_luxalgo_rule():
+    """Swings need only beat the bars AFTER them (the later of equal highs wins), and each swing breaks once."""
+    mid = [5, 6, 7, 8, 10, 8, 7, 6, 7, 9, 11, 12, 14, 12, 11, 10, 11, 13, 15, 16, 16, 16]
+    df = _frame(_wave(mid))
+    o, h, l, c, v = _arr(df)
+    br, obs, trend = pa.structure_legs(o, h, l, c, v, 2, "internal")
+    assert [b.kind for b in br][:2] == ["CHoCH", "BOS"] and all(b.side == pa.BULL for b in br[:2])
+    assert h[4] == h[5] and br[0].level_i == 5 and br[0].level == h[5]    # equal highs: the later bar is the swing
+    assert br[1].level_i == 13
+    assert trend[-1] == pa.BULL
+    assert len(obs) == len(br) and c[obs[0].i] < o[obs[0].i] and obs[0].i <= br[0].origin_i
+
+
+def test_legs_structure_breaks_each_swing_once_on_noise():
+    rng = np.random.default_rng(7)
+    mid = 100 + np.cumsum(rng.normal(0, 1, 800))
+    df = _frame(_wave(mid, wick=0.4))
+    o, h, l, c, v = _arr(df)
+    br, _, trend = pa.structure_legs(o, h, l, c, v, 5, "internal")
+    assert len(br) > 20
+    assert len({(b.side, b.level_i) for b in br}) == len(br)              # no swing is broken twice
+    for b in br:                                                          # a close really crossed the level
+        assert (c[b.i] > b.level and c[b.i - 1] <= b.level) if b.side == pa.BULL else (c[b.i] < b.level and c[b.i - 1] >= b.level)
+        assert b.level_i <= b.i - 5                                       # known only k bars after it printed
+    kinds = [(b.side, b.kind) for b in br]
+    assert all(kind == "BOS" for (side, kind), prev in zip(kinds[1:], kinds) if prev[0] == side)
+    assert all(kind == "CHoCH" for (side, kind), prev in zip(kinds[1:], kinds) if prev[0] != side)
+
+
+def test_analyse_internal_structure_defaults_to_the_leg_engine_at_5():
+    t = np.arange(400)
+    df = _frame(_wave(100 + 10 * np.sin(t / 9) + 0.05 * t))
+    o, h, l, c, v = _arr(df.iloc[:-1])
+    cx = pa.analyse(df)
+    ref, _, _ = pa.structure_legs(o, h, l, c, v, 5, "internal")
+    assert [(b.i, b.side, b.kind) for b in cx.internal] == [(b.i, b.side, b.kind) for b in ref]
+    old = pa.analyse(df, internal_engine="pivots", k_internal=5)
+    ref_old, _, _ = pa.structure(o, h, l, c, v, 5, "internal")
+    assert [(b.i, b.side, b.kind) for b in old.internal] == [(b.i, b.side, b.kind) for b in ref_old]
+
+
 def test_liquidity_grab_vs_break():
     rows = _wave([5, 6, 7, 8, 10, 8, 7, 6, 6, 6])
     rows += [(6, 10.5, 6, 9.5)]              # wick above the 10.3 high, close back
