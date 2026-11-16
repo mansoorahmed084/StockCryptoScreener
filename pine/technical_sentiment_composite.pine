@@ -7,7 +7,7 @@
 //   Momentum oscillators (RSI, Stochastic %K, Stochastic RSI, CCI, Bull Bear Power)
 //     are zone-scaled: oversold zone -> 0-25, lower half -> 25-50, upper half -> 50-75,
 //     overbought zone -> 75-100.
-//   Trend tools (moving average, Bollinger Bands, Supertrend, session VWAP bands,
+//   Trend tools (moving average, Bollinger Bands, Supertrend, anchored VWAP bands,
 //     market structure) give buy / sell flips; the score is where price sits between
 //     the low and the high it has made around the latest flip, lightly smoothed.
 //   Linear regression is scored from the correlation of price with time.
@@ -18,8 +18,12 @@
 // differently and Bull Bear Power needs 100 bars here.
 //
 // Independent implementation of the confluence-scoring idea, written from the public
-// description of the method. Not affiliated with LuxAlgo and not expected to match any
-// LuxAlgo script bar for bar.
+// description of the method. Not affiliated with LuxAlgo. Checked against LuxAlgo's
+// Market Sentiment Technicals (run in PineTS) on BTC and ETH at 15m, 4h, 1D and 1W: after
+// the warm-up the readings agree exactly. The first bars of a chart can still differ,
+// because the running range here is seeded from the first bar (LuxAlgo shows nothing until
+// a buy and a sell flip have both happened) and Pine seeds its RSI and EMA averages from
+// a simple average.
 indicator("Technical Sentiment Composite", shorttitle = "Sentiment", overlay = false, precision = 1)
 
 // ---- inputs ------------------------------------------------------------------------
@@ -82,8 +86,9 @@ bandScale(float v, float upper, float lower) =>
     na(v) or na(upper) or na(lower) ? na : v >= 0 ? pos : neg
 
 // 0-100 position of price between its running low and high. A fresh buy flip restarts the
-// high at the close and a fresh sell flip restarts the low, so a new up-signal reads 100 and
-// decays as price gives ground; a new down-signal reads 0 and recovers as price bounces.
+// high at the close and a fresh sell flip restarts the low (the other side carries over), so
+// a new up-signal reads 100 and decays as price gives ground; a new down-signal reads 0 and
+// recovers as price bounces.
 anchoredScore(bool buy, bool sell, int smooth) =>
     var int state = 0
     var float hi = na
@@ -97,10 +102,8 @@ anchoredScore(bool buy, bool sell, int smooth) =>
         hi := close
         lo := close
     else if state > prev
-        lo := math.min(lo, close)
         hi := close
     else if state < prev
-        hi := math.max(hi, close)
         lo := close
     else
         hi := math.max(hi, close)
@@ -154,24 +157,30 @@ float sBb = anchoredScore(close > bbMid + bbDev, close < bbMid - bbDev, normSmoo
 [stLine, stDir] = ta.supertrend(stMult, stLen)
 float sSt = anchoredScore(close > stLine, close < stLine, normSmooth)
 
-// Session VWAP with volume-weighted deviation bands, restarting each day. It only means
-// something on intraday candles with volume.
-var float dayVolume = 0.0
-var float dayValue = 0.0
-var float dayValueSq = 0.0
-if timeframe.change("D")
-    dayVolume := 0.0
-    dayValue := 0.0
-    dayValueSq := 0.0
-dayVolume += nz(volume)
-dayValue += hlc3 * nz(volume)
-dayValueSq += hlc3 * hlc3 * nz(volume)
-float vwapLine = dayVolume > 0 ? dayValue / dayVolume : na
-float vwapDev = dayVolume > 0 ? math.sqrt(math.max(dayValueSq / dayVolume - vwapLine * vwapLine, 0)) : na
-float vwapUpper = vwapLine + vwapMult * vwapDev
-float vwapLower = vwapLine - vwapMult * vwapDev
+// Anchored VWAP of the close with volume-weighted deviation bands. The anchor follows the
+// chart's timeframe: the day up to 15 minutes, the week on longer intraday charts, the month
+// on daily, the quarter on weekly and the year on monthly. It needs volume.
+string vwapAnchor = timeframe.isintraday ? (timeframe.multiplier <= 15 ? "D" : "W") : timeframe.isdaily ? "M" : timeframe.isweekly ? "3M" : "12M"
+bool anchorChanged = timeframe.change(vwapAnchor)
+bool newSession = barstate.isfirst or anchorChanged
+var float vwapVolume = 0.0
+var float vwapValue = 0.0
+var float vwapValueSq = 0.0
+if newSession
+    vwapVolume := 0.0
+    vwapValue := 0.0
+    vwapValueSq := 0.0
+vwapVolume += nz(volume)
+vwapValue += close * nz(volume)
+vwapValueSq += close * close * nz(volume)
+float vwapLine = vwapVolume > 0 ? vwapValue / vwapVolume : na
+float vwapDev = vwapVolume > 0 ? math.sqrt(math.max(vwapValueSq / vwapVolume - vwapLine * vwapLine, 0)) : na
+// A session's first bar is a single sample, so its bands are exactly the close. Dividing the
+// sums back out leaves rounding noise that can put the close a hair outside and flip the trend.
+float vwapUpper = vwapVolume > 0 and newSession ? close : vwapLine + vwapMult * vwapDev
+float vwapLower = vwapVolume > 0 and newSession ? close : vwapLine - vwapMult * vwapDev
 float sVwap = anchoredScore(close > vwapUpper, close < vwapLower, normSmooth)
-bool useVwap = timeframe.isintraday and ta.cum(nz(volume)) > 0
+bool useVwap = ta.cum(nz(volume)) > 0
 
 float sLinreg = 50 * ta.correlation(close, bar_index, linregLen) + 50
 
@@ -181,13 +190,14 @@ float sStruct = anchoredScore(structBuy, structSell, normSmooth)
 // ---- the composite -------------------------------------------------------------------
 // A sum is na while any member is still warming up, so there is no reading until every
 // tool has one.
+// A VWAP that cannot be worked out (no volume) counts as a neutral 50, as LuxAlgo does,
+// rather than being left out of the average.
 float momentumSum = sRsi + sStoch + sStochRsi + sCci + sBbp
-float trendSum = sMa + sBb + sSt + sLinreg + sStruct + (useVwap ? sVwap : 0.0)
-int trendCount = useVwap ? 6 : 5
+float trendSum = sMa + sBb + sSt + sLinreg + sStruct + (useVwap ? nz(sVwap, 50.0) : 50.0)
 
-float sentiment = (momentumSum + trendSum) / (5 + trendCount)
+float sentiment = (momentumSum + trendSum) / 11
 float momentum = na(sentiment) ? na : momentumSum / 5
-float trend = na(sentiment) ? na : trendSum / trendCount
+float trend = na(sentiment) ? na : trendSum / 6
 
 ratingColor(float v) =>
     na(v) ? C_FLAT : v >= strongBull ? C_UP : v >= bull ? C_UP_SOFT : v > bear ? C_FLAT : v > strongBear ? C_DOWN_SOFT : C_DOWN
