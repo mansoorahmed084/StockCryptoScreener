@@ -107,7 +107,21 @@ What came out on the 203 unseen coins:
 
 - The old coins and the new coins agree on these rows. That is a good sign.
 - But the profit per unit of drop is the same as sweep-break or worse. The 4h setups have drops of 37–44%.
-- Not done: the check that it does not lose in the same months as sweep-break.
+
+**Round 2 — does it lose in the same months as sweep-break?**
+
+- **1d setup: yes.** It loses when sweep-break loses. Both together are worse than sweep-break alone. Drop it.
+- **4h Smart Trail setup: no.** It moves on its own (correlation 0.20 to 0.33) and it makes money in sweep-break's losing months.
+
+Shared account, 10 slots, on the 203 unseen coins:
+
+| | Profit a year | Worst drop |
+|---|---|---|
+| Sweep-break alone (0.5% risk) | 15.4% | 17.6% |
+| Sweep-break + 4h Smart Trail (0.25% risk each trade) | 21.2% | 21.5% |
+
+- This is the first tested idea that adds to sweep-break. The gain is small.
+- Not done: a check in freqtrade (a second backtest engine), and a paper test.
 
 Details: [SIGNALS_OVERLAYS_RESEARCH.md](../freqtrade-lab/research/SIGNALS_OVERLAYS_RESEARCH.md)
 

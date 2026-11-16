@@ -1,12 +1,19 @@
 # Signals & Overlays (our own build) — tested 2026-11-16
 
-**Verdict: nothing here beats SMC sweep-break as an account. The 1h signals,
-the contrarian signals and the exit crosses are dead. The confirmation signal
-taken WITH the trend and closed at a fixed 3R has a real-looking edge on 4h
-(+0.11 to +0.15R) and on 1d (+0.25R), the same on the old halves and on the
-203 unseen coins — but it earns less per unit of drawdown than sweep-break.
-It is a candidate for a second book, not a replacement. Round 2 (does it lose
-in the same months as sweep-break?) is not done.**
+**Verdict: the 1h signals, the contrarian signals and the exit crosses are
+dead. The confirmation signal taken WITH the trend and closed at a fixed 3R
+has a real-looking edge on 4h (+0.11 to +0.15R) and on 1d (+0.25R), the same
+on the old halves and on the 203 unseen coins. Alone, neither beats SMC
+sweep-break as an account.**
+
+**Round 2 (same day): the daily candidate moves with sweep-break and makes the
+shared account worse — drop it. The 4h Smart Trail candidate does not move
+with sweep-break (monthly correlation 0.20 to 0.33) and earns in sweep-break's
+losing months. Added at half risk it lifts the shared account a little on the
+unseen coins (21.2% a year / 21.5% worst drop, against 15.4% / 17.6% for
+sweep-break alone). It is the first tested idea that adds to sweep-break
+instead of copying it. The gain is small and it is not cross-checked in
+freqtrade.** See "Round 2" at the end.
 
 **This is NOT LuxAlgo's Signals & Overlays.** That script is paid and closed.
 We built the same feature list from LuxAlgo's public docs with our own
@@ -121,9 +128,63 @@ trades).
   2026-11-13 with the flip exit. The new part here is the fixed 3R exit, the
   2 ATR stop and the trend agreement.
 
+## Round 2 — plateau and the SMC book ([so_check.py](so_check.py))
+
+Two candidates: **4h + Smart Trail filter** and **1d all signals** (both:
+confirmation, long and short, 2 ATR stop, 3R, 42-bar time stop).
+
+**Plateau, old 76 coins only (one dial at a time).** Every neighbour stays
+positive and the two hash halves agree.
+
+| dial | 4h + Smart Trail (avg R) | 1d all signals (avg R) |
+|---|---|---|
+| sensitivity 8 / 12 / 16 / 20 | +0.146 / **+0.215** / +0.104 / +0.081 | +0.227 / **+0.280** / +0.220 / +0.261 |
+| target 2 / 3 / 4 / 6R | +0.163 / +0.215 / +0.250 / +0.305 | +0.176 / +0.280 / +0.389 / +0.503 |
+| time stop 21 / 42 / 84 bars | +0.137 / +0.215 / +0.236 | +0.277 / +0.280 / +0.223 |
+| stop 1.5 / 2 / 3 ATR | +0.179 / +0.215 / +0.197 | +0.217 / +0.280 / +0.749 (392 trades) |
+| long only | +0.151 | +0.323 |
+| strong (+) only | +0.262 | +0.329 |
+| Smart Trail period 2 / 3 / 4 | +0.093 / +0.215 / +0.236 | — |
+
+The 4h candidate is positive in 7 of 7 years on almost every row. One warning:
+sensitivity 12 is the top of its dial; 8 and 16 give half to two thirds of it.
+
+**Against SMC sweep-break (B_final):**
+
+| | 4h + Smart Trail | 1d all signals |
+|---|---|---|
+| monthly R correlation, all 279 / new 203 | **0.20 / 0.33** | 0.41 / 0.37 |
+| months both lose, of sweep-break's losing months (all coins) | 13 of 34 | 20 of 34 |
+| its total R in sweep-break's losing months, all / new | **+792 / +165** | −324 / −46 |
+
+Shared account, 10 slots (CAGR / worst-case DD, ratio):
+
+| | all 279 coins | new 203 coins |
+|---|---|---|
+| sweep-break alone, 0.5% risk | 22.6% / 18.4% (1.23) | 15.4% / 17.6% (0.88) |
+| 4h + Smart Trail alone, 0.5% | 35.5% / 48.7% (0.73) | 27.6% / 36.8% (0.75) |
+| sweep-break + 4h, 0.5% | 56.3% / 40.5% (1.39) | 41.6% / 40.8% (1.02) |
+| **sweep-break + 4h, 0.25%** | **27.7% / 21.8% (1.27)** | **21.2% / 21.5% (0.99)** |
+| 1d alone, 0.5% | 9.0% / 25.1% (0.36) | 8.5% / 25.2% (0.34) |
+| sweep-break + 1d, 0.5% | 17.3% / 24.1% (0.72) | 14.2% / 21.2% (0.67) |
+| all three, 0.25% | 24.2% / 16.7% (1.45) | 22.8% / 15.1% (1.51) |
+
+- **1d: not a second book.** It loses when sweep-break loses, and the shared
+  account is worse than sweep-break alone on both coin sets.
+- **4h + Smart Trail: adds a little.** At the same risk it doubles the profit
+  and more than doubles the drawdown. At half risk the drawdown is close to
+  sweep-break's and the profit is higher: +5 points a year on all coins, +6 on
+  the unseen coins. The ratio moves from 1.23 to 1.27 and from 0.88 to 0.99.
+- **All three in one account has the best ratio, and it is fragile.** With 10
+  slots, 18,027 of 22,702 signals are skipped (all coins), so the result
+  depends on which signals arrive first. With 20 slots the ratios are 2.08
+  (all) and 1.56 (new) at 0.25% risk.
+- The 4h book alone lost in 2026 (−16.6% on all coins, −1.9% on new coins).
+- The 4h book skips two thirds of its own signals because the slots are full.
+
 ## Not done
 
-Round 2, as for S&R Breaks ([sr_check.py](sr_check.py)): the plateau on the
-old 76 coins, the monthly correlation with sweep-break, and one shared
-account. A freqtrade cross-check. The dashboard cells (Volatility, Squeeze,
-Volume Sentiment) are not in the Python twin; they do not make signals.
+A freqtrade cross-check of the 4h candidate (a second engine, real funding and
+fees). A walk-forward or paper test: the candidate was named after the unseen
+coins were seen. The dashboard cells (Volatility, Squeeze, Volume Sentiment)
+are not in the Python twin; they do not make signals.
