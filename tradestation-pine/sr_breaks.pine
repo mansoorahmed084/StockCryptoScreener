@@ -1,0 +1,93 @@
+//@version=5
+// Support and Resistance Levels with Breaks — after LuxAlgo's open-source script (CC BY-NC-SA 4.0,
+// https://www.luxalgo.com/library/). Personal, non-commercial use.
+// A Pine port of the Python rebuild in StockCryptoScreener/freqtrade-lab/research/sr_breaks.py.
+//
+// Resistance is the latest pivot high (same bars each side), usable one bar after it is confirmed;
+// support mirrors it. A level stays until a newer pivot replaces it. "B" marks a close through a
+// level with the volume oscillator above the threshold and no wick rejection.
+indicator("Support and Resistance Levels with Breaks [LuxAlgo]", "S&R Breaks", overlay=true, max_labels_count=500)
+
+toggleBreaks = input.bool(true, "Show Breaks")
+width = input.int(15, "Pivot Bars Each Side", minval=1)
+volumeThresh = input.float(20, "Volume Threshold", minval=0)
+useVol = input.bool(true, "Breaks Need Volume (LuxAlgo default)")
+resCss = input.color(color.red, "Resistance Color")
+supCss = input.color(color.blue, "Support Color")
+
+// A pivot confirmed on this bar: the bar `w` back beats the `w` bars before it strictly and is not
+// beaten by the `w` bars after it.
+pivotHigh(w) =>
+    float r = na
+    if bar_index >= 2 * w
+        c = high[w]
+        ok = true
+        for j = w + 1 to 2 * w
+            if high[j] >= c
+                ok := false
+                break
+        if ok
+            for j = 0 to w - 1
+                if high[j] > c
+                    ok := false
+                    break
+        r := ok ? c : na
+    r
+
+pivotLow(w) =>
+    float r = na
+    if bar_index >= 2 * w
+        c = low[w]
+        ok = true
+        for j = w + 1 to 2 * w
+            if low[j] <= c
+                ok := false
+                break
+        if ok
+            for j = 0 to w - 1
+                if low[j] < c
+                    ok := false
+                    break
+        r := ok ? c : na
+    r
+
+ph = pivotHigh(width)
+pl = pivotLow(width)
+var float res = na
+var float sup = na
+if not na(ph[1])
+    res := ph[1]
+if not na(pl[1])
+    sup := pl[1]
+
+short = ta.ema(volume, 5)
+long = ta.ema(volume, 10)
+osc = 100 * (short - long) / long
+
+xUp = close > res and close[1] <= res[1]
+xDn = close < sup and close[1] >= sup[1]
+bullWick = open - low > close - open
+bearWick = open - close < high - open
+volOk = osc > volumeThresh or not useVol
+bUp = xUp and not bullWick and volOk
+bDn = xDn and not bearWick and volOk
+
+plot(res, "Resistance", color=res != res[1] ? na : resCss, linewidth=3)
+plot(sup, "Support", color=sup != sup[1] ? na : supCss, linewidth=3)
+
+plotshape(toggleBreaks and bUp, "Break Up", shape.labelup, location.belowbar, color.green, text="B", textcolor=color.white, size=size.tiny)
+plotshape(toggleBreaks and bDn, "Break Down", shape.labeldown, location.abovebar, color.red, text="B", textcolor=color.white, size=size.tiny)
+plotshape(toggleBreaks and xUp and bullWick, "Bull Wick", shape.labelup, location.belowbar, color.green, text="Bull Wick", textcolor=color.white, size=size.tiny)
+plotshape(toggleBreaks and xDn and bearWick, "Bear Wick", shape.labeldown, location.abovebar, color.red, text="Bear Wick", textcolor=color.white, size=size.tiny)
+
+// values for alerts, the data window and checks
+plot(osc, "osc", display=display.none)
+plot(bUp ? 1 : 0, "b_up", display=display.none)
+plot(bDn ? 1 : 0, "b_dn", display=display.none)
+plot(xUp ? 1 : 0, "x_up", display=display.none)
+plot(xDn ? 1 : 0, "x_dn", display=display.none)
+
+alertcondition(bUp, "Resistance break", "{{ticker}}: resistance broken with volume")
+alertcondition(bDn, "Support break", "{{ticker}}: support broken with volume")
+alertcondition(xUp, "Close above resistance", "{{ticker}}: closed above resistance")
+alertcondition(xDn, "Close below support", "{{ticker}}: closed below support")

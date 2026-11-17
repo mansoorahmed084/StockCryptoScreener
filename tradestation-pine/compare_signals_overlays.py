@@ -17,7 +17,7 @@ import signals_overlays as so  # noqa: E402
 bars = pd.read_csv(sys.argv[1])
 bars.index = pd.to_datetime(bars["time"], unit="ms", utc=True)
 dump_dir = Path(sys.argv[2])
-book = so.Book(bars)
+books = {"own": so.Book(bars), "lux": so.Book(bars, style="lux")}
 n = len(bars)
 
 # what each dumped setting means in the Python twin
@@ -35,12 +35,16 @@ CONFIGS = {
     "conf_filt_strength": {"filt": "strength"},
     "conf_sens8": {"sens": 8}, "conf_sens20": {"sens": 20},
     "cont_sens8": {"mode": "cont", "sens": 8}, "cont_sens20": {"mode": "cont", "sens": 20},
+    "lux": {"style": "lux"}, "lux_sens5": {"style": "lux", "sens": 5}, "lux_sens25": {"style": "lux", "sens": 25},
+    "lux_auto_medium": {"style": "lux", "auto": "medium"}, "lux_filt_trail": {"style": "lux", "filt": "trail"},
+    "lux_cont": {"style": "lux", "mode": "cont"},
 }
-TPSL = {"conf": "signals", "cont": "trail"}
+TPSL = {"conf": "signals", "cont": "trail", "lux": "signals"}
 
 
 def python_plots(name: str) -> dict:
     kw = {"mode": "conf", "sens": 12, "auto": "off", "filt": "none", "ml": ""} | CONFIGS[name]
+    book = books[kw.pop("style", "own")]
     sig, ex, cls = book.signals(**kw)
     conf_auto = kw["auto"] if kw["mode"] == "conf" else "off"
     flip = book.trail_dir != np.concatenate([[1], book.trail_dir[:-1]])

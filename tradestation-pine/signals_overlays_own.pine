@@ -26,6 +26,12 @@
 //                         Squeeze = how narrow the Bollinger width is. Volume Sentiment = buy/sell split.
 //
 // Not built: Custom Alert Creator, Alert Scripting, External Conditions.
+//
+// "Signal Style" (in Own Build Tuning) has a second choice, "LuxAlgo-like". We read LuxAlgo's real
+// signals from chart pictures (BTCUSDT 15m, sensitivity 5, 12 and 25) and searched about 700,000
+// public rules for the closest one. The closest: band on ohlc4 +/- sensitivity x 0.165 x the 30-bar
+// mean true range, strong (+) and candle colour from EMA 20 against EMA 26. It is still not
+// LuxAlgo's formula. The match numbers are in reports/LUXALGO_SUMMARY.md (step 4).
 indicator("Signals & Overlays Toolkit (own build)", "S&O own", overlay=true, max_labels_count=500)
 
 // ───────────────────────── Inputs ─────────────────────────
@@ -67,6 +73,7 @@ dSqz = input.bool(false, "Squeeze", group=gD)
 dVs = input.bool(false, "Volume Sentiment", group=gD)
 
 gT = "Own Build Tuning"
+styleIn = input.string("Own (tested)", "Signal Style", options=["Own (tested)", "LuxAlgo-like"], group=gT, tooltip="Own (tested) = the build that was backtested: band on hl2, ATR(10), width 0.25 per sensitivity point, strong = with the 200 EMA.\n\nLuxAlgo-like = the settings that came closest to LuxAlgo's chart in our picture comparison: band on ohlc4, 30-bar mean true range, width 0.165 per sensitivity point, strong and candle colour from EMA 20 against EMA 26. It is NOT LuxAlgo's formula. On BTCUSDT 15m it found 105 of 158 LuxAlgo signals within one bar, it gave 76 signals that LuxAlgo did not give, and its candle colour was the same on about 8 bars of 10. It has no backtest. With this style the two inputs below (ATR length, band width) and the Trend Baseline Length are not used for signals.")
 atrLen = input.int(10, "Signal ATR Length", minval=1, group=gT)
 facPer = input.float(0.25, "Band Width Per Sensitivity Point", minval=0.01, step=0.05, group=gT, tooltip="Sensitivity 12 x 0.25 = a band 3 ATR wide.")
 baseLen = input.int(200, "Trend Baseline Length", minval=2, group=gT)
@@ -101,11 +108,20 @@ showNeo = isPre ? preset == "Swing Trader" : showNeoIn
 tpsl = preset == "Scalper" and tpslIn == "None" ? "Signals" : tpslIn
 
 // ───────────────────────── Shared series ─────────────────────────
+luxLike = styleIn == "LuxAlgo-like"
 pc = close[1]
-mid = hl2
-atrS = ta.atr(atrLen)
+atrOwn = ta.atr(atrLen)
+rngLux = ta.sma(ta.tr(true), 30)
+mid = luxLike ? ohlc4 : hl2
+atrS = luxLike ? rngLux : atrOwn
+facUse = luxLike ? 0.165 : facPer
 atr14 = ta.atr(14)
 baseline = ta.ema(close, baseLen)
+// the trend state behind the strong (+) mark and, in the LuxAlgo-like style, the candle colour
+trendFast = ta.ema(close, 20)
+trendSlow = ta.ema(close, 26)
+trendUp = luxLike ? trendFast > trendSlow : close > baseline
+trendDn = luxLike ? trendFast < trendSlow : close < baseline
 
 // ───────────────────────── Signal engines ─────────────────────────
 // One ATR band flip for each sensitivity in `sens`. All the state is in the arrays, so the same
@@ -114,7 +130,7 @@ f_conf(sens, up, lo, dir) =>
     n = array.size(sens)
     if not na(atrS) and not na(pc)
         for k = 0 to n - 1
-            w = array.get(sens, k) * facPer * atrS
+            w = array.get(sens, k) * facUse * atrS
             u = mid + w
             l = mid - w
             pu = array.get(up, k)
@@ -241,7 +257,7 @@ contSig = isCont and autoOn ? array.get(gSig, best) : array.get(cSig, 0)
 contRsi = isCont and autoOn ? array.get(gRs, best) : array.get(cRs, 0)
 
 var int pConfDir = na
-confSig = na(pConfDir) ? 0 : confDir == 1 and pConfDir == -1 ? (close > baseline ? 2 : 1) : confDir == -1 and pConfDir == 1 ? (close < baseline ? -2 : -1) : 0
+confSig = na(pConfDir) ? 0 : confDir == 1 and pConfDir == -1 ? (trendUp ? 2 : 1) : confDir == -1 and pConfDir == 1 ? (trendDn ? -2 : -1) : 0
 pConfDir := confDir
 rawSig = isConf ? confSig : isCont ? contSig : 0
 
@@ -437,7 +453,11 @@ tpShow = tpsl != "None" and tpDir != 0 and not tpMoved
 // ───────────────────────── Candle coloring ─────────────────────────
 var int barVal = 0
 var bool hasSig = false
-if confSig != 0
+if luxLike
+    // bar by bar: green / red while the signal side and the trend state agree, purple while they do not
+    hasSig := true
+    barVal := confDir == 1 and trendUp ? 1 : confDir == -1 and trendDn ? -1 : 0
+else if confSig != 0
     hasSig := true
     barVal := confSig == 2 ? 1 : confSig == -2 ? -1 : 0
 color simpleCol = not hasSig ? na : barVal == 1 ? bullCss : barVal == -1 ? bearCss : neutCss

@@ -139,8 +139,9 @@ def adx(h, l, c, n=14):
 
 # ---------------------------------------------------------- signal engines
 @njit(cache=True)
-def _conf(h, l, c, atr, sens, fac):
-    """Direction (+1 / -1) of one ATR band flip per sensitivity. Starts at +1."""
+def _conf(centre, c, atr, sens, fac):
+    """Direction (+1 / -1) of one band flip per sensitivity. The band is `centre`
+    +/- sensitivity x fac x atr. Starts at +1."""
     k, n = len(sens), len(c)
     out = np.ones((k, n), np.int8)
     for j in range(k):
@@ -149,7 +150,7 @@ def _conf(h, l, c, atr, sens, fac):
         d = 1
         for t in range(n):
             if t >= 1 and not np.isnan(atr[t]):
-                mid = (h[t] + l[t]) / 2
+                mid = centre[t]
                 w = sens[j] * fac * atr[t]
                 u = mid + w
                 lo = mid - w
@@ -260,15 +261,15 @@ def _pick(rows, best, user, gb):
 
 
 @njit(cache=True)
-def _conf_sig(d, c, base):
-    """+-1 on a flip of `d`, +-2 when the flip agrees with the baseline."""
+def _conf_sig(d, trend_up, trend_dn):
+    """+-1 on a flip of `d`, +-2 when the flip agrees with the trend state."""
     n = len(d)
     out = np.zeros(n, np.int8)
     for t in range(1, n):
         if d[t] == 1 and d[t - 1] == -1:
-            out[t] = 2 if c[t] > base[t] else 1
+            out[t] = 2 if trend_up[t] else 1
         elif d[t] == -1 and d[t - 1] == 1:
-            out[t] = -2 if c[t] < base[t] else -1
+            out[t] = -2 if trend_dn[t] else -1
     return out
 
 
@@ -466,16 +467,33 @@ class Book:
     def __init__(self, df: pd.DataFrame, trail_p: int = 3, rz_p: int = 3,
                  catcher_p: int = 3, tracer_p: int = 3, neo_p: int = 2,
                  fac: float = 0.25, base_len: int = 200, grid_bars: int = 250,
-                 ml_len: int = 200):
+                 ml_len: int = 200, style: str = "own"):
+        """style "own" = the tested build: band on hl2 +/- sensitivity x 0.25 x
+        ATR(10), strong = with the 200 EMA. style "lux" = the settings that came
+        closest to LuxAlgo's chart (our picture comparison, see
+        reports/LUXALGO_SUMMARY.md step 4): band on
+        ohlc4 +/- sensitivity x 0.165 x the 30-bar mean true range, strong and
+        candle colour = EMA20 against EMA26."""
         self.index = df.index
         self.o, self.h, self.l, self.c = (df[x].to_numpy(float) for x in
                                           ("open", "high", "low", "close"))
-        h, l, c = self.h, self.l, self.c
+        o, h, l, c = self.o, self.h, self.l, self.c
         self.n = len(c)
-        self.fac, self.gb = fac, grid_bars
+        self.fac, self.gb, self.style = fac, grid_bars, style
         self.atr10 = smc._atr(h, l, c, 10)
         self.atr14 = smc._atr(h, l, c, 14)
         self.base = _ema(c, base_len)
+        with np.errstate(invalid="ignore"):
+            if style == "lux":
+                pc = _prev(c)
+                tr = np.maximum(h - l, np.maximum(np.abs(h - pc), np.abs(l - pc)))
+                tr[0] = h[0] - l[0]                     # ta.tr(true)
+                self.centre, self.rng, self.fac = (o + h + l + c) / 4, _roll(tr, 30, "mean"), 0.165
+                fast, slow = _ema(c, 20), _ema(c, 26)
+                self.trend_up, self.trend_dn = fast > slow, fast < slow
+            else:
+                self.centre, self.rng = (h + l) / 2, self.atr10
+                self.trend_up, self.trend_dn = c > self.base, c < self.base
         with np.errstate(divide="ignore", invalid="ignore"):
             self.cls_hi = _cls_hi((c - self.base) / self.atr14, ml_len)
         r14 = rsi(c, 14)
@@ -511,7 +529,7 @@ class Book:
     # -- engines, cached
     def conf_dir(self, sens: float) -> np.ndarray:
         if sens not in self._conf_rows:
-            self._conf_rows[sens] = _conf(self.h, self.l, self.c, self.atr10,
+            self._conf_rows[sens] = _conf(self.centre, self.c, self.rng,
                                           np.array([float(sens)]), self.fac)[0]
         return self._conf_rows[sens]
 
@@ -546,12 +564,16 @@ class Book:
         return out
 
     # -- signals
-    def conf_sig(self, sens: float = 12, auto: str = "off") -> np.ndarray:
+    def conf_side(self, sens: float = 12, auto: str = "off") -> np.ndarray:
+        """The confirmation engine's side (+1 / -1) on every bar."""
         d = self.conf_dir(sens)
         if auto != "off":
             _, best, rows, _ = self._grid("conf", auto)
             d = _pick(rows, best, d, self.gb)
-        return _conf_sig(d, self.c, self.base)
+        return d
+
+    def conf_sig(self, sens: float = 12, auto: str = "off") -> np.ndarray:
+        return _conf_sig(self.conf_side(sens, auto), self.trend_up, self.trend_dn)
 
     def signals(self, mode: str = "conf", sens: float = 12, auto: str = "off",
                 filt: str = "none", ml: str = "") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -588,7 +610,13 @@ class Book:
         return sig, ex, cls
 
     def bar_value(self, sens: float = 12, auto: str = "off") -> np.ndarray:
-        """Confirmation Simple candle colour: 1 green, 0 purple, -1 red, NaN before the first signal."""
+        """Confirmation Simple candle colour: 1 green, 0 purple, -1 red.
+
+        style "own": set by the last signal (NaN before the first one). style
+        "lux": bar by bar, green / red while the side and the trend state agree."""
+        if self.style == "lux":
+            d = self.conf_side(sens, auto)
+            return np.where((d == 1) & self.trend_up, 1.0, np.where((d == -1) & self.trend_dn, -1.0, 0.0))
         s = self.conf_sig(sens, auto)
         v = np.where(s == 2, 1.0, np.where(s == -2, -1.0, np.where(s != 0, 0.0, np.nan)))
         return pd.Series(v).ffill().to_numpy()

@@ -44,6 +44,13 @@ const configs: Record<string, Record<string, unknown>> = {
     conf_sens20: { 'Signals Sensitivity': 20 },
     cont_sens8: { ...cont, 'Signals Sensitivity': 8 },
     cont_sens20: { ...cont, 'Signals Sensitivity': 20 },
+    // the second signal style
+    lux: { 'Signal Style': 'LuxAlgo-like', ...overlays, 'TP/SL Levels': 'Signals' },
+    lux_sens5: { 'Signal Style': 'LuxAlgo-like', 'Signals Sensitivity': 5 },
+    lux_sens25: { 'Signal Style': 'LuxAlgo-like', 'Signals Sensitivity': 25 },
+    lux_auto_medium: { 'Signal Style': 'LuxAlgo-like', 'Autopilot Sensitivity': 'Medium-Term' },
+    lux_filt_trail: { 'Signal Style': 'LuxAlgo-like', 'Presets / Filters': 'Smart Trail' },
+    lux_cont: { 'Signal Style': 'LuxAlgo-like', ...cont },
 };
 
 mkdirSync(outDir, { recursive: true });

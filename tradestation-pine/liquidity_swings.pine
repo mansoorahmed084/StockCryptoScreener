@@ -1,0 +1,172 @@
+//@version=5
+// Liquidity Swings — rebuilt from LuxAlgo's published description and defaults
+// (https://www.luxalgo.com/library/). Not LuxAlgo's code. Personal, non-commercial use.
+// A Pine port of the Python rebuild in StockCryptoScreener/freqtrade-lab/research/liquidity_swings.py.
+//
+// A swing high is a pivot high with `length` bars on each side. Its zone is the wick (from the
+// candle body up to the high), or the whole candle. A swing low mirrors it. A zone stays live until a
+// candle closes beyond it. The number on a zone counts the candles that touched it. A sweep is a
+// candle that wicks past a live zone's extreme and closes back inside.
+indicator("Liquidity Swings [LuxAlgo]", "Liquidity Swings", overlay=true, max_boxes_count=200, max_labels_count=500)
+
+length = input.int(14, "Pivot Lookback", minval=1)
+area = input.string("Wick Extremity", "Swing Area", options=["Wick Extremity", "Full Range"])
+showSweeps = input.bool(true, "Show Sweeps")
+highCss = input.color(color.red, "Swing High Color")
+lowCss = input.color(color.teal, "Swing Low Color")
+
+wick = area == "Wick Extremity"
+MAXZ = 64
+
+pivotHigh(w) =>
+    float r = na
+    if bar_index >= 2 * w
+        c = high[w]
+        ok = true
+        for j = w + 1 to 2 * w
+            if high[j] >= c
+                ok := false
+                break
+        if ok
+            for j = 0 to w - 1
+                if high[j] > c
+                    ok := false
+                    break
+        r := ok ? c : na
+    r
+
+pivotLow(w) =>
+    float r = na
+    if bar_index >= 2 * w
+        c = low[w]
+        ok = true
+        for j = w + 1 to 2 * w
+            if low[j] <= c
+                ok := false
+                break
+        if ok
+            for j = 0 to w - 1
+                if low[j] < c
+                    ok := false
+                    break
+        r := ok ? c : na
+    r
+
+// live zones by slot: extreme edge, inner edge, touch count, id (-1 = dead or empty), box
+var le = array.new_float(MAXZ, na)
+var li = array.new_float(MAXZ, na)
+var lc = array.new_int(MAXZ, 0)
+var lid = array.new_int(MAXZ, -1)
+var lbox = array.new_box(MAXZ, na)
+var he = array.new_float(MAXZ, na)
+var hi = array.new_float(MAXZ, na)
+var hc = array.new_int(MAXZ, 0)
+var hid = array.new_int(MAXZ, -1)
+var hbox = array.new_box(MAXZ, na)
+var int lastL = -1
+var int lastH = -1
+var int nid = 0
+
+loAny = -1
+hiAny = -1
+loLast = -1
+hiLast = -1
+
+// 1. sweeps of the zones that were live before this bar
+for s = 0 to MAXZ - 1
+    if array.get(lid, s) >= 0 and low < array.get(le, s) and close >= array.get(le, s)
+        if array.get(lc, s) > loAny
+            loAny := array.get(lc, s)
+        if s == lastL
+            loLast := array.get(lc, s)
+    if array.get(hid, s) >= 0 and high > array.get(he, s) and close <= array.get(he, s)
+        if array.get(hc, s) > hiAny
+            hiAny := array.get(hc, s)
+        if s == lastH
+            hiLast := array.get(hc, s)
+
+// 2. this bar touches zones, or closes beyond them and ends them
+for s = 0 to MAXZ - 1
+    if array.get(lid, s) >= 0
+        if low < array.get(li, s) and high > array.get(le, s)
+            array.set(lc, s, array.get(lc, s) + 1)
+        b = array.get(lbox, s)
+        if close < array.get(le, s)
+            array.set(lid, s, -1)
+            if s == lastL
+                lastL := -1
+        else if not na(b)
+            box.set_right(b, bar_index)
+            box.set_text(b, str.tostring(array.get(lc, s)))
+    if array.get(hid, s) >= 0
+        if high > array.get(hi, s) and low < array.get(he, s)
+            array.set(hc, s, array.get(hc, s) + 1)
+        b = array.get(hbox, s)
+        if close > array.get(he, s)
+            array.set(hid, s, -1)
+            if s == lastH
+                lastH := -1
+        else if not na(b)
+            box.set_right(b, bar_index)
+            box.set_text(b, str.tostring(array.get(hc, s)))
+
+// 3. zones confirmed on this bar (the pivot is `length` bars back)
+pl = pivotLow(length)
+if not na(pl)
+    s = nid % MAXZ
+    edge = low[length]
+    inner = wick ? math.min(open[length], close[length]) : high[length]
+    box.delete(array.get(lbox, s))
+    array.set(le, s, edge)
+    array.set(li, s, inner)
+    array.set(lc, s, 0)
+    array.set(lid, s, nid)
+    array.set(lbox, s, box.new(bar_index - length, inner, bar_index, edge, border_color=na, bgcolor=color.new(lowCss, 80), text="0", text_color=lowCss, text_halign=text.align_right, text_size=size.tiny))
+    lastL := s
+    nid += 1
+    // the zone may already be over: a close below it since the pivot
+    for j = 0 to length - 1
+        if close[j] < edge
+            array.set(lid, s, -1)
+            lastL := -1
+            break
+
+ph = pivotHigh(length)
+if not na(ph)
+    s = nid % MAXZ
+    edge = high[length]
+    inner = wick ? math.max(open[length], close[length]) : low[length]
+    box.delete(array.get(hbox, s))
+    array.set(he, s, edge)
+    array.set(hi, s, inner)
+    array.set(hc, s, 0)
+    array.set(hid, s, nid)
+    array.set(hbox, s, box.new(bar_index - length, edge, bar_index, inner, border_color=na, bgcolor=color.new(highCss, 80), text="0", text_color=highCss, text_halign=text.align_right, text_size=size.tiny))
+    lastH := s
+    nid += 1
+    for j = 0 to length - 1
+        if close[j] > edge
+            array.set(hid, s, -1)
+            lastH := -1
+            break
+
+lzBtm = lastL >= 0 ? array.get(le, lastL) : na
+lzTop = lastL >= 0 ? array.get(li, lastL) : na
+hzBtm = lastH >= 0 ? array.get(hi, lastH) : na
+hzTop = lastH >= 0 ? array.get(he, lastH) : na
+
+plotshape(showSweeps and loAny >= 0, "Swing Low Sweep", shape.triangleup, location.belowbar, lowCss, size=size.tiny)
+plotshape(showSweeps and hiAny >= 0, "Swing High Sweep", shape.triangledown, location.abovebar, highCss, size=size.tiny)
+
+// values for alerts, the data window and checks
+plot(loAny, "lo_any", display=display.none)
+plot(hiAny, "hi_any", display=display.none)
+plot(loLast, "lo_last", display=display.none)
+plot(hiLast, "hi_last", display=display.none)
+plot(lzBtm, "lz_btm", display=display.none)
+plot(lzTop, "lz_top", display=display.none)
+plot(hzBtm, "hz_btm", display=display.none)
+plot(hzTop, "hz_top", display=display.none)
+
+alertcondition(loAny >= 0, "Swing low swept", "{{ticker}}: a swing low zone was swept")
+alertcondition(hiAny >= 0, "Swing high swept", "{{ticker}}: a swing high zone was swept")
