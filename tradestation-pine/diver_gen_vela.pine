@@ -1,0 +1,222 @@
+//@version=5
+// Diver-Gen (VuManChu Cipher B style) — Vela / Trade Station build.
+//
+// Same maths, settings and drawings as the TradingView version. Changes made so it runs correctly
+// in Vela's Pine engine (PineTS):
+//   * Inputs use typed functions (input.bool / input.int / input.float / input.source).
+//   * No request.security(): the WaveTrend and MFI were requested on the chart's own timeframe,
+//     which gives the same numbers as computing them directly.
+//   * Fractal tests are written inside f_findDivs. The old version called a function from inside
+//     another function and read src[4]..src[0] there; Vela returns na for that, so no bearish
+//     divergence was ever found.
+//   * ta.valuewhen(...)[2] is stored in a variable first, then [2] is read from it.
+//   * transp= is not supported: colours carry their transparency through color.new().
+//   * Removed: "Show MACD Colors" (off by default, every colour it used was 100% transparent, and
+//     it needed a 4h data request) and the unused Heikin Ashi candle function.
+indicator(title='Diver-Gen', shorttitle='Diver-Gen')
+
+// PARAMETERS {
+
+// WaveTrend
+wtShow = input.bool(true, title='Show WaveTrend')
+wtBuyShow = input.bool(true, title='Show Buy dots')
+wtGoldShow = input.bool(true, title='Show Gold dots')
+wtSellShow = input.bool(true, title='Show Sell dots')
+wtDivShow = input.bool(true, title='Show Div. dots')
+wtChannelLen = input.int(9, title='WT Channel Length')
+wtAverageLen = input.int(12, title='WT Average Length')
+wtMASource = input.source(hlc3, title='WT MA Source')
+wtMALen = input.int(3, title='WT MA Length')
+
+// WaveTrend Overbought & Oversold lines
+obLevel = input.int(53, title='WT Overbought Level 1')
+obLevel3 = input.int(100, title='WT Overbought Level 3')
+osLevel = input.int(-53, title='WT Oversold Level 1')
+osLevel3 = input.int(-100, title='WT Oversold Level 3')
+
+// Divergence WT
+wtShowDiv = input.bool(true, title='Show WT Regular Divergences')
+wtShowHiddenDiv = input.bool(false, title='Show WT Hidden Divergences')
+showHiddenDiv_nl = input.bool(false, title='Not apply OB/OS Limits on Hidden Divergences')
+wtDivOBLevel = input.int(45, title='WT Bearish Divergence min')
+wtDivOSLevel = input.int(-65, title='WT Bullish Divergence min')
+
+// Divergence extra range
+wtDivOBLevel_addshow = input.bool(true, title='Show 2nd WT Regular Divergences')
+wtDivOBLevel_add = input.int(15, title='WT 2nd Bearish Divergence')
+wtDivOSLevel_add = input.int(-40, title='WT 2nd Bullish Divergence 15 min')
+
+// RSI+MFI
+rsiMFIShow = input.bool(true, title='Show MFI')
+rsiMFIperiod = input.int(60, title='MFI Period')
+rsiMFIMultiplier = input.float(175, title='MFI Area multiplier')
+rsiMFIPosY = input.float(2.5, title='MFI Area Y Pos')
+
+// RSI
+rsiShow = input.bool(false, title='Show RSI')
+rsiSRC = input.source(close, title='RSI Source')
+rsiLen = input.int(14, title='RSI Length')
+rsiOversold = input.int(30, title='RSI Oversold', minval=0, maxval=100)
+rsiOverbought = input.int(60, title='RSI Overbought', minval=0, maxval=100)
+
+// Divergence RSI
+rsiShowDiv = input.bool(false, title='Show RSI Regular Divergences')
+rsiShowHiddenDiv = input.bool(false, title='Show RSI Hidden Divergences')
+rsiDivOBLevel = input.int(60, title='RSI Bearish Divergence min')
+rsiDivOSLevel = input.int(30, title='RSI Bullish Divergence min')
+
+darkMode = input.bool(false, title='Dark mode')
+
+// Colors (several are 100% transparent on purpose, exactly as in the TradingView version)
+colorRed = color.new(#ff0000, 100)
+colorPurple = color.new(#e600e6, 100)
+colorGreen = color.new(#3fff00, 100)
+colorOrange = color.new(#e2a400, 100)
+colorWhite = color.new(#ffffff, 100)
+colorPink = color.new(#ff00f0, 100)
+colorBluelight = color.new(#31c0ff, 100)
+
+colorWT1 = color.new(#f1f2f1, 0)
+colorWT2 = color.new(#0545f2, 23)
+colorWT2_ = color.new(#efefef, 100)
+
+// } PARAMETERS
+
+
+// FUNCTIONS {
+
+// Fractal tops/bottoms of src (peak two bars back) and the divergences between them.
+f_findDivs(src, topLimit, botLimit, useLimits) =>
+    s0 = src
+    s1 = src[1]
+    s2 = src[2]
+    s3 = src[3]
+    s4 = src[4]
+    isTop = s4 < s2 and s3 < s2 and s2 > s1 and s2 > s0
+    isBot = not isTop and s4 > s2 and s3 > s2 and s2 < s1 and s2 < s0
+    fractalTop = isTop and (useLimits ? s2 >= topLimit : true)
+    fractalBot = isBot and (useLimits ? s2 <= botLimit : true)
+    hi2 = high[2]
+    lo2 = low[2]
+    highPrevNow = ta.valuewhen(fractalTop, s2, 0)
+    highPriceNow = ta.valuewhen(fractalTop, hi2, 0)
+    lowPrevNow = ta.valuewhen(fractalBot, s2, 0)
+    lowPriceNow = ta.valuewhen(fractalBot, lo2, 0)
+    highPrev = highPrevNow[2]
+    highPrice = highPriceNow[2]
+    lowPrev = lowPrevNow[2]
+    lowPrice = lowPriceNow[2]
+    bearSignal = fractalTop and hi2 > highPrice and s2 < highPrev
+    bullSignal = fractalBot and lo2 < lowPrice and s2 > lowPrev
+    bearDivHidden = fractalTop and hi2 < highPrice and s2 > highPrev
+    bullDivHidden = fractalBot and lo2 > lowPrice and s2 < lowPrev
+    [fractalTop, fractalBot, lowPrev, bearSignal, bullSignal, bearDivHidden, bullDivHidden]
+
+// } FUNCTIONS
+
+
+// CALCULATE INDICATORS {
+
+// RSI
+rsi = ta.rsi(rsiSRC, rsiLen)
+rsiColor = rsi <= rsiOversold ? colorGreen : rsi >= rsiOverbought ? colorRed : colorPurple
+
+// RSI + MFI Area
+rsiMFI = ta.sma((close - open) / (high - low) * rsiMFIMultiplier, rsiMFIperiod) - rsiMFIPosY
+rsiMFIColor = rsiMFI > 0 ? #3ee145 : #ff3d2e
+
+// WaveTrend
+esa = ta.ema(wtMASource, wtChannelLen)
+de = ta.ema(math.abs(wtMASource - esa), wtChannelLen)
+ci = (wtMASource - esa) / (0.015 * de)
+wt1 = ta.ema(ci, wtAverageLen)
+wt2 = ta.sma(wt1, wtMALen)
+wtOversold = wt2 <= osLevel
+wtOverbought = wt2 >= obLevel
+wtCross = ta.cross(wt1, wt2)
+wtCrossUp = wt2 - wt1 <= 0
+wtCrossDown = wt2 - wt1 >= 0
+
+// WT Divergences
+[wtFractalTop, wtFractalBot, wtLow_prev, wtBearDiv, wtBullDiv, wtBearDivHidden, wtBullDivHidden] = f_findDivs(wt2, wtDivOBLevel, wtDivOSLevel, true)
+[wtFractalTop_add, wtFractalBot_add, wtLow_prev_add, wtBearDiv_add, wtBullDiv_add, wtBearDivHidden_add, wtBullDivHidden_add] = f_findDivs(wt2, wtDivOBLevel_add, wtDivOSLevel_add, true)
+[wtFractalTop_nl, wtFractalBot_nl, wtLow_prev_nl, wtBearDiv_nl, wtBullDiv_nl, wtBearDivHidden_nl, wtBullDivHidden_nl] = f_findDivs(wt2, 0, 0, false)
+
+wtBearDivHidden_ = showHiddenDiv_nl ? wtBearDivHidden_nl : wtBearDivHidden
+wtBullDivHidden_ = showHiddenDiv_nl ? wtBullDivHidden_nl : wtBullDivHidden
+
+wtBearDivColor = wtShowDiv and wtBearDiv or wtShowHiddenDiv and wtBearDivHidden_ ? colorRed : na
+wtBullDivColor = wtShowDiv and wtBullDiv or wtShowHiddenDiv and wtBullDivHidden_ ? colorGreen : na
+
+wtBearDivColor_add = wtShowDiv and wtDivOBLevel_addshow and wtBearDiv_add or wtShowHiddenDiv and wtDivOBLevel_addshow and wtBearDivHidden_add ? #9a0202 : na
+wtBullDivColor_add = wtShowDiv and wtDivOBLevel_addshow and wtBullDiv_add or wtShowHiddenDiv and wtDivOBLevel_addshow and wtBullDivHidden_add ? #1b5e20 : na
+
+// RSI Divergences
+[rsiFractalTop, rsiFractalBot, rsiLow_prev, rsiBearDiv, rsiBullDiv, rsiBearDivHidden, rsiBullDivHidden] = f_findDivs(rsi, rsiDivOBLevel, rsiDivOSLevel, true)
+[rsiFractalTop_nl, rsiFractalBot_nl, rsiLow_prev_nl, rsiBearDiv_nl, rsiBullDiv_nl, rsiBearDivHidden_nl, rsiBullDivHidden_nl] = f_findDivs(rsi, 0, 0, false)
+
+rsiBearDivHidden_ = showHiddenDiv_nl ? rsiBearDivHidden_nl : rsiBearDivHidden
+rsiBullDivHidden_ = showHiddenDiv_nl ? rsiBullDivHidden_nl : rsiBullDivHidden
+
+rsiBearDivColor = rsiShowDiv and rsiBearDiv or rsiShowHiddenDiv and rsiBearDivHidden_ ? colorRed : na
+rsiBullDivColor = rsiShowDiv and rsiBullDiv or rsiShowHiddenDiv and rsiBullDivHidden_ ? colorGreen : na
+
+// Buy signal
+buySignal = wtCross and wtCrossUp and wtOversold
+buySignalDiv = wtShowDiv and wtBullDiv or wtShowDiv and wtBullDiv_add or rsiShowDiv and rsiBullDiv
+buySignalDiv_color = wtBullDiv ? colorBluelight : wtBullDiv_add ? color.new(colorBluelight, 60) : rsiShowDiv ? colorBluelight : na
+
+// Sell signal
+sellSignal = wtCross and wtCrossDown and wtOverbought
+sellSignalDiv = wtShowDiv and wtBearDiv or wtShowDiv and wtBearDiv_add or rsiShowDiv and rsiBearDiv
+sellSignalDiv_color = wtBearDiv ? colorPink : wtBearDiv_add ? color.new(colorPink, 60) : rsiBearDiv ? colorPink : na
+
+// Gold Buy
+rsi2 = rsi[2]
+lastRsiNow = ta.valuewhen(wtFractalBot, rsi2, 0)
+lastRsi = lastRsiNow[2]
+wtGoldBuy = (wtShowDiv and wtBullDiv or rsiShowDiv and rsiBullDiv) and wtLow_prev <= osLevel3 and wt2 > osLevel3 and wtLow_prev - wt2 <= -5 and lastRsi < 30
+
+// } CALCULATE INDICATORS
+
+
+// DRAW {
+bgcolor(darkMode ? color.new(#000000, 80) : na)
+zLine = plot(0, title='Zero', color=color.new(colorWhite, 50))
+
+// WT Areas
+plot(wtShow ? wt1 : na, style=plot.style_line, title='WT Wave 1', color=colorWT1)
+plot(wtShow ? wt2 : na, style=plot.style_line, title='WT Wave 2', color=darkMode ? colorWT2_ : colorWT2)
+
+// MFI AREA
+rsiMFIplot = plot(rsiMFIShow ? rsiMFI : na, title='RSI+MFI Area', color=color.new(rsiMFIColor, 20))
+fill(rsiMFIplot, zLine, color=color.new(rsiMFIColor, 40), title='RSI+MFI Fill')
+
+// WT Div
+wt2_2 = wt2[2]
+plot(wtFractalTop ? wt2_2 : na, title='WT Bearish Divergence', color=wtBearDivColor, linewidth=2, offset=-2)
+plot(wtFractalBot ? wt2_2 : na, title='WT Bullish Divergence', color=wtBullDivColor, linewidth=2, offset=-2)
+
+// WT 2nd Div
+plot(wtFractalTop_add ? wt2_2 : na, title='WT 2nd Bearish Divergence', color=wtBearDivColor_add, linewidth=2, offset=-2)
+plot(wtFractalBot_add ? wt2_2 : na, title='WT 2nd Bullish Divergence', color=wtBullDivColor_add, linewidth=2, offset=-2)
+
+// RSI
+plot(rsiShow ? rsi : na, title='RSI', color=rsiColor, linewidth=2)
+
+// RSI Div
+plot(rsiFractalTop ? rsi2 : na, title='RSI Bearish Divergence', color=rsiBearDivColor, linewidth=1, offset=-2)
+plot(rsiFractalBot ? rsi2 : na, title='RSI Bullish Divergence', color=rsiBullDivColor, linewidth=1, offset=-2)
+
+// Overbought & Oversold lines
+plot(obLevel3, title='Over Bought Level 3', color=color.new(colorRed, 35), linewidth=1, style=plot.style_stepline)
+plot(osLevel3, title='Over Sold Level 3', color=color.new(colorGreen, 35), linewidth=1, style=plot.style_stepline)
+
+// Circles
+plotchar(wtBuyShow and buySignal ? -107 : na, title='Buy circle', char='·', color=color.new(colorGreen, 50), location=location.absolute, size=size.small)
+plotchar(wtSellShow and sellSignal ? 105 : na, title='Sell circle', char='·', color=color.new(colorRed, 50), location=location.absolute, size=size.small)
+plotchar(wtDivShow and buySignalDiv ? -106 : na, title='Divergence buy circle', char='•', color=buySignalDiv_color, location=location.absolute, size=size.small, offset=-2)
+plotchar(wtDivShow and sellSignalDiv ? 106 : na, title='Divergence sell circle', char='•', color=sellSignalDiv_color, location=location.absolute, size=size.small, offset=-2)
+plotchar(wtGoldBuy and wtGoldShow ? -106 : na, title='Gold  buy gold circle', char='•', color=color.new(colorOrange, 15), location=location.absolute, size=size.small, offset=-2)
+
+// } DRAW
