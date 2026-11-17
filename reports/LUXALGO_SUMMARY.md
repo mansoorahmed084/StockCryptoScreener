@@ -125,6 +125,22 @@ Shared account, 10 slots, on the 203 unseen coins:
 
 Details: [SIGNALS_OVERLAYS_RESEARCH.md](../freqtrade-lab/research/SIGNALS_OVERLAYS_RESEARCH.md)
 
+## Step 4 — our build against the real LuxAlgo chart (2026-11-16)
+
+- We read LuxAlgo's real signals from 27 chart pictures (BTCUSDT 15m, sensitivity 5, 12 and 25). We did not open LuxAlgo's code.
+- We tried more than 700,000 rule settings to find the rule that gives the same signals.
+- **We did not find it.** LuxAlgo's signal is not a SuperTrend, a Parabolic SAR, a trailing stop or a moving-average cross.
+- The closest rule is now in our build as the **"LuxAlgo-like" signal style**. The tested default style did not change.
+
+| Signal style | LuxAlgo signals found (of 158) | Extra signals | Same candle colour |
+|---|---|---|---|
+| Own (tested) | 62 | 46 | 52–63% of bars |
+| LuxAlgo-like | 105 | 76 | 78–82% of bars |
+
+- The LuxAlgo-like style has no backtest. To test LuxAlgo's real signals, use LuxAlgo's own Backtester (S&O) tool.
+
+Details: the match table and the list of what was tried are in `tradestation-pine/luxalgo_compare/README.md`. That folder holds data read from LuxAlgo's paid chart, so it is kept on this PC only and is not in the repo.
+
 ## Skipped, and why
 
 | Indicator | Reason |

@@ -20,6 +20,9 @@ env/
 data_cache/
 *.log
 
+# Signals read from LuxAlgo's paid chart (pictures, readings, rule searches). Kept on this PC only.
+tradestation-pine/luxalgo_compare/
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

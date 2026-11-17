@@ -1,0 +1,185 @@
+//@version=5
+// SuperTrend AI (Clustering) — after LuxAlgo's open-source script (CC BY-NC-SA 4.0,
+// https://www.luxalgo.com/library/indicator/supertrend-ai-clustering/). Personal, non-commercial use.
+// A Pine port of the Python rebuild in StockCryptoScreener/freqtrade-lab/research/supertrend_ai.py.
+//
+// One SuperTrend runs for each factor in the range. Each one gets a score: an EMA of the
+// close-to-close change, signed by the side of that SuperTrend the previous close was on. k-means
+// (k = 3, seeded at the 25/50/75th percentiles) groups the scores. The mean factor of the best
+// group drives the final SuperTrend. A flip of its direction is the signal; the label shows the
+// best group's score from 0 to 10.
+indicator("SuperTrend AI (Clustering) [LuxAlgo]", "SuperTrend AI", overlay=true, max_labels_count=500)
+
+length = input.int(10, "ATR Length", minval=1)
+minMult = input.float(1.0, "Factor Min", minval=0)
+maxMult = input.float(5.0, "Factor Max", minval=0)
+step = input.float(0.5, "Factor Step", minval=0.1)
+perfAlpha = input.float(10, "Performance Memory", minval=2)
+maxIter = input.int(1000, "Maximum Iteration Steps", minval=0)
+showSignals = input.bool(true, "Show Signals")
+bullCss = input.color(color.teal, "Bullish Color")
+bearCss = input.color(color.red, "Bearish Color")
+
+// The Pine engine rounds values kept in `var` and arrays to 10 decimal places. Scores of nearby
+// factors can differ by less than that, and cheap coins have prices near it, so all the state here
+// is kept in prices times S. Lines are divided back before they are drawn.
+S = 1e6
+atr = ta.atr(length) * S
+mid = (high + low) / 2 * S
+src = close * S
+prevClose = close[1] * S
+a = 2.0 / (perfAlpha + 1.0)
+ea = 2.0 / (math.floor(perfAlpha) + 1.0)
+m = int(math.round((maxMult - minMult) / step)) + 1
+
+var factors = array.new_float(0)
+var upF = array.new_float(0)
+var loF = array.new_float(0)
+var trF = array.new_int(0)
+var outF = array.new_float(0)
+var perf = array.new_float(0)
+var lab = array.new_int(0)
+if barstate.isfirst
+    for k = 0 to m - 1
+        array.push(factors, minMult + k * step)
+        array.push(upF, na)
+        array.push(loF, na)
+        array.push(trF, 0)
+        array.push(outF, na)
+        array.push(perf, 0.0)
+        array.push(lab, 0)
+
+// EMA of |close - close[1]|, seeded with its first value: the score's denominator
+var float den = na
+dx = math.abs(src - prevClose)
+if not na(dx)
+    den := na(den) ? dx : ea * dx + (1 - ea) * den
+
+// numpy's default percentile (linear interpolation) on a sorted array
+pct(arr, p) =>
+    n = array.size(arr)
+    pos = p / 100.0 * (n - 1)
+    lo = int(math.floor(pos))
+    hi = math.min(lo + 1, n - 1)
+    vlo = array.get(arr, lo)
+    vlo + (array.get(arr, hi) - vlo) * (pos - lo)
+
+var float upper = na
+var float lower = na
+var int os = 0
+var float target = na
+float ts = na
+float pidx = na
+int osOut = -1
+
+if bar_index >= 1 and not na(atr)
+    // one SuperTrend per factor, scored
+    for k = 0 to m - 1
+        f = array.get(factors, k)
+        up = mid + atr * f
+        dn = mid - atr * f
+        pu = array.get(upF, k)
+        pl = array.get(loF, k)
+        if not na(pu)
+            if src > pu
+                array.set(trF, k, 1)
+            else if src < pl
+                array.set(trF, k, 0)
+        array.set(upF, k, not na(pu) and prevClose < pu ? math.min(up, pu) : up)
+        array.set(loF, k, not na(pl) and prevClose > pl ? math.max(dn, pl) : dn)
+        of = array.get(outF, k)
+        d = na(of) ? 0.0 : math.sign(prevClose - of)
+        p = array.get(perf, k)
+        array.set(perf, k, p + a * ((src - prevClose) * d - p))
+        array.set(outF, k, array.get(trF, k) == 1 ? array.get(loF, k) : array.get(upF, k))
+
+    // k-means on the scores, k = 3
+    sorted = array.copy(perf)
+    array.sort(sorted, order.ascending)
+    cen = array.from(pct(sorted, 25), pct(sorted, 50), pct(sorted, 75))
+    for it = 0 to maxIter
+        // The centroids depend only on the groups. When no factor changes group, nothing changes
+        // again, so stopping gives the same result as running every step.
+        moved = false
+        for k = 0 to m - 1
+            pk = array.get(perf, k)
+            best = -1
+            bd = 1e308
+            for j = 0 to 2
+                cj = array.get(cen, j)
+                if not na(cj)
+                    dd = math.abs(pk - cj)
+                    if dd < bd
+                        bd := dd
+                        best := j
+            if array.get(lab, k) != best
+                moved := true
+            array.set(lab, k, best)
+        if it > 0 and not moved
+            break
+        nw = array.new_float(3, na)
+        for j = 0 to 2
+            s = 0.0
+            cnt = 0
+            for k = 0 to m - 1
+                if array.get(lab, k) == j
+                    s += array.get(perf, k)
+                    cnt += 1
+            if cnt > 0
+                array.set(nw, j, s / cnt)
+        same = true
+        for j = 0 to 2
+            if not (array.get(nw, j) == array.get(cen, j))
+                same := false
+        cen := nw
+        if same
+            break
+
+    // the best group's mean factor and score
+    fs = 0.0
+    ps = 0.0
+    cnt = 0
+    for k = 0 to m - 1
+        if array.get(lab, k) == 2
+            fs += array.get(factors, k)
+            ps += array.get(perf, k)
+            cnt += 1
+    pi = 0.0
+    if cnt > 0
+        target := fs / cnt
+        pi := math.max(ps / cnt, 0)
+
+    // the final SuperTrend on that factor
+    if not na(target)
+        pidx := den > 0 ? pi / den : 0.0
+        up = mid + atr * target
+        dn = mid - atr * target
+        upper := not na(upper) and prevClose < upper ? math.min(up, upper) : up
+        lower := not na(lower) and prevClose > lower ? math.max(dn, lower) : dn
+        if src > upper
+            os := 1
+        else if src < lower
+            os := 0
+        ts := (os == 1 ? lower : upper) / S
+        osOut := os
+
+var int prevOs = -1
+bull = osOut == 1 and prevOs == 0
+bear = osOut == 0 and prevOs == 1
+prevOs := osOut
+score = math.floor(pidx * 10)
+
+plot(bull or bear ? na : ts, "Trailing Stop", color=osOut == 1 ? bullCss : bearCss, style=plot.style_linebr, linewidth=2)
+if showSignals and bull
+    label.new(bar_index, ts, str.tostring(score), style=label.style_label_up, color=bullCss, textcolor=color.white, size=size.tiny)
+if showSignals and bear
+    label.new(bar_index, ts, str.tostring(score), style=label.style_label_down, color=bearCss, textcolor=color.white, size=size.tiny)
+
+// values for alerts, the data window and checks
+plot(ts, "ts", display=display.none)
+plot(osOut, "os", display=display.none)
+plot(target, "factor", display=display.none)
+plot(score, "score", display=display.none)
+
+alertcondition(bull, "Bullish flip", "{{ticker}}: SuperTrend AI turned bullish")
+alertcondition(bear, "Bearish flip", "{{ticker}}: SuperTrend AI turned bearish")
