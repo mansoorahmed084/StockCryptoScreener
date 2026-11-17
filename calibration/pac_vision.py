@@ -74,16 +74,22 @@ class Fit:
 
 
 def fit(a: np.ndarray, candles: pd.DataFrame, dx_guess: float, plot_x: tuple[int, int],
-        plot_y: tuple[int, int], i_range: tuple[int, int] | None = None) -> Fit:
-    m = masks(a)
-    cand = _vertical_runs(m["bull"] | m["bear"], 4)
+        plot_y: tuple[int, int], i_range: tuple[int, int] | None = None,
+        cand: np.ndarray | None = None, dx_span: float = 0.01) -> Fit:
+    """Fit the picture to the candle table. ``cand`` is a mask of candle pixels when the chart colours its
+    candles differently (the default is green and red); ``dx_span`` is how far the bar spacing may be from
+    ``dx_guess``, as a share of it."""
+    if cand is None:
+        m = masks(a)
+        cand = _vertical_runs(m["bull"] | m["bear"], 4)
+    cand = cand.copy()
     cand[: plot_y[0]] = False
     cand[plot_y[1]:] = False
     x_lo, x_hi = plot_x
     colsum = cand.sum(0).astype(float)
     # 1. dx and the column of one bar: the comb that catches the most candle pixels
     best = (-1.0, dx_guess, 0.0)
-    for dx in np.arange(dx_guess * 0.99, dx_guess * 1.01, dx_guess * 0.0005):
+    for dx in np.arange(dx_guess * (1 - dx_span), dx_guess * (1 + dx_span), dx_guess * max(0.0005, dx_span / 40)):
         for ph in np.arange(0, dx, 0.25):
             xs = np.round(np.arange(x_lo + ph, x_hi, dx)).astype(int)
             s = colsum[xs[(xs >= 0) & (xs < a.shape[1])]].sum()
